@@ -45,11 +45,18 @@
       </div>
       <div id="menu-staff" hidden>
         <h2>Staff</h2>
-        <button type="button" data-section="agendas">Manage Agendas</button>
-        <button type="button" data-section="backlog">Todos &amp; Backlog <span id="backlog-nav-badge" class="badge draft" hidden></span></button>
         <div class="nav-group">
-          <button type="button" id="menu-preferences-toggle" class="nav-parent" aria-expanded="false">
-            <span>Preferences</span><span id="menu-preferences-arrow" aria-hidden="true">&#9656;</span>
+          <button type="button" class="nav-parent" data-submenu="menu-agendas-submenu" aria-expanded="false">
+            <span>Agenda Management</span><span class="nav-arrow" aria-hidden="true">&#9656;</span>
+          </button>
+          <div id="menu-agendas-submenu" class="nav-submenu" hidden>
+            <button type="button" data-section="agendas">Manage Agendas</button>
+            <button type="button" data-section="backlog">Todos &amp; Backlog <span id="backlog-nav-badge" class="badge draft" hidden></span></button>
+          </div>
+        </div>
+        <div class="nav-group">
+          <button type="button" class="nav-parent" data-submenu="menu-preferences-submenu" aria-expanded="false">
+            <span>Preferences</span><span class="nav-arrow" aria-hidden="true">&#9656;</span>
           </button>
           <div id="menu-preferences-submenu" class="nav-submenu" hidden>
             <button type="button" data-section="preferences-general">General Preferences</button>

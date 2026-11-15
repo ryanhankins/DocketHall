@@ -63,27 +63,31 @@ pwForm.addEventListener('submit', async (e) => {
 });
 
 // ------------------------------------------------------------- navigation
-function setPrefSubmenuOpen(open) {
-  const submenu = document.getElementById('menu-preferences-submenu');
-  const toggle = document.getElementById('menu-preferences-toggle');
-  const arrow = document.getElementById('menu-preferences-arrow');
+function setSubmenuOpen(submenuId, open) {
+  const submenu = document.getElementById(submenuId);
+  const toggle = document.querySelector(`.nav-parent[data-submenu="${submenuId}"]`);
+  const arrow = toggle?.querySelector('.nav-arrow');
   if (!submenu || !toggle) return;
   submenu.hidden = !open;
   toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
   if (arrow) arrow.innerHTML = open ? '&#9662;' : '&#9656;';
 }
 
-document.getElementById('menu-preferences-toggle')?.addEventListener('click', () => {
-  const submenu = document.getElementById('menu-preferences-submenu');
-  if (submenu) setPrefSubmenuOpen(submenu.hidden);
+document.querySelectorAll('.nav-parent[data-submenu]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const submenu = document.getElementById(btn.dataset.submenu);
+    if (submenu) setSubmenuOpen(btn.dataset.submenu, submenu.hidden);
+  });
 });
 
 function showSection(name, pushHash = true) {
   document.querySelectorAll('#menu button[data-section]').forEach(b => {
     b.classList.toggle('active', b.dataset.section === name);
   });
+  const isAgendaGroup = name === 'agendas' || name === 'backlog';
   const isPref = name === 'preferences-general' || name === 'preferences-agenda';
-  if (isPref) setPrefSubmenuOpen(true);
+  if (isAgendaGroup) setSubmenuOpen('menu-agendas-submenu', true);
+  if (isPref) setSubmenuOpen('menu-preferences-submenu', true);
   document.getElementById('section-users').hidden = name !== 'users';
   document.getElementById('section-agendas').hidden = name !== 'agendas';
   document.getElementById('section-backlog').hidden = name !== 'backlog';
@@ -107,6 +111,7 @@ async function routeFromHash(isAdmin, isStaff, isCouncil) {
   const hash = location.hash.replace(/^#/, '');
   const agMatch = hash.match(/^agendas\/(\d+)(\/(contents|minutes))?$/);
   if (agMatch && isStaff) {
+    setSubmenuOpen('menu-agendas-submenu', true);
     document.querySelectorAll('#menu button[data-section]').forEach(b => {
       b.classList.toggle('active', b.dataset.section === 'agendas');
     });
