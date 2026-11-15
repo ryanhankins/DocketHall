@@ -47,7 +47,15 @@
         <h2>Staff</h2>
         <button type="button" data-section="agendas">Manage Agendas</button>
         <button type="button" data-section="backlog">Todos &amp; Backlog <span id="backlog-nav-badge" class="badge draft" hidden></span></button>
-        <button type="button" data-section="preferences">Agenda Preferences</button>
+        <div class="nav-group">
+          <button type="button" id="menu-preferences-toggle" class="nav-parent" aria-expanded="false">
+            <span>Preferences</span><span id="menu-preferences-arrow" aria-hidden="true">&#9656;</span>
+          </button>
+          <div id="menu-preferences-submenu" class="nav-submenu" hidden>
+            <button type="button" data-section="preferences-general">General Preferences</button>
+            <button type="button" data-section="preferences-agenda">Agenda Preferences</button>
+          </div>
+        </div>
       </div>
       <div id="menu-council" hidden>
         <h2 id="menu-council-heading">Council Member</h2>
@@ -390,7 +398,33 @@
         </div>
       </section>
 
-      <section id="section-preferences" hidden>
+      <section id="section-preferences-general" hidden>
+        <h1>General Preferences</h1>
+        <div class="card">
+          <p class="muted" style="margin-top:0;">
+            Site-wide branding shown at the top of each page and on the sign-in screen.
+          </p>
+          <form id="general-prefs-form">
+            <div class="field" style="margin-bottom:.9rem;">
+              <label for="pref-city-title">City Title (appears before CivicDesk at the top of each page)</label>
+              <input id="pref-city-title" placeholder="e.g. City of Northfield">
+            </div>
+            <div class="field" style="margin-bottom:1.1rem;">
+              <label for="pref-logo-file">City Logo (prints on first page &amp; page header)</label>
+              <div style="display:flex; align-items:center; gap:.75rem; flex-wrap:wrap;">
+                <img id="pref-logo-preview" alt="City Logo" hidden style="max-height:72px; max-width:220px; border:1px solid #cbd2d9; border-radius:4px; padding:4px; background:#fff;">
+                <input id="pref-logo-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp" style="width:auto;">
+                <button type="button" id="pref-logo-remove" class="btn sm danger" hidden>Remove Logo</button>
+              </div>
+              <div id="pref-logo-drop" class="drop-zone" style="margin-top:.5rem;">Drag &amp; drop a city logo image (PNG, JPG, GIF, WEBP) here</div>
+            </div>
+            <button type="submit" class="btn primary">Save General Preferences</button>
+            <div id="general-prefs-msg" class="ok-msg" role="status"></div>
+          </form>
+        </div>
+      </section>
+
+      <section id="section-preferences-agenda" hidden>
         <h1>Agenda Preferences</h1>
         <div class="card">
           <p class="muted" style="margin-top:0;">
@@ -407,19 +441,6 @@
             </label>
 
             <h2 style="margin:1rem 0 .75rem; font-size:1rem;">Cover Sheet Details</h2>
-            <div class="field" style="margin-bottom:.9rem;">
-              <label for="pref-city-title">City Title (appears before CivicDesk at the top of each page)</label>
-              <input id="pref-city-title" placeholder="e.g. City of Northfield">
-            </div>
-            <div class="field" style="margin-bottom:.9rem;">
-              <label for="pref-logo-file">City Logo (prints on first page)</label>
-              <div style="display:flex; align-items:center; gap:.75rem; flex-wrap:wrap;">
-                <img id="pref-logo-preview" alt="City Logo" hidden style="max-height:72px; max-width:220px; border:1px solid #cbd2d9; border-radius:4px; padding:4px; background:#fff;">
-                <input id="pref-logo-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp" style="width:auto;">
-                <button type="button" id="pref-logo-remove" class="btn sm danger" hidden>Remove Logo</button>
-              </div>
-              <div id="pref-logo-drop" class="drop-zone" style="margin-top:.5rem;">Drag &amp; drop a city logo image (PNG, JPG, GIF, WEBP) here</div>
-            </div>
             <div class="row" style="margin-bottom:.75rem;">
               <div class="field" style="flex:1; min-width:200px;">
                 <label for="pref-city-name">City Name</label>

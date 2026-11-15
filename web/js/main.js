@@ -63,21 +63,39 @@ pwForm.addEventListener('submit', async (e) => {
 });
 
 // ------------------------------------------------------------- navigation
+function setPrefSubmenuOpen(open) {
+  const submenu = document.getElementById('menu-preferences-submenu');
+  const toggle = document.getElementById('menu-preferences-toggle');
+  const arrow = document.getElementById('menu-preferences-arrow');
+  if (!submenu || !toggle) return;
+  submenu.hidden = !open;
+  toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (arrow) arrow.innerHTML = open ? '&#9662;' : '&#9656;';
+}
+
+document.getElementById('menu-preferences-toggle')?.addEventListener('click', () => {
+  const submenu = document.getElementById('menu-preferences-submenu');
+  if (submenu) setPrefSubmenuOpen(submenu.hidden);
+});
+
 function showSection(name, pushHash = true) {
   document.querySelectorAll('#menu button[data-section]').forEach(b => {
     b.classList.toggle('active', b.dataset.section === name);
   });
+  const isPref = name === 'preferences-general' || name === 'preferences-agenda';
+  if (isPref) setPrefSubmenuOpen(true);
   document.getElementById('section-users').hidden = name !== 'users';
   document.getElementById('section-agendas').hidden = name !== 'agendas';
   document.getElementById('section-backlog').hidden = name !== 'backlog';
-  document.getElementById('section-preferences').hidden = name !== 'preferences';
+  document.getElementById('section-preferences-general').hidden = name !== 'preferences-general';
+  document.getElementById('section-preferences-agenda').hidden = name !== 'preferences-agenda';
   document.getElementById('section-council').hidden = name !== 'council';
   const targetHash = `#${name}`;
   if (pushHash && location.hash !== targetHash) history.pushState(null, '', targetHash);
   if (name === 'users') loadUsers();
   if (name === 'agendas') { showAgendaList(); loadAgendas(); }
   if (name === 'backlog') loadBacklog();
-  if (name === 'preferences') loadPreferences();
+  if (isPref) loadPreferences();
   if (name === 'council') loadCouncilAgendas();
 }
 
@@ -95,7 +113,8 @@ async function routeFromHash(isAdmin, isStaff, isCouncil) {
     document.getElementById('section-users').hidden = true;
     document.getElementById('section-agendas').hidden = false;
     document.getElementById('section-backlog').hidden = true;
-    document.getElementById('section-preferences').hidden = true;
+    document.getElementById('section-preferences-general').hidden = true;
+    document.getElementById('section-preferences-agenda').hidden = true;
     document.getElementById('section-council').hidden = true;
     try {
       await openAgenda(Number(agMatch[1]), agMatch[3] || 'edit', false);
@@ -108,7 +127,8 @@ async function routeFromHash(isAdmin, isStaff, isCouncil) {
   if (hash === 'users' && isAdmin) { showSection('users', false); return; }
   if (hash === 'agendas' && isStaff) { showSection('agendas', false); return; }
   if (hash === 'backlog' && isStaff) { showSection('backlog', false); return; }
-  if (hash === 'preferences' && isStaff) { showSection('preferences', false); return; }
+  if (hash === 'preferences-general' && isStaff) { showSection('preferences-general', false); return; }
+  if ((hash === 'preferences-agenda' || hash === 'preferences') && isStaff) { showSection('preferences-agenda', false); return; }
   if (hash === 'council' && isCouncil) { showSection('council', false); return; }
   const fallback = isAdmin ? 'users' : (isStaff ? 'agendas' : 'council');
   if (location.hash !== `#${fallback}`) history.replaceState(null, '', `#${fallback}`);

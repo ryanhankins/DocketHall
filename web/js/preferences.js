@@ -147,7 +147,7 @@ function renderPrefLogo(hasLogo) {
 
 async function uploadLogoFile(file) {
   if (!file) return;
-  const msg = document.getElementById('prefs-msg');
+  const msg = document.getElementById('general-prefs-msg');
   msg.className = 'ok-msg';
   msg.textContent = 'Uploading logo...';
   try {
@@ -188,7 +188,7 @@ logoDrop.addEventListener('drop', async (e) => {
 });
 
 document.getElementById('pref-logo-remove').addEventListener('click', async () => {
-  const msg = document.getElementById('prefs-msg');
+  const msg = document.getElementById('general-prefs-msg');
   msg.className = 'ok-msg';
   msg.textContent = '';
   try {
@@ -255,6 +255,26 @@ export async function loadPreferences() {
   loadPrefTemplates();
 }
 
+document.getElementById('general-prefs-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const msg = document.getElementById('general-prefs-msg');
+  msg.className = 'ok-msg';
+  msg.textContent = '';
+  try {
+    const saved = await api('/api/agendas/preferences/general', {
+      method: 'PUT',
+      body: JSON.stringify({
+        city_title: document.getElementById('pref-city-title').value.trim(),
+      }),
+    });
+    applyBrandTitle(saved.city_title || '');
+    msg.textContent = 'General preferences saved.';
+  } catch (err) {
+    msg.className = 'error-msg';
+    msg.textContent = err.message;
+  }
+});
+
 document.getElementById('prefs-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const msg = document.getElementById('prefs-msg');
@@ -266,7 +286,6 @@ document.getElementById('prefs-form').addEventListener('submit', async (e) => {
       body: JSON.stringify({
         include_item_cover_sheets: document.getElementById('pref-cover-sheets').checked,
         include_page_numbers: document.getElementById('pref-page-numbers').checked,
-        city_title: document.getElementById('pref-city-title').value.trim(),
         city_name: document.getElementById('pref-city-name').value.trim(),
         meeting_location: document.getElementById('pref-meeting-location').value.trim(),
         meeting_time: document.getElementById('pref-meeting-time').value.trim(),
@@ -277,7 +296,6 @@ document.getElementById('prefs-form').addEventListener('submit', async (e) => {
         categories: prefCategories,
       }),
     });
-    applyBrandTitle(saved.city_title || '');
     prefBodies = [...saved.bodies];
     prefSections = [...(saved.sections || [])];
     prefCategories = Array.isArray(saved.categories)

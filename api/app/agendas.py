@@ -628,10 +628,13 @@ class AgendaCategoryIn(BaseModel):
     warn_on_leave: bool = False
 
 
+class GeneralPreferencesIn(BaseModel):
+    city_title: str = ""
+
+
 class AgendaPreferencesIn(BaseModel):
     include_item_cover_sheets: bool = True
     include_page_numbers: bool = True
-    city_title: str = ""
     city_name: str = ""
     meeting_location: str = ""
     meeting_time: str = ""
@@ -706,6 +709,20 @@ def get_preferences_branding():
         "city_title": prefs.get("city_title", ""),
         "has_city_logo": bool(prefs.get("has_city_logo", False)),
     }
+
+
+@router.put("/preferences/general")
+def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get_staff_user)):
+    with pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO agenda_preferences (id, city_title, updated_at) "
+            "VALUES (1, %s, now()) "
+            "ON CONFLICT (id) DO UPDATE SET "
+            "city_title = EXCLUDED.city_title, "
+            "updated_at = now()",
+            (body.city_title.strip(),),
+        )
+        return _load_preferences(conn)
 
 
 _LOGO_MEDIA = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
@@ -849,7 +866,6 @@ def update_preferences(body: AgendaPreferencesIn, _: dict = Depends(get_staff_us
     vals = (
         body.include_item_cover_sheets,
         body.include_page_numbers,
-        body.city_title.strip(),
         body.city_name.strip(),
         body.meeting_location.strip(),
         body.meeting_time.strip(),
@@ -872,13 +888,12 @@ def update_preferences(body: AgendaPreferencesIn, _: dict = Depends(get_staff_us
         conn.execute(
             "INSERT INTO agenda_preferences "
             "(id, include_item_cover_sheets, include_page_numbers, "
-            " city_title, city_name, meeting_location, meeting_time, other_notes, "
+            " city_name, meeting_location, meeting_time, other_notes, "
             " footer_disclosures, bodies, sections, categories, updated_at) "
-            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, now()) "
+            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, now()) "
             "ON CONFLICT (id) DO UPDATE SET "
             "include_item_cover_sheets = EXCLUDED.include_item_cover_sheets, "
             "include_page_numbers = EXCLUDED.include_page_numbers, "
-            "city_title = EXCLUDED.city_title, "
             "city_name = EXCLUDED.city_name, "
             "meeting_location = EXCLUDED.meeting_location, "
             "meeting_time = EXCLUDED.meeting_time, "
