@@ -37,6 +37,7 @@ from .auth import current_user
 from .db import _read_secret, pool
 
 STAFF_ROLES = {"staff_member", "admin"}
+COUNCIL_ACCESS_ROLES = STAFF_ROLES | {"council_member"}
 DEFAULT_BODIES = ["City Council", "Parks Committee", "Planning Commission"]
 DEFAULT_SECTIONS = ["Opening", "Consent", "Old Business", "New Business", "Public Hearing", "Closing"]
 DEFAULT_CATEGORIES = [
@@ -154,6 +155,27 @@ CREATE TABLE IF NOT EXISTS agenda_documents (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS agenda_docs_item_idx ON agenda_documents(agenda_item_id, position);
+CREATE TABLE IF NOT EXISTS council_submissions (
+    id                 BIGSERIAL PRIMARY KEY,
+    submitted_by       BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    submitted_username TEXT NOT NULL DEFAULT '',
+    title              TEXT NOT NULL,
+    description        TEXT NOT NULL DEFAULT '',
+    section            TEXT NOT NULL DEFAULT '',
+    recommended_motion TEXT NOT NULL DEFAULT '',
+    fiscal_impact      TEXT NOT NULL DEFAULT '',
+    target_date        DATE,
+    target_note        TEXT NOT NULL DEFAULT '',
+    status             TEXT NOT NULL DEFAULT 'pending',
+    accepted_agenda_id BIGINT REFERENCES agendas(id) ON DELETE SET NULL,
+    accepted_item_id   BIGINT REFERENCES agenda_items(id) ON DELETE SET NULL,
+    reviewed_by        BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_username  TEXT NOT NULL DEFAULT '',
+    review_note        TEXT NOT NULL DEFAULT '',
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reviewed_at        TIMESTAMPTZ
+);
+ALTER TABLE council_submissions ADD COLUMN IF NOT EXISTS target_agenda_id BIGINT REFERENCES agendas(id) ON DELETE SET NULL;
 CREATE TABLE IF NOT EXISTS agenda_preferences (
     id                         INTEGER PRIMARY KEY CHECK (id = 1),
     include_item_cover_sheets  BOOLEAN NOT NULL DEFAULT TRUE,
@@ -269,6 +291,31 @@ def get_staff_user(request: Request) -> dict:
     if user["role"] not in STAFF_ROLES:
         raise HTTPException(status_code=403, detail="Staff access required")
     return user
+
+
+def get_council_or_staff_user(request: Request) -> dict:
+    """Require an authenticated council member, staff member, or admin."""
+    user = current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if user["role"] not in COUNCIL_ACCESS_ROLES:
+        raise HTTPException(status_code=403, detail="Council or staff access required")
+    return user
+
+
+_COUNCIL_FINALIZED_WHERE = (
+    "STRPOS(LOWER(a.body), 'council') > 0 "
+    "AND STRPOS(LOWER(a.status), 'finalized') > 0"
+)
+
+
+def _is_council_finalized(conn, agenda_id: int) -> bool:
+    """Return True if agenda_id is a finalized council agenda."""
+    row = conn.execute(
+        f"SELECT 1 FROM agendas a WHERE a.id = %s AND {_COUNCIL_FINALIZED_WHERE}",
+        (agenda_id,),
+    ).fetchone()
+    return row is not None
 
 
 def _validate_doc(filename: str, data: bytes) -> tuple[str, str]:
@@ -1404,6 +1451,279 @@ def create_agenda(body: AgendaIn, user: dict = Depends(get_staff_user)):
         return _load_agenda(conn, agenda_id)
 
 
+class CouncilSubmissionIn(BaseModel):
+    title: str
+    description: str = ""
+    section: str = ""
+    recommended_motion: str = ""
+    fiscal_impact: str = ""
+    target_agenda_id: int | None = None
+    target_date: date | None = None
+    target_note: str = ""
+
+
+class AcceptSubmissionIn(BaseModel):
+    agenda_id: int | None = None
+    new_agenda_title: str | None = None
+    new_agenda_date: date | None = None
+
+
+class DeclineSubmissionIn(BaseModel):
+    review_note: str = ""
+
+
+@router.get("/council/targets")
+def list_council_target_agendas(_: dict = Depends(get_council_or_staff_user)):
+    """Return minimal info (id, title, meeting_date) for in-progress council agendas as submission targets."""
+    sql = (
+        "SELECT id, title, body, meeting_date "
+        "FROM agendas "
+        "WHERE STRPOS(LOWER(body), 'council') > 0 "
+        "  AND status = 'In-Progress Agendas' "
+        "ORDER BY meeting_date ASC NULLS LAST, id DESC"
+    )
+    with pool.connection() as conn:
+        rows = conn.execute(sql).fetchall()
+    return [
+        {
+            "id": r[0],
+            "title": r[1],
+            "body": r[2],
+            "meeting_date": r[3].isoformat() if r[3] else None,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/council/submissions")
+def list_council_submissions(user: dict = Depends(get_council_or_staff_user)):
+    """List council item submissions (own submissions for council, pending/recent for staff)."""
+    sql = (
+        "SELECT s.id, s.submitted_username, s.title, s.description, s.section, "
+        "       s.recommended_motion, s.fiscal_impact, s.target_date, s.target_note, "
+        "       s.status, s.accepted_agenda_id, a.title AS accepted_agenda_title, "
+        "       a.meeting_date AS accepted_agenda_date, s.reviewed_username, "
+        "       s.review_note, s.created_at, s.reviewed_at, "
+        "       s.target_agenda_id, ta.title AS target_agenda_title, "
+        "       ta.meeting_date AS target_agenda_date "
+        "FROM council_submissions s "
+        "LEFT JOIN agendas a ON a.id = s.accepted_agenda_id "
+        "LEFT JOIN agendas ta ON ta.id = s.target_agenda_id "
+    )
+    params: list = []
+    if user["role"] == "council_member":
+        sql += "WHERE s.submitted_by = %s "
+        params.append(user["id"])
+    else:
+        sql += "WHERE s.status = 'pending' "
+    sql += "ORDER BY s.created_at DESC, s.id DESC"
+
+    with pool.connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [
+        {
+            "id": r[0],
+            "submitted_username": r[1],
+            "title": r[2],
+            "description": r[3],
+            "section": r[4],
+            "recommended_motion": r[5],
+            "fiscal_impact": r[6],
+            "target_date": r[7].isoformat() if r[7] else None,
+            "target_note": r[8],
+            "status": r[9],
+            "accepted_agenda_id": r[10],
+            "accepted_agenda_title": r[11],
+            "accepted_agenda_date": r[12].isoformat() if r[12] else None,
+            "reviewed_username": r[13],
+            "review_note": r[14],
+            "created_at": r[15].isoformat() if r[15] else None,
+            "reviewed_at": r[16].isoformat() if r[16] else None,
+            "target_agenda_id": r[17],
+            "target_agenda_title": r[18],
+            "target_agenda_date": r[19].isoformat() if r[19] else None,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/council/submissions", status_code=201)
+def create_council_submission(
+    body: CouncilSubmissionIn, user: dict = Depends(get_council_or_staff_user)
+):
+    """Submit a pending agenda item from a council member."""
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Item title is required")
+    with pool.connection() as conn:
+        if body.target_agenda_id is not None:
+            trow = conn.execute(
+                "SELECT 1 FROM agendas WHERE id = %s AND STRPOS(LOWER(body), 'council') > 0 "
+                "AND status = 'In-Progress Agendas'",
+                (body.target_agenda_id,),
+            ).fetchone()
+            if not trow:
+                raise HTTPException(status_code=400, detail="Selected target agenda is not available")
+        row = conn.execute(
+            "INSERT INTO council_submissions "
+            "(submitted_by, submitted_username, title, description, section, "
+            " recommended_motion, fiscal_impact, target_agenda_id, target_date, target_note, status) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending') "
+            "RETURNING id, created_at",
+            (
+                user["id"],
+                user["username"],
+                title,
+                body.description.strip(),
+                body.section.strip(),
+                body.recommended_motion.strip(),
+                body.fiscal_impact.strip(),
+                body.target_agenda_id,
+                body.target_date,
+                body.target_note.strip(),
+            ),
+        ).fetchone()
+    return {
+        "id": row[0],
+        "submitted_username": user["username"],
+        "title": title,
+        "description": body.description.strip(),
+        "section": body.section.strip(),
+        "recommended_motion": body.recommended_motion.strip(),
+        "fiscal_impact": body.fiscal_impact.strip(),
+        "target_agenda_id": body.target_agenda_id,
+        "target_date": body.target_date.isoformat() if body.target_date else None,
+        "target_note": body.target_note.strip(),
+        "status": "pending",
+        "created_at": row[1].isoformat() if row[1] else None,
+    }
+
+
+@router.post("/council/submissions/{sub_id}/accept")
+def accept_council_submission(
+    sub_id: int, body: AcceptSubmissionIn, user: dict = Depends(get_staff_user)
+):
+    """Accept a pending council submission onto an existing or newly created agenda."""
+    with pool.connection() as conn:
+        sub = conn.execute(
+            "SELECT id, title, description, section, recommended_motion, fiscal_impact, "
+            "       target_date, submitted_username, status "
+            "FROM council_submissions WHERE id = %s",
+            (sub_id,),
+        ).fetchone()
+        if not sub:
+            raise HTTPException(status_code=404, detail="Submission not found")
+        if sub[8] != "pending":
+            raise HTTPException(status_code=400, detail="Submission has already been reviewed")
+
+        agenda_id = body.agenda_id
+        if agenda_id is None:
+            new_title = (body.new_agenda_title or "").strip()
+            if not new_title:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Select an existing agenda or provide a title for a new agenda",
+                )
+            prefs = _load_preferences(conn)
+            council_body = next(
+                (b for b in prefs["bodies"] if "council" in b.lower()),
+                prefs["bodies"][0] if prefs["bodies"] else "City Council",
+            )
+            default_status = (
+                prefs["categories"][0]["name"] if prefs.get("categories") else "In-Progress Agendas"
+            )
+            mdate = body.new_agenda_date or sub[6]
+            arow = conn.execute(
+                "INSERT INTO agendas (title, body, meeting_date, meeting_time, status, created_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                (new_title, council_body, mdate, prefs["meeting_time"], default_status, user["id"]),
+            ).fetchone()
+            agenda_id = arow[0]
+            _log_agenda_event(conn, agenda_id, "created", user["username"], "From council submission")
+        else:
+            exists = conn.execute("SELECT 1 FROM agendas WHERE id = %s", (agenda_id,)).fetchone()
+            if not exists:
+                raise HTTPException(status_code=404, detail="Target agenda not found")
+
+        pos = conn.execute(
+            "SELECT COALESCE(MAX(position), 0) + 1 FROM agenda_items WHERE agenda_id = %s",
+            (agenda_id,),
+        ).fetchone()[0]
+        irow = conn.execute(
+            "INSERT INTO agenda_items "
+            "(agenda_id, position, title, description, section, presenter, recommended_motion, fiscal_impact) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (agenda_id, pos, sub[1], sub[2], sub[3], sub[7], sub[4], sub[5]),
+        ).fetchone()
+        item_id = irow[0]
+        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (agenda_id,))
+        conn.execute(
+            "UPDATE council_submissions "
+            "SET status = 'accepted', accepted_agenda_id = %s, accepted_item_id = %s, "
+            "    reviewed_by = %s, reviewed_username = %s, reviewed_at = now() "
+            "WHERE id = %s",
+            (agenda_id, item_id, user["id"], user["username"], sub_id),
+        )
+    return {"status": "accepted", "agenda_id": agenda_id, "item_id": item_id}
+
+
+@router.post("/council/submissions/{sub_id}/decline")
+def decline_council_submission(
+    sub_id: int, body: DeclineSubmissionIn, user: dict = Depends(get_staff_user)
+):
+    """Decline a pending council submission."""
+    with pool.connection() as conn:
+        sub = conn.execute(
+            "SELECT status FROM council_submissions WHERE id = %s", (sub_id,)
+        ).fetchone()
+        if not sub:
+            raise HTTPException(status_code=404, detail="Submission not found")
+        if sub[0] != "pending":
+            raise HTTPException(status_code=400, detail="Submission has already been reviewed")
+        conn.execute(
+            "UPDATE council_submissions "
+            "SET status = 'declined', review_note = %s, reviewed_by = %s, "
+            "    reviewed_username = %s, reviewed_at = now() "
+            "WHERE id = %s",
+            (body.review_note.strip(), user["id"], user["username"], sub_id),
+        )
+    return {"status": "declined"}
+
+
+@router.get("/council")
+def list_council_finalized_agendas(_: dict = Depends(get_council_or_staff_user)):
+    """List finalized council agendas (agenda-only access for council members)."""
+    sql = (
+        "SELECT a.id, a.title, a.body, a.meeting_date, a.meeting_time, a.status, "
+        "       a.finalized_at, a.created_at, a.updated_at, "
+        "       COUNT(DISTINCT i.id) AS item_count, "
+        "       COUNT(d.id) AS doc_count "
+        "FROM agendas a "
+        "LEFT JOIN agenda_items i ON i.agenda_id = a.id "
+        "LEFT JOIN agenda_documents d ON d.agenda_item_id = i.id "
+        f"WHERE {_COUNCIL_FINALIZED_WHERE} "
+        "GROUP BY a.id ORDER BY a.meeting_date DESC NULLS LAST, a.updated_at DESC, a.id DESC"
+    )
+    with pool.connection() as conn:
+        rows = conn.execute(sql).fetchall()
+    return [
+        {
+            "id": r[0],
+            "title": r[1],
+            "body": r[2],
+            "meeting_date": r[3].isoformat() if r[3] else None,
+            "meeting_time": r[4],
+            "status": r[5],
+            "finalized_at": r[6].isoformat() if r[6] else None,
+            "created_at": r[7].isoformat() if r[7] else None,
+            "updated_at": r[8].isoformat() if r[8] else None,
+            "item_count": r[9],
+            "doc_count": r[10],
+        }
+        for r in rows
+    ]
+
+
 @router.get("/{agenda_id}")
 def get_agenda(agenda_id: int, _: dict = Depends(get_staff_user)):
     with pool.connection() as conn:
@@ -2222,13 +2542,22 @@ def generate_agenda_pdf(
     agenda_id: int,
     download: bool = False,
     summary: bool = False,
-    _: dict = Depends(get_staff_user),
+    user: dict = Depends(get_council_or_staff_user),
 ):
     with pool.connection() as conn:
         agenda = _load_agenda(conn, agenda_id)
+        if not agenda:
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        if user["role"] == "council_member":
+            if not summary:
+                raise HTTPException(
+                    status_code=403, detail="Council members may only access agenda-only PDFs"
+                )
+            if not _is_council_finalized(conn, agenda_id):
+                raise HTTPException(
+                    status_code=403, detail="Access restricted to finalized council agendas"
+                )
         prefs = _load_preferences(conn)
-    if not agenda:
-        raise HTTPException(status_code=404, detail="Agenda not found")
 
     def fetch_doc(object_key: str) -> bytes:
         obj = _minio().get_object(_bucket(), object_key)

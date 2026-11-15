@@ -48,6 +48,10 @@
         <button type="button" data-section="backlog">Todos &amp; Backlog <span id="backlog-nav-badge" class="badge draft" hidden></span></button>
         <button type="button" data-section="preferences">Agenda Preferences</button>
       </div>
+      <div id="menu-council" hidden>
+        <h2>Council Member</h2>
+        <button type="button" data-section="council">Council Agendas</button>
+      </div>
     </nav>
 
     <main>
@@ -142,6 +146,23 @@
               <button type="submit" class="btn primary">Create Agenda</button>
             </form>
             <div id="agenda-form-error" class="error-msg" role="alert"></div>
+          </div>
+
+          <div class="card" id="council-submissions-card" hidden>
+            <h2>Pending Council Item Submissions <span id="council-submissions-badge" class="badge draft"></span></h2>
+            <p class="muted" style="margin-top:-.25rem; margin-bottom:.75rem;">Items submitted by council members awaiting staff review.</p>
+            <table>
+              <thead>
+                <tr>
+                  <th>Item</th>
+                  <th>Submitted By</th>
+                  <th>Target</th>
+                  <th>Assign to Agenda</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="staff-council-submissions-tbody"></tbody>
+            </table>
           </div>
 
           <div class="card" id="agenda-filters-card" style="padding:.85rem 1.15rem;">
@@ -548,6 +569,95 @@
             </div>
           </div>
           <div id="backlog-list"></div>
+        </div>
+      </section>
+
+      <section id="section-council" hidden>
+        <h1>Council Member</h1>
+
+        <div class="card">
+          <h2>Submit Agenda Item</h2>
+          <p class="muted" style="margin-top:-.25rem; margin-bottom:.75rem;">Submit an item for staff to review and add to an upcoming or future council agenda.</p>
+          <form id="council-submit-form">
+            <div class="row">
+              <div class="field" style="flex:2; min-width:220px;">
+                <label for="cs-title">Item Title</label>
+                <input id="cs-title" required placeholder="e.g. Review sidewalk repair schedule">
+              </div>
+              <div class="field" style="flex:1.5; min-width:200px;">
+                <label for="cs-target-agenda">Target Agenda</label>
+                <select id="cs-target-agenda">
+                  <option value="">Some future agenda</option>
+                </select>
+              </div>
+              <div class="field" id="cs-target-date-wrap" style="flex:1; min-width:150px;">
+                <label for="cs-target-date">Target Date (optional)</label>
+                <input id="cs-target-date" type="date">
+              </div>
+              <div class="field" style="flex:1.2; min-width:170px;">
+                <label for="cs-target-note">Note (optional)</label>
+                <input id="cs-target-note" placeholder="e.g. December meeting">
+              </div>
+            </div>
+            <div class="row" style="margin-top:.65rem;">
+              <div class="field" style="flex:1; min-width:160px;">
+                <label for="cs-section">Section (optional)</label>
+                <input id="cs-section" placeholder="e.g. New Business">
+              </div>
+              <div class="field" style="flex:1; min-width:180px;">
+                <label for="cs-motion">Recommended Motion (optional)</label>
+                <input id="cs-motion" placeholder="e.g. Direct staff to...">
+              </div>
+              <div class="field" style="flex:1; min-width:150px;">
+                <label for="cs-fiscal">Fiscal Impact (optional)</label>
+                <input id="cs-fiscal" placeholder="e.g. None / $5,000">
+              </div>
+            </div>
+            <div class="field" style="margin-top:.65rem;">
+              <label for="cs-description">Description / Background (optional)</label>
+              <textarea id="cs-description" rows="2" placeholder="Details for staff and council…"></textarea>
+            </div>
+            <div class="actions" style="margin-top:.75rem;">
+              <button type="submit" class="btn primary">Submit Item</button>
+              <span id="cs-form-error" class="error-msg" role="alert"></span>
+            </div>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>My Submitted Items</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Target</th>
+                <th>Status</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="council-submissions-tbody">
+              <tr><td colspan="4" class="muted">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card">
+          <h2>Finalized Council Agendas</h2>
+          <p class="muted" style="margin-top:-.25rem; margin-bottom:.75rem;">Only finalized council agendas are visible here (agenda-only).</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Body</th>
+                <th>Meeting Date</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="council-agendas-tbody">
+              <tr><td colspan="5" class="muted">Loading…</td></tr>
+            </tbody>
+          </table>
         </div>
       </section>
 

@@ -21,6 +21,7 @@ import { loadAgendas } from './agendas-list.js';
 import { openAgenda } from './agenda-detail.js';
 import { loadPreferences } from './preferences.js';
 import { loadBacklog, updateBacklogNavBadge } from './backlog.js';
+import { loadCouncilAgendas } from './council.js';
 
 document.getElementById('logout').addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
@@ -70,19 +71,21 @@ function showSection(name, pushHash = true) {
   document.getElementById('section-agendas').hidden = name !== 'agendas';
   document.getElementById('section-backlog').hidden = name !== 'backlog';
   document.getElementById('section-preferences').hidden = name !== 'preferences';
+  document.getElementById('section-council').hidden = name !== 'council';
   const targetHash = `#${name}`;
   if (pushHash && location.hash !== targetHash) history.pushState(null, '', targetHash);
   if (name === 'users') loadUsers();
   if (name === 'agendas') { showAgendaList(); loadAgendas(); }
   if (name === 'backlog') loadBacklog();
   if (name === 'preferences') loadPreferences();
+  if (name === 'council') loadCouncilAgendas();
 }
 
 document.querySelectorAll('#menu button[data-section]').forEach(btn => {
   btn.addEventListener('click', () => showSection(btn.dataset.section));
 });
 
-async function routeFromHash(isAdmin, isStaff) {
+async function routeFromHash(isAdmin, isStaff, isCouncil) {
   const hash = location.hash.replace(/^#/, '');
   const agMatch = hash.match(/^agendas\/(\d+)(\/(contents|minutes))?$/);
   if (agMatch && isStaff) {
@@ -93,6 +96,7 @@ async function routeFromHash(isAdmin, isStaff) {
     document.getElementById('section-agendas').hidden = false;
     document.getElementById('section-backlog').hidden = true;
     document.getElementById('section-preferences').hidden = true;
+    document.getElementById('section-council').hidden = true;
     try {
       await openAgenda(Number(agMatch[1]), agMatch[3] || 'edit', false);
       return;
@@ -105,7 +109,8 @@ async function routeFromHash(isAdmin, isStaff) {
   if (hash === 'agendas' && isStaff) { showSection('agendas', false); return; }
   if (hash === 'backlog' && isStaff) { showSection('backlog', false); return; }
   if (hash === 'preferences' && isStaff) { showSection('preferences', false); return; }
-  const fallback = isAdmin ? 'users' : 'agendas';
+  if (hash === 'council' && isCouncil) { showSection('council', false); return; }
+  const fallback = isAdmin ? 'users' : (isStaff ? 'agendas' : 'council');
   if (location.hash !== `#${fallback}`) history.replaceState(null, '', `#${fallback}`);
   showSection(fallback, false);
 }
@@ -117,15 +122,17 @@ async function routeFromHash(isAdmin, isStaff) {
 
   const isAdmin = state.me.role === 'admin';
   const isStaff = state.me.role === 'staff_member' || isAdmin;
-  if (isAdmin || isStaff) {
+  const isCouncil = state.me.role === 'council_member';
+  if (isAdmin || isStaff || isCouncil) {
     document.getElementById('menu').hidden = false;
     if (isAdmin) document.getElementById('menu-admin').hidden = false;
     if (isStaff) {
       document.getElementById('menu-staff').hidden = false;
       api('/api/agendas/backlog').then(updateBacklogNavBadge).catch(() => {});
     }
-    await routeFromHash(isAdmin, isStaff);
-    window.addEventListener('popstate', () => routeFromHash(isAdmin, isStaff));
+    if (isCouncil) document.getElementById('menu-council').hidden = false;
+    await routeFromHash(isAdmin, isStaff, isCouncil);
+    window.addEventListener('popstate', () => routeFromHash(isAdmin, isStaff, isCouncil));
   } else {
     document.getElementById('section-nonstaff').hidden = false;
   }

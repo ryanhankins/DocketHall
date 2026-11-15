@@ -415,6 +415,155 @@ export async function loadAgendas() {
   populateMultiFilter('filter-agenda-category', catOpts, 'All Categories', 'Categories', initCats);
 
   renderAgendaCategories();
+  await loadPendingCouncilSubmissions();
+}
+
+async function loadPendingCouncilSubmissions() {
+  const card = document.getElementById('council-submissions-card');
+  const badge = document.getElementById('council-submissions-badge');
+  const tbody = document.getElementById('staff-council-submissions-tbody');
+  if (!card || !tbody) return;
+  let subs = [];
+  try {
+    subs = await api('/api/agendas/council/submissions');
+  } catch {
+    card.hidden = true;
+    return;
+  }
+  if (!subs.length) {
+    card.hidden = true;
+    tbody.textContent = '';
+    return;
+  }
+  card.hidden = false;
+  badge.textContent = `${subs.length} pending`;
+  tbody.textContent = '';
+
+  const agendas = state.agendasList || [];
+  const councilAgendas = agendas.filter(a => (a.body || '').toLowerCase().includes('council'));
+  const targetOptions = councilAgendas.length ? councilAgendas : agendas;
+
+  for (const s of subs) {
+    const tr = document.createElement('tr');
+
+    const tdItem = document.createElement('td');
+    const titleEl = document.createElement('div');
+    titleEl.style.fontWeight = '600';
+    titleEl.textContent = s.title;
+    tdItem.appendChild(titleEl);
+    const meta = [s.section, s.description, s.recommended_motion && `Motion: ${s.recommended_motion}`, s.fiscal_impact && `Fiscal: ${s.fiscal_impact}`].filter(Boolean);
+    if (meta.length) {
+      const subEl = document.createElement('div');
+      subEl.className = 'muted';
+      subEl.style.fontSize = '.82rem';
+      subEl.textContent = meta.join(' · ');
+      tdItem.appendChild(subEl);
+    }
+
+    const tdUser = document.createElement('td');
+    tdUser.className = 'muted';
+    tdUser.textContent = s.submitted_username || '—';
+
+    const tdTarget = document.createElement('td');
+    tdTarget.className = 'muted';
+    if (s.target_agenda_title) {
+      tdTarget.textContent = s.target_agenda_date
+        ? `${s.target_agenda_title} (${s.target_agenda_date})`
+        : s.target_agenda_title;
+    } else {
+      const tParts = [s.target_date, s.target_note].filter(Boolean);
+      tdTarget.textContent = tParts.length ? `Some future agenda · ${tParts.join(' · ')}` : 'Some future agenda';
+    }
+
+    const tdAssign = document.createElement('td');
+    const sel = document.createElement('select');
+    sel.style.width = '100%';
+    sel.style.minWidth = '200px';
+    let matchedId = s.target_agenda_id ? String(s.target_agenda_id) : null;
+    for (const a of targetOptions) {
+      const opt = document.createElement('option');
+      opt.value = String(a.id);
+      opt.textContent = `${a.title}${a.meeting_date ? ` (${a.meeting_date})` : ''}`;
+      if (!matchedId && s.target_date && a.meeting_date === s.target_date) {
+        matchedId = String(a.id);
+      }
+      sel.appendChild(opt);
+    }
+    const newOpt = document.createElement('option');
+    newOpt.value = '__new__';
+    newOpt.textContent = '+ Create new council agenda…';
+    sel.appendChild(newOpt);
+    if (matchedId) sel.value = matchedId;
+    else if (!targetOptions.length) sel.value = '__new__';
+
+    const newWrap = document.createElement('div');
+    newWrap.style.marginTop = '.4rem';
+    newWrap.style.display = sel.value === '__new__' ? 'flex' : 'none';
+    newWrap.style.gap = '.35rem';
+    const newTitle = document.createElement('input');
+    newTitle.placeholder = 'New agenda title';
+    newTitle.value = 'Regular Meeting';
+    newTitle.style.flex = '1';
+    const newDate = document.createElement('input');
+    newDate.type = 'date';
+    newDate.value = s.target_date || '';
+    newWrap.append(newTitle, newDate);
+
+    sel.addEventListener('change', () => {
+      newWrap.style.display = sel.value === '__new__' ? 'flex' : 'none';
+    });
+    tdAssign.append(sel, newWrap);
+
+    const tdActions = document.createElement('td');
+    const actWrap = document.createElement('div');
+    actWrap.className = 'actions';
+
+    const acceptBtn = document.createElement('button');
+    acceptBtn.type = 'button';
+    acceptBtn.className = 'btn sm primary';
+    acceptBtn.textContent = 'Accept & Add';
+    acceptBtn.addEventListener('click', async () => {
+      acceptBtn.disabled = true;
+      try {
+        const payload = sel.value === '__new__'
+          ? { new_agenda_title: newTitle.value.trim(), new_agenda_date: newDate.value || null }
+          : { agenda_id: Number(sel.value) };
+        await api(`/api/agendas/council/submissions/${s.id}/accept`, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
+        showToast(`Added "${s.title}" to agenda`, 'ok');
+        await loadAgendas();
+      } catch (err) {
+        showToast(err.message, 'error');
+        acceptBtn.disabled = false;
+      }
+    });
+
+    const declineBtn = document.createElement('button');
+    declineBtn.type = 'button';
+    declineBtn.className = 'btn sm danger';
+    declineBtn.textContent = 'Decline';
+    declineBtn.addEventListener('click', async () => {
+      declineBtn.disabled = true;
+      try {
+        await api(`/api/agendas/council/submissions/${s.id}/decline`, {
+          method: 'POST',
+          body: JSON.stringify({ review_note: '' }),
+        });
+        showToast(`Declined "${s.title}"`, 'ok');
+        await loadPendingCouncilSubmissions();
+      } catch (err) {
+        showToast(err.message, 'error');
+        declineBtn.disabled = false;
+      }
+    });
+
+    actWrap.append(acceptBtn, declineBtn);
+    tdActions.appendChild(actWrap);
+    tr.append(tdItem, tdUser, tdTarget, tdAssign, tdActions);
+    tbody.appendChild(tr);
+  }
 }
 
 document.getElementById('create-agenda-form').addEventListener('submit', async (e) => {
