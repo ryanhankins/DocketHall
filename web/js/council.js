@@ -144,7 +144,7 @@ async function loadFinalizedCouncilAgendas() {
       const td = document.createElement('td');
       td.colSpan = 5;
       td.className = 'muted';
-      td.textContent = 'No finalized council agendas.';
+      td.textContent = 'No finalized agendas.';
       tr.appendChild(td);
       tbody.appendChild(tr);
       return;

@@ -305,14 +305,11 @@ def get_council_or_staff_user(request: Request) -> dict:
     return user
 
 
-_COUNCIL_FINALIZED_WHERE = (
-    "STRPOS(LOWER(a.body), 'council') > 0 "
-    "AND STRPOS(LOWER(a.status), 'finalized') > 0"
-)
+_COUNCIL_FINALIZED_WHERE = "STRPOS(LOWER(a.status), 'finalized') > 0"
 
 
 def _is_council_finalized(conn, agenda_id: int) -> bool:
-    """Return True if agenda_id is a finalized council agenda."""
+    """Return True if agenda_id is a finalized agenda."""
     row = conn.execute(
         f"SELECT 1 FROM agendas a WHERE a.id = %s AND {_COUNCIL_FINALIZED_WHERE}",
         (agenda_id,),
@@ -2557,7 +2554,7 @@ def generate_agenda_pdf(
                 )
             if not _is_council_finalized(conn, agenda_id):
                 raise HTTPException(
-                    status_code=403, detail="Access restricted to finalized council agendas"
+                    status_code=403, detail="Access restricted to finalized agendas"
                 )
         prefs = _load_preferences(conn)
 
