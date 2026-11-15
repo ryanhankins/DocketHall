@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { state, api, toTimeInputValue, syncSectionsDatalist, showToast, refreshBackupBanner, downloadBackupArchive, wireRestoreForm } from './state.js';
+import { state, api, toTimeInputValue, syncSectionsDatalist, showToast, refreshBackupBanner, downloadBackupArchive, wireRestoreForm, applyBrandTitle } from './state.js';
 
 let prefBodies = [];
 let prefSections = [];
@@ -231,6 +231,8 @@ export async function loadPreferences() {
   const prefs = await api('/api/agendas/preferences');
   document.getElementById('pref-cover-sheets').checked = !!prefs.include_item_cover_sheets;
   document.getElementById('pref-page-numbers').checked = !!prefs.include_page_numbers;
+  document.getElementById('pref-city-title').value = prefs.city_title || '';
+  applyBrandTitle(prefs.city_title || '');
   document.getElementById('pref-city-name').value = prefs.city_name || '';
   document.getElementById('pref-meeting-location').value = prefs.meeting_location || '';
   document.getElementById('pref-meeting-time').value = toTimeInputValue(prefs.meeting_time);
@@ -264,6 +266,7 @@ document.getElementById('prefs-form').addEventListener('submit', async (e) => {
       body: JSON.stringify({
         include_item_cover_sheets: document.getElementById('pref-cover-sheets').checked,
         include_page_numbers: document.getElementById('pref-page-numbers').checked,
+        city_title: document.getElementById('pref-city-title').value.trim(),
         city_name: document.getElementById('pref-city-name').value.trim(),
         meeting_location: document.getElementById('pref-meeting-location').value.trim(),
         meeting_time: document.getElementById('pref-meeting-time').value.trim(),
@@ -274,6 +277,7 @@ document.getElementById('prefs-form').addEventListener('submit', async (e) => {
         categories: prefCategories,
       }),
     });
+    applyBrandTitle(saved.city_title || '');
     prefBodies = [...saved.bodies];
     prefSections = [...(saved.sections || [])];
     prefCategories = Array.isArray(saved.categories)

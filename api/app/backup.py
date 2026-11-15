@@ -123,7 +123,7 @@ _EXPORT_TABLES: list[tuple[str, list[str], set[str], bool]] = [
     (
         "agenda_preferences",
         [
-            "id", "include_item_cover_sheets", "include_page_numbers", "city_name",
+            "id", "include_item_cover_sheets", "include_page_numbers", "city_title", "city_name",
             "meeting_location", "meeting_time", "other_notes", "footer_disclosures",
             "bodies", "sections", "categories", "city_logo_key",
             "backup_reminder_days", "last_backup_at", "updated_at",

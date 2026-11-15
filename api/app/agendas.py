@@ -208,6 +208,7 @@ CREATE TABLE IF NOT EXISTS agenda_preferences (
     sections                   JSONB NOT NULL DEFAULT '["Opening", "Consent", "Old Business", "New Business", "Public Hearing", "Closing"]'::jsonb,
     categories                 JSONB NOT NULL DEFAULT '[{"name": "In-Progress Agendas", "warn_on_leave": false}, {"name": "Finalized Agendas", "warn_on_leave": true}]'::jsonb,
     city_logo_key              TEXT NOT NULL DEFAULT '',
+    city_title                 TEXT NOT NULL DEFAULT '',
     updated_at                 TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS include_page_numbers BOOLEAN NOT NULL DEFAULT TRUE;
@@ -220,6 +221,7 @@ ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS bodies JSONB NOT NULL DE
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS sections JSONB NOT NULL DEFAULT '["Opening", "Consent", "Old Business", "New Business", "Public Hearing", "Closing"]'::jsonb;
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS categories JSONB NOT NULL DEFAULT '[{"name": "In-Progress Agendas", "warn_on_leave": false}, {"name": "Finalized Agendas", "warn_on_leave": true}]'::jsonb;
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS city_logo_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS city_title TEXT NOT NULL DEFAULT '';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS backup_reminder_days INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS last_backup_at TIMESTAMPTZ;
 """
@@ -629,6 +631,7 @@ class AgendaCategoryIn(BaseModel):
 class AgendaPreferencesIn(BaseModel):
     include_item_cover_sheets: bool = True
     include_page_numbers: bool = True
+    city_title: str = ""
     city_name: str = ""
     meeting_location: str = ""
     meeting_time: str = ""
@@ -643,13 +646,15 @@ def _load_preferences(conn) -> dict:
     row = conn.execute(
         "SELECT include_item_cover_sheets, include_page_numbers, "
         "       city_name, meeting_location, meeting_time, other_notes, "
-        "       footer_disclosures, bodies, city_logo_key, sections, categories "
+        "       footer_disclosures, bodies, city_logo_key, sections, categories, "
+        "       city_title "
         "FROM agenda_preferences WHERE id = 1"
     ).fetchone()
     if not row:
         return {
             "include_item_cover_sheets": True,
             "include_page_numbers": True,
+            "city_title": "",
             "city_name": "",
             "meeting_location": "",
             "meeting_time": "",
@@ -673,6 +678,7 @@ def _load_preferences(conn) -> dict:
     return {
         "include_item_cover_sheets": bool(row[0]),
         "include_page_numbers": bool(row[1]),
+        "city_title": row[11] or "",
         "city_name": row[2],
         "meeting_location": row[3],
         "meeting_time": row[4],
@@ -690,6 +696,16 @@ def _load_preferences(conn) -> dict:
 def get_preferences(_: dict = Depends(get_staff_user)):
     with pool.connection() as conn:
         return _load_preferences(conn)
+
+
+@router.get("/preferences/branding")
+def get_preferences_branding():
+    with pool.connection() as conn:
+        prefs = _load_preferences(conn)
+    return {
+        "city_title": prefs.get("city_title", ""),
+        "has_city_logo": bool(prefs.get("has_city_logo", False)),
+    }
 
 
 _LOGO_MEDIA = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
@@ -833,6 +849,7 @@ def update_preferences(body: AgendaPreferencesIn, _: dict = Depends(get_staff_us
     vals = (
         body.include_item_cover_sheets,
         body.include_page_numbers,
+        body.city_title.strip(),
         body.city_name.strip(),
         body.meeting_location.strip(),
         body.meeting_time.strip(),
@@ -855,12 +872,13 @@ def update_preferences(body: AgendaPreferencesIn, _: dict = Depends(get_staff_us
         conn.execute(
             "INSERT INTO agenda_preferences "
             "(id, include_item_cover_sheets, include_page_numbers, "
-            " city_name, meeting_location, meeting_time, other_notes, "
+            " city_title, city_name, meeting_location, meeting_time, other_notes, "
             " footer_disclosures, bodies, sections, categories, updated_at) "
-            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, now()) "
+            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, now()) "
             "ON CONFLICT (id) DO UPDATE SET "
             "include_item_cover_sheets = EXCLUDED.include_item_cover_sheets, "
             "include_page_numbers = EXCLUDED.include_page_numbers, "
+            "city_title = EXCLUDED.city_title, "
             "city_name = EXCLUDED.city_name, "
             "meeting_location = EXCLUDED.meeting_location, "
             "meeting_time = EXCLUDED.meeting_time, "

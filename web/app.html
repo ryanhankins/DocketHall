@@ -27,6 +27,7 @@
   <header>
     <div class="brand" style="display:flex; align-items:center; gap:.55rem;">
       <img id="brand-logo" alt="City Logo" src="/api/agendas/preferences/logo" style="height:64px; width:auto; border-radius:4px; object-fit:contain;" onerror="this.hidden=true;">
+      <span id="brand-city-title" hidden></span>
       <span>CivicDesk</span>
     </div>
     <div class="user-bar">
@@ -406,6 +407,10 @@
             </label>
 
             <h2 style="margin:1rem 0 .75rem; font-size:1rem;">Cover Sheet Details</h2>
+            <div class="field" style="margin-bottom:.9rem;">
+              <label for="pref-city-title">City Title (appears before CivicDesk at the top of each page)</label>
+              <input id="pref-city-title" placeholder="e.g. City of Northfield">
+            </div>
             <div class="field" style="margin-bottom:.9rem;">
               <label for="pref-logo-file">City Logo (prints on first page)</label>
               <div style="display:flex; align-items:center; gap:.75rem; flex-wrap:wrap;">

@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { ROLE_LABELS, state, api, showAgendaList, refreshBackupBanner, downloadBackupArchive } from './state.js';
+import { ROLE_LABELS, state, api, showAgendaList, refreshBackupBanner, downloadBackupArchive, applyBrandTitle } from './state.js';
 import { loadUsers } from './users.js';
 import { loadAgendas } from './agendas-list.js';
 import { openAgenda } from './agenda-detail.js';
@@ -116,6 +116,10 @@ async function routeFromHash(isAdmin, isStaff, isCouncil) {
 }
 
 (async () => {
+  fetch('/api/agendas/preferences/branding')
+    .then(r => r.ok ? r.json() : null)
+    .then(b => { if (b) applyBrandTitle(b.city_title || ''); })
+    .catch(() => {});
   state.me = await api('/api/me');
   document.getElementById('whoami').textContent =
     `${state.me.username} (${ROLE_LABELS[state.me.role] || state.me.role})`;
