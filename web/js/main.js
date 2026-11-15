@@ -85,7 +85,7 @@ function showSection(name, pushHash = true) {
     b.classList.toggle('active', b.dataset.section === name);
   });
   const isAgendaGroup = name === 'agendas' || name === 'backlog';
-  const isPref = name === 'preferences-general' || name === 'preferences-agenda';
+  const isPref = name === 'preferences-general' || name === 'preferences-agenda' || name === 'preferences-backup';
   if (isAgendaGroup) setSubmenuOpen('menu-agendas-submenu', true);
   if (isPref) setSubmenuOpen('menu-preferences-submenu', true);
   document.getElementById('section-users').hidden = name !== 'users';
@@ -93,6 +93,7 @@ function showSection(name, pushHash = true) {
   document.getElementById('section-backlog').hidden = name !== 'backlog';
   document.getElementById('section-preferences-general').hidden = name !== 'preferences-general';
   document.getElementById('section-preferences-agenda').hidden = name !== 'preferences-agenda';
+  document.getElementById('section-preferences-backup').hidden = name !== 'preferences-backup';
   document.getElementById('section-council').hidden = name !== 'council';
   const targetHash = `#${name}`;
   if (pushHash && location.hash !== targetHash) history.pushState(null, '', targetHash);
@@ -120,6 +121,7 @@ async function routeFromHash(isAdmin, isStaff, isCouncil) {
     document.getElementById('section-backlog').hidden = true;
     document.getElementById('section-preferences-general').hidden = true;
     document.getElementById('section-preferences-agenda').hidden = true;
+    document.getElementById('section-preferences-backup').hidden = true;
     document.getElementById('section-council').hidden = true;
     try {
       await openAgenda(Number(agMatch[1]), agMatch[3] || 'edit', false);
@@ -134,6 +136,7 @@ async function routeFromHash(isAdmin, isStaff, isCouncil) {
   if (hash === 'backlog' && isStaff) { showSection('backlog', false); return; }
   if (hash === 'preferences-general' && isStaff) { showSection('preferences-general', false); return; }
   if ((hash === 'preferences-agenda' || hash === 'preferences') && isStaff) { showSection('preferences-agenda', false); return; }
+  if (hash === 'preferences-backup' && isStaff) { showSection('preferences-backup', false); return; }
   if (hash === 'council' && isCouncil) { showSection('council', false); return; }
   const fallback = isAdmin ? 'users' : (isStaff ? 'agendas' : 'council');
   if (location.hash !== `#${fallback}`) history.replaceState(null, '', `#${fallback}`);

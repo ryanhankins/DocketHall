@@ -190,10 +190,8 @@ export async function refreshBackupBanner() {
   if (!banner || !textEl) return;
   try {
     const st = await api('/api/backup/status');
-    const adminDays = document.getElementById('admin-backup-days');
-    const staffDays = document.getElementById('staff-backup-days');
-    if (adminDays) adminDays.value = String(st.reminder_days ?? 0);
-    if (staffDays) staffDays.value = String(st.reminder_days ?? 0);
+    const backupDays = document.getElementById('backup-days');
+    if (backupDays) backupDays.value = String(st.reminder_days ?? 0);
     if (st.overdue) {
       textEl.textContent = st.last_backup_at
         ? `Backup reminder: Last backup was ${st.days_since_backup} day(s) ago (interval: every ${st.reminder_days} days).`

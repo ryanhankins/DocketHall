@@ -61,6 +61,7 @@
           <div id="menu-preferences-submenu" class="nav-submenu" hidden>
             <button type="button" data-section="preferences-general">General Preferences</button>
             <button type="button" data-section="preferences-agenda">Agenda Preferences</button>
+            <button type="button" data-section="preferences-backup">Backup &amp; Restore</button>
           </div>
         </div>
       </div>
@@ -128,31 +129,6 @@
             </thead>
             <tbody id="users-body"></tbody>
           </table>
-        </div>
-
-        <div class="card">
-          <h2>Backup &amp; Restore</h2>
-          <p class="muted" style="margin-top:0;">
-            Download a full archive (.zip) containing human-readable agendas, CSVs, database JSON, users, and uploaded attachments, or restore onto a fresh instance.
-          </p>
-          <div class="actions" style="margin-bottom:.75rem;">
-            <button type="button" id="admin-export-btn" class="btn primary">Download Full Archive (.zip)</button>
-          </div>
-          <form id="admin-backup-reminder-form" class="row" style="align-items:flex-end; margin-bottom:.85rem;">
-            <div class="field" style="max-width:260px;">
-              <label for="admin-backup-days">Backup Reminder Interval (days, 0 = off)</label>
-              <input id="admin-backup-days" type="number" min="0" max="3650" value="0" required>
-            </div>
-            <button type="submit" class="btn sm">Save Reminder</button>
-          </form>
-          <form id="admin-restore-form" class="row" style="align-items:flex-end;">
-            <div class="field" style="flex:1; min-width:220px;">
-              <label for="admin-import-file">Restore from Archive (.zip)</label>
-              <input id="admin-import-file" type="file" accept=".zip" required>
-            </div>
-            <button type="submit" class="btn danger">Restore Archive</button>
-          </form>
-          <div id="admin-backup-msg" class="ok-msg" role="status"></div>
         </div>
       </section>
 
@@ -525,30 +501,32 @@
           </p>
           <div id="pref-templates-list" class="muted">Loading…</div>
         </div>
+      </section>
 
+      <section id="section-preferences-backup" hidden>
+        <h1>Backup &amp; Restore</h1>
         <div class="card">
-          <h2>Data Export &amp; Restore</h2>
           <p class="muted" style="margin-top:0;">
-            Download all agendas, items, todos/backlog, council submissions, preferences, templates, and uploaded attachments in a single human-readable &amp; reconstructible .zip archive, or restore from an archive.
+            Download a full archive (.zip) containing human-readable agendas, CSVs, database JSON, users, preferences, templates, and uploaded attachments, or restore onto an instance.
           </p>
           <div class="actions" style="margin-bottom:.75rem;">
-            <button type="button" id="staff-export-btn" class="btn primary">Download Data Archive (.zip)</button>
+            <button type="button" id="backup-export-btn" class="btn primary">Download Full Archive (.zip)</button>
           </div>
-          <form id="staff-backup-reminder-form" class="row" style="align-items:flex-end; margin-bottom:.85rem;">
+          <form id="backup-reminder-form" class="row" style="align-items:flex-end; margin-bottom:.85rem;">
             <div class="field" style="max-width:260px;">
-              <label for="staff-backup-days">Backup Reminder Interval (days, 0 = off)</label>
-              <input id="staff-backup-days" type="number" min="0" max="3650" value="0" required>
+              <label for="backup-days">Backup Reminder Interval (days, 0 = off)</label>
+              <input id="backup-days" type="number" min="0" max="3650" value="0" required>
             </div>
             <button type="submit" class="btn sm">Save Reminder</button>
           </form>
-          <form id="staff-restore-form" class="row" style="align-items:flex-end;">
+          <form id="backup-restore-form" class="row" style="align-items:flex-end;">
             <div class="field" style="flex:1; min-width:220px;">
-              <label for="staff-import-file">Restore from Archive (.zip)</label>
-              <input id="staff-import-file" type="file" accept=".zip" required>
+              <label for="backup-import-file">Restore from Archive (.zip)</label>
+              <input id="backup-import-file" type="file" accept=".zip" required>
             </div>
             <button type="submit" class="btn danger">Restore Archive</button>
           </form>
-          <div id="staff-backup-msg" class="ok-msg" role="status"></div>
+          <div id="backup-msg" class="ok-msg" role="status"></div>
         </div>
       </section>
 

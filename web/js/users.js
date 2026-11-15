@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { ROLE_LABELS, state, api, formatDate, showToast, refreshBackupBanner, downloadBackupArchive, wireRestoreForm } from './state.js';
+import { ROLE_LABELS, state, api, formatDate, showToast } from './state.js';
 
 function showPasswordBanner(username, password) {
   document.getElementById('pw-user').textContent = username;
@@ -166,23 +166,4 @@ document.getElementById('create-user-form').addEventListener('submit', async (e)
     showPasswordBanner(created.username, created.generated_password);
     await loadUsers();
   } catch (err) { errEl.textContent = err.message; }
-});
-
-wireRestoreForm('admin-restore-form', 'admin-import-file', 'admin-backup-msg', loadUsers);
-
-document.getElementById('admin-export-btn')?.addEventListener('click', downloadBackupArchive);
-
-document.getElementById('admin-backup-reminder-form')?.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const days = Number(document.getElementById('admin-backup-days').value || 0);
-  try {
-    await api('/api/backup/settings', {
-      method: 'PUT',
-      body: JSON.stringify({ reminder_days: days }),
-    });
-    await refreshBackupBanner();
-    showToast(days > 0 ? `Backup reminder set to every ${days} day(s)` : 'Backup reminder disabled', 'ok');
-  } catch (err) {
-    showToast(err.message, 'error');
-  }
 });

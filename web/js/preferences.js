@@ -313,12 +313,12 @@ document.getElementById('prefs-form').addEventListener('submit', async (e) => {
   }
 });
 
-document.getElementById('staff-export-btn')?.addEventListener('click', downloadBackupArchive);
-wireRestoreForm('staff-restore-form', 'staff-import-file', 'staff-backup-msg', loadPreferences);
+document.getElementById('backup-export-btn')?.addEventListener('click', downloadBackupArchive);
+wireRestoreForm('backup-restore-form', 'backup-import-file', 'backup-msg', loadPreferences);
 
-document.getElementById('staff-backup-reminder-form')?.addEventListener('submit', async (e) => {
+document.getElementById('backup-reminder-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
-  const days = Number(document.getElementById('staff-backup-days').value || 0);
+  const days = Number(document.getElementById('backup-days').value || 0);
   try {
     await api('/api/backup/settings', {
       method: 'PUT',
