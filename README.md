@@ -23,12 +23,6 @@ Run the deployment script. It initializes Docker Swarm (if not already active), 
 ./scripts/deploy.sh
 ```
 
-If you have a Gemini API key, you can pass it via the environment (otherwise the script prompts for one, or uses a placeholder if left blank):
-
-```bash
-GEMINI_API_KEY="your-api-key" ./scripts/deploy.sh
-```
-
 ### 3. Open CivicDesk
 
 Once the services are running:
@@ -86,7 +80,6 @@ Stop and remove the stack **and** delete all volumes, secrets, and configs:
 | `STACK_NAME` | `civicdesk` | Docker Swarm stack name |
 | `CIVICDESK_TAG` | `latest` | Image tag for built services |
 | `CIVICDESK_REGISTRY` | *(empty)* | Optional registry prefix (e.g. `registry.example.com/`); pushes images if set |
-| `GEMINI_API_KEY` | *(prompted)* | Gemini API key stored in the `gemini_api_key` Swarm secret |
 | `POSTGRES_PASSWORD` | *(random)* | Initial password for `postgres_password` Swarm secret |
 | `MINIO_ROOT_USER` | `civicdesk` | Initial username for `minio_root_user` Swarm secret |
 | `MINIO_ROOT_PASSWORD` | *(random)* | Initial password for `minio_root_password` Swarm secret |

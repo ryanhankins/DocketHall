@@ -25,7 +25,7 @@ if [ "${1:-}" = "--purge" ]; then
   while docker ps -q --filter "label=com.docker.stack.namespace=$STACK_NAME" | grep -q .; do sleep 2; done
   sleep 3
   docker volume rm "${STACK_NAME}_records_data" "${STACK_NAME}_pgdata" "${STACK_NAME}_minio_data" 2>/dev/null || true
-  docker secret rm postgres_password gemini_api_key minio_root_user minio_root_password 2>/dev/null || true
+  docker secret rm postgres_password minio_root_user minio_root_password 2>/dev/null || true
   docker config rm civicdesk_db_init_v1 2>/dev/null || true
   echo "Purged volumes, secrets and configs."
 fi

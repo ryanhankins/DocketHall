@@ -16,7 +16,7 @@
 
 # Build images, create Swarm secrets (if missing) and deploy the CivicDesk stack.
 #
-#   GEMINI_API_KEY=... ./scripts/deploy.sh
+#   ./scripts/deploy.sh
 #
 # Optional env: STACK_NAME (default civicdesk), CIVICDESK_TAG (default latest),
 #               CIVICDESK_REGISTRY (e.g. "registry.example.com/" — images are pushed if set)
@@ -48,12 +48,6 @@ echo "==> Secrets"
 create_secret postgres_password   "${POSTGRES_PASSWORD:-$(rand)}"
 create_secret minio_root_user     "${MINIO_ROOT_USER:-civicdesk}"
 create_secret minio_root_password "${MINIO_ROOT_PASSWORD:-$(rand)}"
-if ! docker secret inspect gemini_api_key >/dev/null 2>&1; then
-  if [ -z "${GEMINI_API_KEY:-}" ]; then
-    read -rsp "    Gemini API key (blank = placeholder): " GEMINI_API_KEY; echo
-  fi
-  create_secret gemini_api_key "${GEMINI_API_KEY:-CHANGE_ME}"
-fi
 
 # 3. Images
 echo "==> Building images"
