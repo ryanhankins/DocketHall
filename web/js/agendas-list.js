@@ -459,6 +459,14 @@ async function loadPendingCouncilSubmissions() {
       subEl.textContent = meta.join(' · ');
       tdItem.appendChild(subEl);
     }
+    const subDocs = Array.isArray(s.documents) ? s.documents : [];
+    if (subDocs.length) {
+      const docsEl = document.createElement('div');
+      docsEl.className = 'muted';
+      docsEl.style.fontSize = '.82rem';
+      docsEl.textContent = `Attachments: ${subDocs.map(d => `${d.filename}${d.approval_status === 'pending' ? ' (pending approval)' : ''}`).join(', ')}`;
+      tdItem.appendChild(docsEl);
+    }
 
     const tdUser = document.createElement('td');
     tdUser.className = 'muted';
@@ -476,6 +484,55 @@ async function loadPendingCouncilSubmissions() {
     }
 
     const tdAssign = document.createElement('td');
+    const tdActions = document.createElement('td');
+    const actWrap = document.createElement('div');
+    actWrap.className = 'actions';
+
+    if (s.status === 'accepted') {
+      tdAssign.className = 'muted';
+      tdAssign.textContent = s.accepted_agenda_title
+        ? `On ${s.accepted_agenda_title}${s.accepted_agenda_date ? ` (${s.accepted_agenda_date})` : ''}`
+        : 'Already on agenda';
+      const pendingDocs = subDocs.filter(d => d.approval_status === 'pending');
+      for (const d of pendingDocs) {
+        const appBtn = document.createElement('button');
+        appBtn.type = 'button';
+        appBtn.className = 'btn sm primary';
+        appBtn.textContent = `Approve ${d.filename}`;
+        appBtn.addEventListener('click', async () => {
+          appBtn.disabled = true;
+          try {
+            await api(`/api/agendas/council/submissions/${s.id}/documents/${d.id}/approve`, { method: 'POST' });
+            showToast(`Approved "${d.filename}"`, 'ok');
+            await loadAgendas();
+          } catch (err) {
+            showToast(err.message, 'error');
+            appBtn.disabled = false;
+          }
+        });
+        const decBtn = document.createElement('button');
+        decBtn.type = 'button';
+        decBtn.className = 'btn sm danger';
+        decBtn.textContent = `Decline ${d.filename}`;
+        decBtn.addEventListener('click', async () => {
+          decBtn.disabled = true;
+          try {
+            await api(`/api/agendas/council/submissions/${s.id}/documents/${d.id}/decline`, { method: 'POST' });
+            showToast(`Declined "${d.filename}"`, 'ok');
+            await loadPendingCouncilSubmissions();
+          } catch (err) {
+            showToast(err.message, 'error');
+            decBtn.disabled = false;
+          }
+        });
+        actWrap.append(appBtn, decBtn);
+      }
+      tdActions.appendChild(actWrap);
+      tr.append(tdItem, tdUser, tdTarget, tdAssign, tdActions);
+      tbody.appendChild(tr);
+      continue;
+    }
+
     const sel = document.createElement('select');
     sel.style.width = '100%';
     sel.style.minWidth = '200px';
@@ -513,10 +570,6 @@ async function loadPendingCouncilSubmissions() {
       newWrap.style.display = sel.value === '__new__' ? 'flex' : 'none';
     });
     tdAssign.append(sel, newWrap);
-
-    const tdActions = document.createElement('td');
-    const actWrap = document.createElement('div');
-    actWrap.className = 'actions';
 
     const acceptBtn = document.createElement('button');
     acceptBtn.type = 'button';

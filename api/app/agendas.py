@@ -176,6 +176,25 @@ CREATE TABLE IF NOT EXISTS council_submissions (
     reviewed_at        TIMESTAMPTZ
 );
 ALTER TABLE council_submissions ADD COLUMN IF NOT EXISTS target_agenda_id BIGINT REFERENCES agendas(id) ON DELETE SET NULL;
+CREATE TABLE IF NOT EXISTS council_submission_documents (
+    id                BIGSERIAL PRIMARY KEY,
+    submission_id     BIGINT NOT NULL REFERENCES council_submissions(id) ON DELETE CASCADE,
+    title             TEXT NOT NULL,
+    filename          TEXT NOT NULL,
+    content_type      TEXT NOT NULL,
+    size_bytes        BIGINT NOT NULL,
+    sha256            TEXT NOT NULL,
+    object_key        TEXT NOT NULL,
+    uploaded_by       BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    uploaded_username TEXT NOT NULL DEFAULT '',
+    approval_status   TEXT NOT NULL DEFAULT 'approved',
+    reviewed_by       BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    reviewed_username TEXT NOT NULL DEFAULT '',
+    agenda_doc_id     BIGINT REFERENCES agenda_documents(id) ON DELETE SET NULL,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reviewed_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS council_sub_docs_idx ON council_submission_documents(submission_id, id);
 CREATE TABLE IF NOT EXISTS agenda_preferences (
     id                         INTEGER PRIMARY KEY CHECK (id = 1),
     include_item_cover_sheets  BOOLEAN NOT NULL DEFAULT TRUE,
@@ -1514,11 +1533,35 @@ def list_council_submissions(user: dict = Depends(get_council_or_staff_user)):
         sql += "WHERE s.submitted_by = %s "
         params.append(user["id"])
     else:
-        sql += "WHERE s.status = 'pending' "
+        sql += (
+            "WHERE s.status = 'pending' "
+            "   OR EXISTS (SELECT 1 FROM council_submission_documents sd "
+            "              WHERE sd.submission_id = s.id AND sd.approval_status = 'pending') "
+        )
     sql += "ORDER BY s.created_at DESC, s.id DESC"
 
     with pool.connection() as conn:
         rows = conn.execute(sql, params).fetchall()
+        sub_ids = [r[0] for r in rows]
+        docs_by_sub: dict[int, list[dict]] = {sid: [] for sid in sub_ids}
+        if sub_ids:
+            doc_rows = conn.execute(
+                "SELECT id, submission_id, title, filename, size_bytes, approval_status, "
+                "       uploaded_username, created_at "
+                "FROM council_submission_documents "
+                "WHERE submission_id = ANY(%s) ORDER BY id ASC",
+                (sub_ids,),
+            ).fetchall()
+            for dr in doc_rows:
+                docs_by_sub[dr[1]].append({
+                    "id": dr[0],
+                    "title": dr[2],
+                    "filename": dr[3],
+                    "size_bytes": dr[4],
+                    "approval_status": dr[5],
+                    "uploaded_username": dr[6],
+                    "created_at": dr[7].isoformat() if dr[7] else None,
+                })
     return [
         {
             "id": r[0],
@@ -1541,6 +1584,7 @@ def list_council_submissions(user: dict = Depends(get_council_or_staff_user)):
             "target_agenda_id": r[17],
             "target_agenda_title": r[18],
             "target_agenda_date": r[19].isoformat() if r[19] else None,
+            "documents": docs_by_sub.get(r[0], []),
         }
         for r in rows
     ]
@@ -1596,6 +1640,166 @@ def create_council_submission(
         "status": "pending",
         "created_at": row[1].isoformat() if row[1] else None,
     }
+
+
+def _attach_submission_doc_to_item(
+    conn,
+    sub_doc_id: int,
+    title: str,
+    filename: str,
+    content_type: str,
+    size_bytes: int,
+    sha256: str,
+    src_key: str,
+    agenda_id: int,
+    item_id: int,
+    uploaded_by: int | None,
+) -> int:
+    """Copy a submission attachment in MinIO onto an agenda item and link agenda_doc_id."""
+    bucket = _bucket()
+    dst_key = f"agendas/{agenda_id}/{item_id}/{uuid.uuid4().hex[:12]}_{filename}"
+    _minio().copy_object(bucket, dst_key, CopySource(bucket, src_key))
+    doc_pos = conn.execute(
+        "SELECT COALESCE(MAX(position), 0) + 1 FROM agenda_documents WHERE agenda_item_id = %s",
+        (item_id,),
+    ).fetchone()[0]
+    drow = conn.execute(
+        "INSERT INTO agenda_documents "
+        "(agenda_item_id, position, title, filename, content_type, size_bytes, sha256, object_key, uploaded_by) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        (item_id, doc_pos, title, filename, content_type, size_bytes, sha256, dst_key, uploaded_by),
+    ).fetchone()
+    agenda_doc_id = drow[0]
+    conn.execute(
+        "UPDATE council_submission_documents SET agenda_doc_id = %s WHERE id = %s",
+        (agenda_doc_id, sub_doc_id),
+    )
+    return agenda_doc_id
+
+
+@router.post("/council/submissions/{sub_id}/documents", status_code=201)
+async def upload_council_submission_document(
+    sub_id: int,
+    file: UploadFile = File(...),
+    title: str = Form(""),
+    user: dict = Depends(get_council_or_staff_user),
+):
+    """Attach a document to a council submission (requires staff approval if already accepted)."""
+    data = await _read_upload_limited(file, MAX_DOC_BYTES, "100 MB")
+    safe_name, content_type = _validate_doc(file.filename or "document", data)
+    doc_title = title.strip() or os.path.splitext(safe_name)[0].replace("_", " ").strip() or safe_name
+    sha = hashlib.sha256(data).hexdigest()
+
+    def _store() -> dict:
+        with pool.connection() as conn:
+            sub = conn.execute(
+                "SELECT submitted_by, status FROM council_submissions WHERE id = %s",
+                (sub_id,),
+            ).fetchone()
+            if not sub:
+                raise HTTPException(status_code=404, detail="Submission not found")
+            if user["role"] not in STAFF_ROLES and sub[0] != user["id"]:
+                raise HTTPException(status_code=403, detail="You may only attach files to your own submissions")
+            if sub[1] == "declined":
+                raise HTTPException(status_code=400, detail="Cannot attach files to a declined submission")
+
+            approval_status = "pending" if (sub[1] == "accepted" and user["role"] not in STAFF_ROLES) else "approved"
+            obj_key = f"submissions/{sub_id}/{uuid.uuid4().hex[:12]}_{safe_name}"
+            _minio().put_object(
+                _bucket(), obj_key, io.BytesIO(data), length=len(data), content_type=content_type
+            )
+            row = conn.execute(
+                "INSERT INTO council_submission_documents "
+                "(submission_id, title, filename, content_type, size_bytes, sha256, object_key, "
+                " uploaded_by, uploaded_username, approval_status) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id, created_at",
+                (
+                    sub_id, doc_title, safe_name, content_type, len(data), sha, obj_key,
+                    user["id"], user["username"], approval_status,
+                ),
+            ).fetchone()
+
+            if sub[1] == "accepted" and approval_status == "approved":
+                acc = conn.execute(
+                    "SELECT accepted_agenda_id, accepted_item_id FROM council_submissions WHERE id = %s",
+                    (sub_id,),
+                ).fetchone()
+                if acc and acc[0] and acc[1]:
+                    _attach_submission_doc_to_item(
+                        conn, row[0], doc_title, safe_name, content_type,
+                        len(data), sha, obj_key, acc[0], acc[1], user["id"],
+                    )
+
+            return {
+                "id": row[0],
+                "title": doc_title,
+                "filename": safe_name,
+                "size_bytes": len(data),
+                "approval_status": approval_status,
+                "uploaded_username": user["username"],
+                "created_at": row[1].isoformat() if row[1] else None,
+            }
+
+    return await run_in_threadpool(_store)
+
+
+@router.post("/council/submissions/{sub_id}/documents/{doc_id}/approve")
+def approve_council_submission_document(
+    sub_id: int, doc_id: int, user: dict = Depends(get_staff_user)
+):
+    """Approve a pending post-acceptance attachment and add it to the agenda item."""
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT sd.id, sd.title, sd.filename, sd.content_type, sd.size_bytes, sd.sha256, "
+            "       sd.object_key, sd.uploaded_by, sd.approval_status, "
+            "       s.accepted_agenda_id, s.accepted_item_id "
+            "FROM council_submission_documents sd "
+            "JOIN council_submissions s ON s.id = sd.submission_id "
+            "WHERE sd.id = %s AND sd.submission_id = %s",
+            (doc_id, sub_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Submission document not found")
+        if row[8] != "pending":
+            raise HTTPException(status_code=400, detail="Document is not pending approval")
+        if not row[9] or not row[10]:
+            raise HTTPException(status_code=400, detail="Submission is not linked to an agenda item")
+        agenda_doc_id = _attach_submission_doc_to_item(
+            conn, row[0], row[1], row[2], row[3], row[4], row[5], row[6],
+            row[9], row[10], row[7],
+        )
+        conn.execute(
+            "UPDATE council_submission_documents "
+            "SET approval_status = 'approved', reviewed_by = %s, reviewed_username = %s, reviewed_at = now() "
+            "WHERE id = %s",
+            (user["id"], user["username"], doc_id),
+        )
+        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (row[9],))
+    return {"status": "approved", "agenda_doc_id": agenda_doc_id}
+
+
+@router.post("/council/submissions/{sub_id}/documents/{doc_id}/decline")
+def decline_council_submission_document(
+    sub_id: int, doc_id: int, user: dict = Depends(get_staff_user)
+):
+    """Decline a pending post-acceptance attachment on a council submission."""
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT approval_status FROM council_submission_documents "
+            "WHERE id = %s AND submission_id = %s",
+            (doc_id, sub_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Submission document not found")
+        if row[0] != "pending":
+            raise HTTPException(status_code=400, detail="Document is not pending approval")
+        conn.execute(
+            "UPDATE council_submission_documents "
+            "SET approval_status = 'declined', reviewed_by = %s, reviewed_username = %s, reviewed_at = now() "
+            "WHERE id = %s",
+            (user["id"], user["username"], doc_id),
+        )
+    return {"status": "declined"}
 
 
 @router.post("/council/submissions/{sub_id}/accept")
@@ -1655,6 +1859,23 @@ def accept_council_submission(
             (agenda_id, pos, sub[1], sub[2], sub[3], sub[7], sub[4], sub[5]),
         ).fetchone()
         item_id = irow[0]
+        sub_docs = conn.execute(
+            "SELECT id, title, filename, content_type, size_bytes, sha256, object_key, uploaded_by "
+            "FROM council_submission_documents "
+            "WHERE submission_id = %s AND approval_status != 'declined' ORDER BY id ASC",
+            (sub_id,),
+        ).fetchall()
+        for sd in sub_docs:
+            _attach_submission_doc_to_item(
+                conn, sd[0], sd[1], sd[2], sd[3], sd[4], sd[5], sd[6],
+                agenda_id, item_id, sd[7],
+            )
+            conn.execute(
+                "UPDATE council_submission_documents "
+                "SET approval_status = 'approved', reviewed_by = %s, reviewed_username = %s, reviewed_at = now() "
+                "WHERE id = %s",
+                (user["id"], user["username"], sd[0]),
+            )
         conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (agenda_id,))
         conn.execute(
             "UPDATE council_submissions "
@@ -1687,6 +1908,32 @@ def decline_council_submission(
             (body.review_note.strip(), user["id"], user["username"], sub_id),
         )
     return {"status": "declined"}
+
+
+@router.delete("/council/submissions/{sub_id}")
+def delete_council_submission(sub_id: int, user: dict = Depends(get_council_or_staff_user)):
+    """Delete a pending council submission and its MinIO attachments."""
+    with pool.connection() as conn:
+        sub = conn.execute(
+            "SELECT submitted_by, status FROM council_submissions WHERE id = %s",
+            (sub_id,),
+        ).fetchone()
+        if not sub:
+            raise HTTPException(status_code=404, detail="Submission not found")
+        if user["role"] not in STAFF_ROLES and sub[0] != user["id"]:
+            raise HTTPException(status_code=403, detail="You may only delete your own submissions")
+        if sub[1] != "pending":
+            raise HTTPException(status_code=400, detail="Only pending submissions can be deleted")
+        keys = [
+            r[0]
+            for r in conn.execute(
+                "SELECT object_key FROM council_submission_documents WHERE submission_id = %s",
+                (sub_id,),
+            ).fetchall()
+        ]
+        conn.execute("DELETE FROM council_submissions WHERE id = %s", (sub_id,))
+    _remove_minio_objects(keys)
+    return {"status": "deleted"}
 
 
 @router.get("/council")

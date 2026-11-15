@@ -111,6 +111,16 @@ _EXPORT_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         True,
     ),
     (
+        "council_submission_documents",
+        [
+            "id", "submission_id", "title", "filename", "content_type", "size_bytes",
+            "sha256", "object_key", "uploaded_by", "uploaded_username", "approval_status",
+            "reviewed_by", "reviewed_username", "agenda_doc_id", "created_at", "reviewed_at",
+        ],
+        set(),
+        True,
+    ),
+    (
         "agenda_preferences",
         [
             "id", "include_item_cover_sheets", "include_page_numbers", "city_name",
@@ -350,6 +360,9 @@ def export_archive(user: dict = Depends(get_staff_user)):
 
             # 4. Binary files from MinIO (documents + logo)
             object_keys: list[str] = [d["object_key"] for d in table_data["agenda_documents"] if d.get("object_key")]
+            object_keys.extend(
+                sd["object_key"] for sd in table_data.get("council_submission_documents", []) if sd.get("object_key")
+            )
             for pref in table_data["agenda_preferences"]:
                 if pref.get("city_logo_key"):
                     object_keys.append(pref["city_logo_key"])

@@ -79,6 +79,20 @@ function submissionBadge(status) {
   return span;
 }
 
+async function uploadSubmissionFiles(subId, files) {
+  for (const f of files) {
+    const fd = new FormData();
+    fd.append('file', f);
+    const res = await fetch(`/api/agendas/council/submissions/${subId}/documents`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: fd,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Failed to upload ${f.name}`);
+  }
+}
+
 async function loadMySubmissions() {
   const tbody = document.getElementById('council-submissions-tbody');
   tbody.textContent = '';
@@ -110,14 +124,104 @@ async function loadMySubmissions() {
 
       const tdDetails = document.createElement('td');
       tdDetails.className = 'muted';
+      const detailText = document.createElement('div');
       if (s.status === 'accepted' && s.accepted_agenda_title) {
-        tdDetails.textContent = s.accepted_agenda_date
+        detailText.textContent = s.accepted_agenda_date
           ? `Added to ${s.accepted_agenda_title} (${s.accepted_agenda_date})`
           : `Added to ${s.accepted_agenda_title}`;
       } else if (s.status === 'declined') {
-        tdDetails.textContent = s.review_note || 'Declined by staff';
+        detailText.textContent = s.review_note || 'Declined by staff';
       } else {
-        tdDetails.textContent = 'Awaiting staff review';
+        detailText.textContent = 'Awaiting staff review';
+      }
+      tdDetails.appendChild(detailText);
+
+      const docs = Array.isArray(s.documents) ? s.documents : [];
+      if (docs.length) {
+        const listEl = document.createElement('div');
+        listEl.style.marginTop = '.35rem';
+        listEl.style.fontSize = '.82rem';
+        for (const d of docs) {
+          const itemEl = document.createElement('div');
+          const statusTxt = d.approval_status === 'pending'
+            ? 'Pending staff approval'
+            : (d.approval_status === 'declined' ? 'Declined' : 'Included');
+          itemEl.textContent = `• ${d.filename} (${statusTxt})`;
+          listEl.appendChild(itemEl);
+        }
+        tdDetails.appendChild(listEl);
+      }
+
+      if (s.status !== 'declined') {
+        const addWrap = document.createElement('div');
+        addWrap.style.marginTop = '.4rem';
+        const fileInp = document.createElement('input');
+        fileInp.type = 'file';
+        fileInp.hidden = true;
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'btn sm';
+        addBtn.textContent = '+ Add Attachment (or drop on row)';
+        addBtn.addEventListener('click', () => fileInp.click());
+
+        const handleRowFiles = async (files) => {
+          if (!files.length) return;
+          addBtn.disabled = true;
+          try {
+            await uploadSubmissionFiles(s.id, files);
+            showToast(
+              s.status === 'accepted'
+                ? `Uploaded ${files.length} attachment(s) (pending staff approval)`
+                : `Added ${files.length} attachment(s) to submission`,
+              'ok'
+            );
+            await loadMySubmissions();
+          } catch (err) {
+            showToast(err.message, 'error');
+            addBtn.disabled = false;
+          }
+        };
+
+        fileInp.addEventListener('change', () => handleRowFiles([...(fileInp.files || [])]));
+        tr.addEventListener('dragover', (e) => {
+          if (e.dataTransfer?.types?.includes('Files')) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            tr.classList.add('file-drag-over');
+          }
+        });
+        tr.addEventListener('dragleave', (e) => {
+          if (!tr.contains(e.relatedTarget)) tr.classList.remove('file-drag-over');
+        });
+        tr.addEventListener('drop', (e) => {
+          if (e.dataTransfer?.files?.length) {
+            e.preventDefault();
+            tr.classList.remove('file-drag-over');
+            handleRowFiles([...e.dataTransfer.files]);
+          }
+        });
+        addWrap.append(fileInp, addBtn);
+        if (s.status === 'pending') {
+          const delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'btn sm danger';
+          delBtn.textContent = 'Delete';
+          delBtn.style.marginLeft = '.4rem';
+          delBtn.addEventListener('click', async () => {
+            if (!confirm(`Delete pending submission "${s.title}"?`)) return;
+            delBtn.disabled = true;
+            try {
+              await api(`/api/agendas/council/submissions/${s.id}`, { method: 'DELETE' });
+              showToast(`Deleted "${s.title}"`, 'ok');
+              await loadMySubmissions();
+            } catch (err) {
+              showToast(err.message, 'error');
+              delBtn.disabled = false;
+            }
+          });
+          addWrap.appendChild(delBtn);
+        }
+        tdDetails.appendChild(addWrap);
       }
 
       tr.append(tdTitle, tdTarget, tdStatus, tdDetails);
@@ -193,6 +297,70 @@ async function loadFinalizedCouncilAgendas() {
   }
 }
 
+let queuedSubmissionFiles = [];
+
+function renderQueuedSubmissionFiles() {
+  const listEl = document.getElementById('cs-file-list');
+  if (!listEl) return;
+  listEl.textContent = '';
+  if (!queuedSubmissionFiles.length) return;
+  queuedSubmissionFiles.forEach((f, idx) => {
+    const chip = document.createElement('span');
+    chip.className = 'badge draft';
+    chip.style.marginRight = '.35rem';
+    chip.style.marginBottom = '.25rem';
+    chip.textContent = `${f.name} `;
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.textContent = '×';
+    rm.style.cssText = 'border:none; background:none; cursor:pointer; font-weight:700; padding:0 .15rem;';
+    rm.addEventListener('click', () => {
+      queuedSubmissionFiles.splice(idx, 1);
+      renderQueuedSubmissionFiles();
+    });
+    chip.appendChild(rm);
+    listEl.appendChild(chip);
+  });
+}
+
+const csDrop = document.getElementById('cs-drop-zone');
+const csFilesInp = document.getElementById('cs-files');
+if (csDrop && csFilesInp) {
+  csDrop.addEventListener('click', () => csFilesInp.click());
+  csDrop.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); csFilesInp.click(); }
+  });
+  csFilesInp.addEventListener('change', () => {
+    queuedSubmissionFiles.push(...(csFilesInp.files || []));
+    csFilesInp.value = '';
+    renderQueuedSubmissionFiles();
+  });
+  csDrop.addEventListener('dragover', (e) => {
+    if (e.dataTransfer?.types?.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      csDrop.classList.add('file-drag-over');
+    }
+  });
+  csDrop.addEventListener('dragleave', () => csDrop.classList.remove('file-drag-over'));
+  csDrop.addEventListener('drop', (e) => {
+    if (e.dataTransfer?.files?.length) {
+      e.preventDefault();
+      csDrop.classList.remove('file-drag-over');
+      queuedSubmissionFiles.push(...e.dataTransfer.files);
+      renderQueuedSubmissionFiles();
+    }
+  });
+}
+
+// Prevent accidental browser navigation when dropping files anywhere else in the window.
+window.addEventListener('dragover', (e) => {
+  if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();
+});
+window.addEventListener('drop', (e) => {
+  if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();
+});
+
 const submitForm = document.getElementById('council-submit-form');
 if (submitForm) {
   submitForm.addEventListener('submit', async (e) => {
@@ -208,7 +376,7 @@ if (submitForm) {
     const fiscEl = document.getElementById('cs-fiscal');
     const descEl = document.getElementById('cs-description');
     try {
-      await api('/api/agendas/council/submissions', {
+      const created = await api('/api/agendas/council/submissions', {
         method: 'POST',
         body: JSON.stringify({
           title: titleEl.value.trim(),
@@ -221,6 +389,11 @@ if (submitForm) {
           description: descEl.value.trim(),
         }),
       });
+      if (queuedSubmissionFiles.length) {
+        await uploadSubmissionFiles(created.id, queuedSubmissionFiles);
+      }
+      queuedSubmissionFiles = [];
+      renderQueuedSubmissionFiles();
       submitForm.reset();
       syncTargetDateVisibility();
       showToast('Submitted item (pending staff review)', 'ok');

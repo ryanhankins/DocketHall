@@ -673,6 +673,14 @@
               <label for="cs-description">Description / Background (optional)</label>
               <textarea id="cs-description" rows="2" placeholder="Details for staff and council…"></textarea>
             </div>
+            <div class="field" style="margin-top:.65rem;">
+              <label for="cs-files">Attachments (optional — PDF, DOCX, XLSX, PPTX, CSV, TXT, MD, PNG, JPG)</label>
+              <div id="cs-drop-zone" class="drop-zone" tabindex="0" role="button">
+                Drag &amp; drop files here, or click to select attachments
+              </div>
+              <input id="cs-files" type="file" multiple hidden>
+              <div id="cs-file-list" class="muted" style="margin-top:.35rem; font-size:.85rem;"></div>
+            </div>
             <div class="actions" style="margin-top:.75rem;">
               <button type="submit" class="btn primary">Submit Item</button>
               <span id="cs-form-error" class="error-msg" role="alert"></span>
