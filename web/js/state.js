@@ -181,3 +181,92 @@ export function makeInlineInput(el, currentVal, { required = false, multiline = 
   });
   inp.addEventListener('blur', commit);
 }
+
+/** Refresh global backup reminder banner and sync reminder day inputs. */
+export async function refreshBackupBanner() {
+  const banner = document.getElementById('backup-reminder-banner');
+  const textEl = document.getElementById('backup-reminder-text');
+  if (!banner || !textEl) return;
+  try {
+    const st = await api('/api/backup/status');
+    const adminDays = document.getElementById('admin-backup-days');
+    const staffDays = document.getElementById('staff-backup-days');
+    if (adminDays) adminDays.value = String(st.reminder_days ?? 0);
+    if (staffDays) staffDays.value = String(st.reminder_days ?? 0);
+    if (st.overdue) {
+      textEl.textContent = st.last_backup_at
+        ? `Backup reminder: Last backup was ${st.days_since_backup} day(s) ago (interval: every ${st.reminder_days} days).`
+        : `Backup reminder: No backup has been downloaded yet (interval: every ${st.reminder_days} days).`;
+      banner.hidden = false;
+    } else {
+      banner.hidden = true;
+    }
+  } catch {
+    banner.hidden = true;
+  }
+}
+
+/** Download full backup archive and immediately clear/refresh the reminder banner. */
+export async function downloadBackupArchive() {
+  const res = await fetch('/api/backup/export', { credentials: 'same-origin' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    showToast(err.detail || `Backup export failed (${res.status})`, 'error');
+    return;
+  }
+  const disp = res.headers.get('Content-Disposition') || '';
+  const m = disp.match(/filename="?([^"]+)"?/);
+  const filename = m ? m[1] : 'civicdesk_backup.zip';
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast('Backup archive downloaded', 'ok');
+  await refreshBackupBanner();
+}
+
+/** Upload and restore a CivicDesk .zip backup archive. */
+export function wireRestoreForm(formId, fileId, msgId, onRestored) {
+  const form = document.getElementById(formId);
+  if (!form) return;
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fileEl = document.getElementById(fileId);
+    const msgEl = document.getElementById(msgId);
+    const file = fileEl?.files?.[0];
+    if (!file) return;
+    if (!confirm('Restore from this archive? This will replace current agendas, items, documents, and settings.')) return;
+    msgEl.className = 'ok-msg';
+    msgEl.textContent = 'Restoring archive…';
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/backup/import', {
+        method: 'POST',
+        credentials: 'same-origin',
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Restore failed (${res.status})`);
+      form.reset();
+      const totalRows = Object.values(data.row_counts || {}).reduce((a, b) => a + b, 0);
+      msgEl.textContent = `Restored ${totalRows} database rows and ${data.restored_files || 0} files.`;
+      const brandLogo = document.getElementById('brand-logo');
+      if (brandLogo) {
+        brandLogo.hidden = false;
+        brandLogo.src = `/api/agendas/preferences/logo?t=${Date.now()}`;
+      }
+      showToast('Archive restored', 'ok');
+      await refreshBackupBanner();
+      if (onRestored) await onRestored();
+    } catch (err) {
+      msgEl.className = 'error-msg';
+      msgEl.textContent = err.message;
+    }
+  });
+}

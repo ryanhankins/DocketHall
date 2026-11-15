@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import { state, api, toTimeInputValue, syncSectionsDatalist } from './state.js';
+import { state, api, toTimeInputValue, syncSectionsDatalist, showToast, refreshBackupBanner, downloadBackupArchive, wireRestoreForm } from './state.js';
 
 let prefBodies = [];
 let prefSections = [];
@@ -249,6 +249,7 @@ export async function loadPreferences() {
   renderPrefCategories();
   syncSectionsDatalist(prefSections);
   renderPrefLogo(!!prefs.has_city_logo);
+  refreshBackupBanner();
   loadPrefTemplates();
 }
 
@@ -287,5 +288,23 @@ document.getElementById('prefs-form').addEventListener('submit', async (e) => {
   } catch (err) {
     msg.className = 'error-msg';
     msg.textContent = err.message;
+  }
+});
+
+document.getElementById('staff-export-btn')?.addEventListener('click', downloadBackupArchive);
+wireRestoreForm('staff-restore-form', 'staff-import-file', 'staff-backup-msg', loadPreferences);
+
+document.getElementById('staff-backup-reminder-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const days = Number(document.getElementById('staff-backup-days').value || 0);
+  try {
+    await api('/api/backup/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ reminder_days: days }),
+    });
+    await refreshBackupBanner();
+    showToast(days > 0 ? `Backup reminder set to every ${days} day(s)` : 'Backup reminder disabled', 'ok');
+  } catch (err) {
+    showToast(err.message, 'error');
   }
 });

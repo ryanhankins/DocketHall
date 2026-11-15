@@ -201,6 +201,8 @@ ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS bodies JSONB NOT NULL DE
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS sections JSONB NOT NULL DEFAULT '["Opening", "Consent", "Old Business", "New Business", "Public Hearing", "Closing"]'::jsonb;
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS categories JSONB NOT NULL DEFAULT '[{"name": "In-Progress Agendas", "warn_on_leave": false}, {"name": "Finalized Agendas", "warn_on_leave": true}]'::jsonb;
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS city_logo_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS backup_reminder_days INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS last_backup_at TIMESTAMPTZ;
 """
 
 _minio_client: Minio | None = None

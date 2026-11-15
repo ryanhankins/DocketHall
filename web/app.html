@@ -55,6 +55,11 @@
     </nav>
 
     <main>
+      <div id="backup-reminder-banner" class="banner" role="alert" style="background:#fef2f2; border-color:#fca5a5; color:#991b1b; margin-bottom:1rem;" hidden>
+        <span id="backup-reminder-text"></span>
+        <button type="button" id="backup-banner-download-btn" class="btn sm primary">Download Backup Now</button>
+      </div>
+
       <!-- ==================================================== MANAGE USERS -->
       <section id="section-users" hidden>
         <h1>Manage Users</h1>
@@ -106,6 +111,31 @@
             </thead>
             <tbody id="users-body"></tbody>
           </table>
+        </div>
+
+        <div class="card">
+          <h2>Backup &amp; Restore</h2>
+          <p class="muted" style="margin-top:0;">
+            Download a full archive (.zip) containing human-readable agendas, CSVs, database JSON, users, and uploaded attachments, or restore onto a fresh instance.
+          </p>
+          <div class="actions" style="margin-bottom:.75rem;">
+            <button type="button" id="admin-export-btn" class="btn primary">Download Full Archive (.zip)</button>
+          </div>
+          <form id="admin-backup-reminder-form" class="row" style="align-items:flex-end; margin-bottom:.85rem;">
+            <div class="field" style="max-width:260px;">
+              <label for="admin-backup-days">Backup Reminder Interval (days, 0 = off)</label>
+              <input id="admin-backup-days" type="number" min="0" max="3650" value="0" required>
+            </div>
+            <button type="submit" class="btn sm">Save Reminder</button>
+          </form>
+          <form id="admin-restore-form" class="row" style="align-items:flex-end;">
+            <div class="field" style="flex:1; min-width:220px;">
+              <label for="admin-import-file">Restore from Archive (.zip)</label>
+              <input id="admin-import-file" type="file" accept=".zip" required>
+            </div>
+            <button type="submit" class="btn danger">Restore Archive</button>
+          </form>
+          <div id="admin-backup-msg" class="ok-msg" role="status"></div>
         </div>
       </section>
 
@@ -460,6 +490,31 @@
             Reusable templates available when creating a new agenda. You can also save any agenda as a template from its detail page.
           </p>
           <div id="pref-templates-list" class="muted">Loading…</div>
+        </div>
+
+        <div class="card">
+          <h2>Data Export &amp; Restore</h2>
+          <p class="muted" style="margin-top:0;">
+            Download all agendas, items, todos/backlog, council submissions, preferences, templates, and uploaded attachments in a single human-readable &amp; reconstructible .zip archive, or restore from an archive.
+          </p>
+          <div class="actions" style="margin-bottom:.75rem;">
+            <button type="button" id="staff-export-btn" class="btn primary">Download Data Archive (.zip)</button>
+          </div>
+          <form id="staff-backup-reminder-form" class="row" style="align-items:flex-end; margin-bottom:.85rem;">
+            <div class="field" style="max-width:260px;">
+              <label for="staff-backup-days">Backup Reminder Interval (days, 0 = off)</label>
+              <input id="staff-backup-days" type="number" min="0" max="3650" value="0" required>
+            </div>
+            <button type="submit" class="btn sm">Save Reminder</button>
+          </form>
+          <form id="staff-restore-form" class="row" style="align-items:flex-end;">
+            <div class="field" style="flex:1; min-width:220px;">
+              <label for="staff-import-file">Restore from Archive (.zip)</label>
+              <input id="staff-import-file" type="file" accept=".zip" required>
+            </div>
+            <button type="submit" class="btn danger">Restore Archive</button>
+          </form>
+          <div id="staff-backup-msg" class="ok-msg" role="status"></div>
         </div>
       </section>
 
