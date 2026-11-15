@@ -1,0 +1,167 @@
+# Copyright 2026 Ryan Hankins
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+# CivicDesk — Docker Swarm stack
+#
+# Deploy with:   ./scripts/deploy.sh        (builds images, creates secrets, deploys)
+# Or manually:   docker stack deploy -c docker-stack.yml civicdesk
+#
+# Images are built locally (docker stack deploy does not build), so this works
+# as-is on a single-node swarm. For multi-node, push the images to a registry
+# and set CIVICDESK_REGISTRY, e.g. CIVICDESK_REGISTRY=registry.example.com/
+
+services:
+  # ---------------------------------------------------------------- web / proxy
+  web:
+    image: ${CIVICDESK_REGISTRY:-}civicdesk-web:${CIVICDESK_TAG:-latest}
+    ports:
+      - target: 80
+        published: 8080
+        protocol: tcp
+        mode: host        # host mode so Colima/Docker Desktop forwards it to the Mac
+    networks: [civicdesk]
+    deploy:
+      replicas: 1
+      restart_policy: { condition: any }
+      update_config: { order: stop-first, failure_action: rollback }   # host-mode port can't be shared
+
+  # ------------------------------------------------------------------------ api
+  api:
+    image: ${CIVICDESK_REGISTRY:-}civicdesk-api:${CIVICDESK_TAG:-latest}
+    environment:
+      # Postgres (password read from the secret file, never from env)
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: civicdesk
+      POSTGRES_USER: civicdesk
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      # Gemini
+      GEMINI_API_KEY_FILE: /run/secrets/gemini_api_key
+      GEMINI_MODEL: gemini-4-hydrogen
+      # Local record storage (PDFs written 0444 + SHA-256 sidecar)
+      LOCAL_RECORDS_DIR: /data/records
+      # Auth cookie security (set COOKIE_SECURE=true when serving over HTTPS)
+      COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      # MinIO (S3-compatible object storage)
+      MINIO_ENDPOINT: minio:9000
+      MINIO_SECURE: "false"
+      MINIO_BUCKET: records
+      MINIO_ACCESS_KEY_FILE: /run/secrets/minio_root_user
+      MINIO_SECRET_KEY_FILE: /run/secrets/minio_root_password
+    secrets:
+      - postgres_password
+      - gemini_api_key
+      - minio_root_user
+      - minio_root_password
+    volumes:
+      - records_data:/data/records
+    networks: [civicdesk]
+    deploy:
+      # Keep at 1 replica while records live on a local named volume.
+      replicas: 1
+      restart_policy: { condition: any, delay: 5s }
+      update_config: { order: stop-first, failure_action: rollback }
+
+  # ------------------------------------------------------------------- database
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: civicdesk
+      POSTGRES_USER: civicdesk
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    configs:
+      # Runs only on first start (empty data volume).
+      - source: db_init
+        target: /docker-entrypoint-initdb.d/init.sql
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [civicdesk]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U civicdesk -d civicdesk"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: 1
+      restart_policy: { condition: any }
+      placement:
+        constraints: [node.role == manager]   # pin to the node holding the volume
+
+  # ---------------------------------------------------------------------- minio
+  minio:
+    image: ${CIVICDESK_REGISTRY:-}civicdesk-minio:${CIVICDESK_TAG:-latest}   # built from ./minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER_FILE: /run/secrets/minio_root_user
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_root_password
+    secrets:
+      - minio_root_user
+      - minio_root_password
+    ports:
+      # Web console only. The S3 API (9000) stays internal to the overlay network.
+      - target: 9001
+        published: 9001
+        protocol: tcp
+        mode: host        # host mode so Colima/Docker Desktop forwards it to the Mac
+    volumes:
+      - minio_data:/data
+    networks: [civicdesk]
+    deploy:
+      replicas: 1
+      restart_policy: { condition: any }
+      placement:
+        constraints: [node.role == manager]
+
+  # One-shot job: creates the "records" bucket (with object lock / versioning).
+  minio-init:
+    image: ${CIVICDESK_REGISTRY:-}civicdesk-minio-init:${CIVICDESK_TAG:-latest}   # built from ./minio/init
+    environment:
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_BUCKET: records
+    secrets:
+      - minio_root_user
+      - minio_root_password
+    networks: [civicdesk]
+    deploy:
+      replicas: 1
+      restart_policy: { condition: on-failure, delay: 5s, max_attempts: 10 }
+
+networks:
+  civicdesk:
+    driver: overlay
+    attachable: true
+
+volumes:
+  records_data:
+  pgdata:
+  minio_data:
+
+configs:
+  db_init:
+    # Swarm configs are immutable: bump the suffix when init.sql changes.
+    name: civicdesk_db_init_v1
+    file: ./db/init.sql
+
+secrets:
+  postgres_password:
+    external: true
+  gemini_api_key:
+    external: true
+  minio_root_user:
+    external: true
+  minio_root_password:
+    external: true

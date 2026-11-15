@@ -1,0 +1,448 @@
+/*
+ * Copyright 2026 Ryan Hankins
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+import { state, api, showAgendaDetail, toTimeInputValue, categoryBadgeClass, syncSectionsDatalist, setAgendaStatus, showToast } from './state.js';
+import { openAgenda, renderAgendaDetail, setAgendaTab } from './agenda-detail.js';
+import { todayIso, updateBacklogNavBadge } from './backlog.js';
+
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('.multi-filter[open]').forEach((det) => {
+    if (!det.contains(e.target)) det.open = false;
+  });
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.multi-filter[open]').forEach((det) => { det.open = false; });
+  }
+});
+
+
+function renderAgendaTable(agendas, tbody, emptyMsg, categoryName) {
+  tbody.textContent = '';
+  if (!agendas.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 6; td.className = 'muted';
+    td.textContent = emptyMsg;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const a of agendas) {
+    const tr = document.createElement('tr');
+
+    const tdTitle = document.createElement('td');
+    const titleBtn = document.createElement('button');
+    titleBtn.type = 'button';
+    titleBtn.className = 'link-btn';
+    titleBtn.textContent = a.title;
+    titleBtn.addEventListener('click', () => openAgenda(a.id));
+    tdTitle.appendChild(titleBtn);
+
+    const tdBody = document.createElement('td');
+    tdBody.className = 'muted';
+    tdBody.textContent = a.body || '—';
+
+    const tdDate = document.createElement('td');
+    tdDate.className = 'muted';
+    tdDate.textContent = a.meeting_date || '—';
+
+    const tdStatus = document.createElement('td');
+    const catLabel = a.status || categoryName || '';
+    if (catLabel) {
+      const badge = document.createElement('span');
+      badge.className = categoryBadgeClass(catLabel);
+      badge.textContent = catLabel;
+      tdStatus.appendChild(badge);
+    } else {
+      tdStatus.className = 'muted';
+      tdStatus.textContent = '—';
+    }
+
+    const tdCounts = document.createElement('td');
+    tdCounts.className = 'muted';
+    tdCounts.textContent = `${a.item_count} items, ${a.doc_count} docs`;
+
+    const tdActions = document.createElement('td');
+    const wrap = document.createElement('div');
+    wrap.className = 'actions';
+
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button'; openBtn.className = 'btn sm primary'; openBtn.textContent = 'Open';
+    openBtn.addEventListener('click', () => openAgenda(a.id));
+
+    const pdfLink = document.createElement('a');
+    pdfLink.className = 'btn sm';
+    pdfLink.textContent = 'Agenda PDF';
+    pdfLink.href = `/api/agendas/${a.id}/packet.pdf`;
+    pdfLink.target = '_blank';
+    pdfLink.rel = 'noopener';
+
+    const sumLink = document.createElement('a');
+    sumLink.className = 'btn sm';
+    sumLink.textContent = 'Agenda-Only PDF';
+    sumLink.href = `/api/agendas/${a.id}/packet.pdf?summary=1`;
+    sumLink.target = '_blank';
+    sumLink.rel = 'noopener';
+
+    const cloneBtn = document.createElement('button');
+    cloneBtn.type = 'button'; cloneBtn.className = 'btn sm';
+    cloneBtn.textContent = 'Clone';
+    cloneBtn.addEventListener('click', async () => {
+      cloneBtn.disabled = true;
+      try {
+        const cloned = await api(`/api/agendas/${a.id}/clone`, { method: 'POST' });
+        openAgenda(cloned.id);
+      } catch (err) {
+        showToast(err.message, 'error');
+        cloneBtn.disabled = false;
+      }
+    });
+
+    const moveSel = document.createElement('select');
+    moveSel.className = 'btn sm';
+    moveSel.style.width = 'auto';
+    moveSel.setAttribute('aria-label', `Category for ${a.title}`);
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = '(No Category)';
+    noneOpt.selected = !a.status;
+    moveSel.appendChild(noneOpt);
+    const catNames = state.configuredCategories.map(c => c.name);
+    if (a.status && !catNames.includes(a.status)) catNames.unshift(a.status);
+    for (const cname of catNames) {
+      const opt = document.createElement('option');
+      opt.value = cname;
+      opt.textContent = cname;
+      opt.selected = cname === a.status;
+      moveSel.appendChild(opt);
+    }
+    moveSel.addEventListener('change', async () => {
+      try {
+        const updated = await setAgendaStatus(a.id, a.status, moveSel.value, a.title);
+        if (updated) loadAgendas();
+        else moveSel.value = a.status;
+      } catch (err) {
+        showToast(err.message, 'error');
+        moveSel.value = a.status;
+      }
+    });
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button'; delBtn.className = 'btn sm danger'; delBtn.textContent = 'Delete';
+    delBtn.addEventListener('click', async () => {
+      if (!confirm(`Delete agenda "${a.title}"?`)) return;
+      delBtn.disabled = true;
+      try {
+        await api(`/api/agendas/${a.id}`, { method: 'DELETE' });
+        showToast(`Deleted "${a.title}"`, 'ok');
+        loadAgendas();
+      } catch (err) {
+        showToast(err.message, 'error');
+        delBtn.disabled = false;
+      }
+    });
+
+    wrap.append(openBtn, pdfLink, sumLink, cloneBtn, moveSel, delBtn);
+    tdActions.appendChild(wrap);
+    tr.append(tdTitle, tdBody, tdDate, tdStatus, tdCounts, tdActions);
+    tbody.appendChild(tr);
+  }
+}
+
+let agendaTemplates = [];
+let lastLoadedAgendas = [];
+
+function getMultiFilterValues(id) {
+  const el = document.getElementById(id);
+  if (!el) return [];
+  return [...el.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value);
+}
+
+function updateMultiFilterSummary(id, allLabel, pluralNoun) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const checked = [...el.querySelectorAll('input[type="checkbox"]:checked')];
+  const sum = el.querySelector('summary');
+  if (checked.length === 0) sum.textContent = allLabel;
+  else if (checked.length === 1) sum.textContent = checked[0].dataset.label || checked[0].value;
+  else sum.textContent = `${checked.length} ${pluralNoun}`;
+}
+
+function populateMultiFilter(id, items, allLabel, pluralNoun, initialValues = null) {
+  const el = document.getElementById(id);
+  const prev = initialValues ? new Set(initialValues) : new Set(getMultiFilterValues(id));
+  const menu = el.querySelector('.multi-filter-menu');
+  menu.textContent = '';
+  for (const item of items) {
+    const val = typeof item === 'string' ? item : item.value;
+    const lbl = typeof item === 'string' ? item : item.label;
+    const labelEl = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = val;
+    cb.dataset.label = lbl;
+    cb.checked = prev.has(val);
+    cb.addEventListener('change', () => {
+      updateMultiFilterSummary(id, allLabel, pluralNoun);
+      saveAgendaFilters();
+      renderAgendaCategories();
+    });
+    const span = document.createElement('span');
+    span.textContent = lbl;
+    labelEl.append(cb, span);
+    menu.appendChild(labelEl);
+  }
+  updateMultiFilterSummary(id, allLabel, pluralNoun);
+}
+
+let agendaFiltersRestored = false;
+function agendaFiltersKey() {
+  return `civicdesk_agenda_filters_${state.me?.id || state.me?.username || 'anon'}`;
+}
+
+function saveAgendaFilters() {
+  try {
+    localStorage.setItem(agendaFiltersKey(), JSON.stringify({
+      search: document.getElementById('filter-agenda-search')?.value || '',
+      bodies: getMultiFilterValues('filter-agenda-body'),
+      categories: getMultiFilterValues('filter-agenda-category'),
+      dateFrom: document.getElementById('filter-agenda-date-from')?.value || '',
+      dateTo: document.getElementById('filter-agenda-date-to')?.value || '',
+    }));
+  } catch {}
+}
+
+function loadSavedAgendaFilters() {
+  try {
+    const raw = localStorage.getItem(agendaFiltersKey());
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+document.addEventListener('click', (e) => {
+  for (const id of ['filter-agenda-body', 'filter-agenda-category']) {
+    const det = document.getElementById(id);
+    if (det && det.open && !det.contains(e.target)) det.open = false;
+  }
+});
+
+function renderAgendaCategories() {
+  const searchQ = (document.getElementById('filter-agenda-search')?.value || '').trim().toLowerCase();
+  const bodyVals = new Set(getMultiFilterValues('filter-agenda-body'));
+  const catVals = new Set(getMultiFilterValues('filter-agenda-category'));
+  const dateFrom = document.getElementById('filter-agenda-date-from')?.value || '';
+  const dateTo = document.getElementById('filter-agenda-date-to')?.value || '';
+  const hasFilters = !!(searchQ || bodyVals.size || catVals.size || dateFrom || dateTo);
+
+  const configuredNames = new Set(state.configuredCategories.map(c => c.name));
+  const filtered = lastLoadedAgendas.filter((a) => {
+    if (searchQ && !(a.title || '').toLowerCase().includes(searchQ)) return false;
+    if (bodyVals.size && !bodyVals.has(a.body || '')) return false;
+    if (dateFrom && (!a.meeting_date || a.meeting_date < dateFrom)) return false;
+    if (dateTo && (!a.meeting_date || a.meeting_date > dateTo)) return false;
+    if (catVals.size) {
+      const isOther = !configuredNames.has(a.status);
+      const matchCat = catVals.has(a.status) || (isOther && catVals.has('__other__'));
+      if (!matchCat) return false;
+    }
+    return true;
+  });
+
+  const catContainer = document.getElementById('agenda-categories-container');
+  catContainer.textContent = '';
+  const card = document.createElement('div');
+  card.className = 'card';
+  const h2 = document.createElement('h2');
+  if (catVals.size === 1) {
+    const only = [...catVals][0];
+    h2.textContent = only === '__other__' ? 'Other Agendas' : only;
+  } else {
+    h2.textContent = 'Agendas';
+  }
+  const table = document.createElement('table');
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  for (const col of ['Title', 'Body', 'Meeting Date', 'Category', 'Items / Docs', 'Actions']) {
+    const th = document.createElement('th');
+    th.textContent = col;
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+  const tbody = document.createElement('tbody');
+  tbody.id = 'agendas-body';
+  table.append(thead, tbody);
+  card.append(h2, table);
+  catContainer.appendChild(card);
+
+  const emptyMsg = hasFilters
+    ? 'No agendas match the current filters.'
+    : 'No agendas yet. Create one above.';
+  renderAgendaTable(filtered, tbody, emptyMsg, '');
+}
+
+for (const fid of [
+  'filter-agenda-search', 'filter-agenda-date-from', 'filter-agenda-date-to',
+]) {
+  const el = document.getElementById(fid);
+  el.addEventListener(el.tagName === 'INPUT' && el.type === 'search' ? 'input' : 'change', () => {
+    saveAgendaFilters();
+    renderAgendaCategories();
+  });
+}
+document.getElementById('filter-agenda-clear').addEventListener('click', () => {
+  document.getElementById('filter-agenda-search').value = '';
+  document.getElementById('filter-agenda-date-from').value = '';
+  document.getElementById('filter-agenda-date-to').value = '';
+  for (const cb of document.querySelectorAll('#filter-agenda-body input[type="checkbox"], #filter-agenda-category input[type="checkbox"]')) {
+    cb.checked = false;
+  }
+  updateMultiFilterSummary('filter-agenda-body', 'All Bodies', 'Bodies');
+  updateMultiFilterSummary('filter-agenda-category', 'All Categories', 'Categories');
+  saveAgendaFilters();
+  renderAgendaCategories();
+});
+
+document.getElementById('agendas-open-backlog-btn')?.addEventListener('click', () => {
+  document.querySelector('#menu button[data-section="backlog"]')?.click();
+});
+
+export async function loadAgendas() {
+  const [agendas, prefs, templates, backlog] = await Promise.all([
+    api('/api/agendas'),
+    api('/api/agendas/preferences'),
+    api('/api/agendas/templates'),
+    api('/api/agendas/backlog'),
+  ]);
+  const backlogList = Array.isArray(backlog) ? backlog : [];
+  updateBacklogNavBadge(backlogList);
+  const today = todayIso();
+  const dueItems = backlogList.filter(it => it.target_date && it.target_date <= today);
+  const alertEl = document.getElementById('agendas-backlog-alert');
+  const alertText = document.getElementById('agendas-backlog-alert-text');
+  if (alertEl && alertText) {
+    if (dueItems.length) {
+      alertText.textContent = `${dueItems.length} backlog item(s) have reached their target date and are ready to assign.`;
+      alertEl.classList.add('show');
+    } else {
+      alertEl.classList.remove('show');
+    }
+  }
+  agendaTemplates = Array.isArray(templates) ? templates : [];
+  const tplSel = document.getElementById('agenda-template');
+  const prevTpl = tplSel.value;
+  tplSel.textContent = '';
+  const blankOpt = document.createElement('option');
+  blankOpt.value = ''; blankOpt.textContent = '(Blank Agenda)';
+  tplSel.appendChild(blankOpt);
+  for (const t of agendaTemplates) {
+    const opt = document.createElement('option');
+    opt.value = String(t.id);
+    opt.textContent = `${t.name} (${(t.items || []).length} items)`;
+    tplSel.appendChild(opt);
+  }
+  if (prevTpl && [...tplSel.options].some(o => o.value === prevTpl)) {
+    tplSel.value = prevTpl;
+  }
+
+  state.configuredBodies = Array.isArray(prefs.bodies) ? [...prefs.bodies] : [];
+  state.configuredCategories = Array.isArray(prefs.categories) && prefs.categories.length
+    ? prefs.categories.map(c => ({ name: c.name, warn_on_leave: !!c.warn_on_leave }))
+    : [
+        { name: 'In-Progress Agendas', warn_on_leave: false },
+        { name: 'Finalized Agendas', warn_on_leave: true },
+      ];
+  syncSectionsDatalist(prefs.sections);
+  state.defaultMeetingTime = prefs.meeting_time || '';
+  const timeEl = document.getElementById('agenda-time');
+  if (!timeEl.value && state.defaultMeetingTime) {
+    timeEl.value = toTimeInputValue(state.defaultMeetingTime);
+  }
+  const bodySel = document.getElementById('agenda-body');
+  const prevBody = bodySel.value;
+  bodySel.textContent = '';
+  for (const b of state.configuredBodies) {
+    const opt = document.createElement('option');
+    opt.value = b;
+    opt.textContent = b;
+    bodySel.appendChild(opt);
+  }
+  if (prevBody && [...bodySel.options].some(o => o.value === prevBody)) {
+    bodySel.value = prevBody;
+  }
+
+  lastLoadedAgendas = Array.isArray(agendas) ? agendas : [];
+  state.agendasList = lastLoadedAgendas;
+
+  let initBodies = null;
+  let initCats = null;
+  if (!agendaFiltersRestored) {
+    agendaFiltersRestored = true;
+    const saved = loadSavedAgendaFilters();
+    if (saved && typeof saved === 'object') {
+      if (typeof saved.search === 'string') document.getElementById('filter-agenda-search').value = saved.search;
+      if (typeof saved.dateFrom === 'string') document.getElementById('filter-agenda-date-from').value = saved.dateFrom;
+      if (typeof saved.dateTo === 'string') document.getElementById('filter-agenda-date-to').value = saved.dateTo;
+      if (Array.isArray(saved.bodies)) initBodies = saved.bodies;
+      if (Array.isArray(saved.categories)) initCats = saved.categories;
+    }
+  }
+
+  const bodyOpts = [...new Set([...state.configuredBodies, ...lastLoadedAgendas.map(a => a.body).filter(Boolean)])];
+  populateMultiFilter('filter-agenda-body', bodyOpts, 'All Bodies', 'Bodies', initBodies);
+
+  const catOpts = state.configuredCategories.map(c => ({ value: c.name, label: c.name }));
+  const cfgNames = new Set(state.configuredCategories.map(c => c.name));
+  if (lastLoadedAgendas.some(a => !cfgNames.has(a.status))) {
+    catOpts.push({ value: '__other__', label: 'Other Agendas' });
+  }
+  populateMultiFilter('filter-agenda-category', catOpts, 'All Categories', 'Categories', initCats);
+
+  renderAgendaCategories();
+}
+
+document.getElementById('create-agenda-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('agenda-form-error');
+  errEl.textContent = '';
+  const titleEl = document.getElementById('agenda-title');
+  const bodyEl = document.getElementById('agenda-body');
+  const dateEl = document.getElementById('agenda-date');
+  const timeEl = document.getElementById('agenda-time');
+  const tplEl = document.getElementById('agenda-template');
+  try {
+    const payload = {
+      title: titleEl.value.trim(),
+      body: bodyEl.value.trim(),
+      meeting_date: dateEl.value,
+      meeting_time: timeEl.value,
+    };
+    if (tplEl.value) payload.template_id = Number(tplEl.value);
+    const created = await api('/api/agendas', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    titleEl.value = ''; dateEl.value = ''; tplEl.value = '';
+    timeEl.value = toTimeInputValue(state.defaultMeetingTime);
+    state.agendasList = [created, ...state.agendasList.filter(a => a.id !== created.id)];
+    renderAgendaDetail(created);
+    showAgendaDetail();
+    setAgendaTab('edit');
+  } catch (err) { errEl.textContent = err.message; }
+});

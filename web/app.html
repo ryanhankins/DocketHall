@@ -1,0 +1,657 @@
+<!doctype html>
+<!--
+  Copyright 2026 Ryan Hankins
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as
+  published by the Free Software Foundation, either version 3 of the
+  License, or (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CivicDesk</title>
+  <link id="app-favicon" rel="icon" href="/api/agendas/preferences/logo">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header>
+    <div class="brand" style="display:flex; align-items:center; gap:.55rem;">
+      <img id="brand-logo" alt="City Logo" src="/api/agendas/preferences/logo" style="height:64px; width:auto; border-radius:4px; object-fit:contain;" onerror="this.hidden=true;">
+      <span>CivicDesk</span>
+    </div>
+    <div class="user-bar">
+      <span id="whoami"></span>
+      <button id="open-pw-modal" class="btn sm">Change Password</button>
+      <button id="logout" class="btn sm">Sign out</button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <nav id="menu" hidden>
+      <div id="menu-admin" hidden>
+        <h2>Admin</h2>
+        <button type="button" data-section="users">Manage Users</button>
+      </div>
+      <div id="menu-staff" hidden>
+        <h2>Staff</h2>
+        <button type="button" data-section="agendas">Manage Agendas</button>
+        <button type="button" data-section="backlog">Todos &amp; Backlog <span id="backlog-nav-badge" class="badge draft" hidden></span></button>
+        <button type="button" data-section="preferences">Agenda Preferences</button>
+      </div>
+    </nav>
+
+    <main>
+      <!-- ==================================================== MANAGE USERS -->
+      <section id="section-users" hidden>
+        <h1>Manage Users</h1>
+
+        <div id="pw-banner" class="banner" role="status">
+          <div>
+            <strong>Temporary password for <span id="pw-user"></span>:</strong>
+            <code id="pw-value"></code>
+            <span class="muted">(shown once)</span>
+          </div>
+          <div class="actions">
+            <button type="button" id="pw-copy" class="btn sm">Copy</button>
+            <button type="button" id="pw-dismiss" class="btn sm">Dismiss</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Add User</h2>
+          <form id="create-user-form" class="row">
+            <div class="field">
+              <label for="new-username">Username</label>
+              <input id="new-username" required minlength="2" maxlength="64"
+                     pattern="[A-Za-z0-9._-]+" placeholder="e.g. jsmith">
+            </div>
+            <div class="field">
+              <label for="new-role">User Type</label>
+              <select id="new-role">
+                <option value="council_member">Council Member</option>
+                <option value="staff_member">Staff Member</option>
+                <option value="read_only">Read-Only</option>
+              </select>
+            </div>
+            <button type="submit" class="btn primary">Create User</button>
+          </form>
+          <div id="form-error" class="error-msg" role="alert"></div>
+        </div>
+
+        <div class="card">
+          <h2>Users</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Last Login</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="users-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ================================================== MANAGE AGENDAS -->
+      <section id="section-agendas" hidden>
+        <!-- List view -->
+        <div id="agendas-list-view">
+          <h1>Manage Agendas</h1>
+
+          <div id="agendas-backlog-alert" class="banner" style="background:#fffbeb; border-color:#fcd34d; color:#92400e;">
+            <span id="agendas-backlog-alert-text"></span>
+            <button type="button" id="agendas-open-backlog-btn" class="btn sm">Open Item Backlog</button>
+          </div>
+
+          <div class="card">
+            <h2>Create New Agenda</h2>
+            <form id="create-agenda-form" class="row">
+              <div class="field" style="flex:1; min-width:200px;">
+                <label for="agenda-title">Agenda Title</label>
+                <input id="agenda-title" required placeholder="e.g. Regular Meeting">
+              </div>
+              <div class="field" style="flex:1; min-width:170px;">
+                <label for="agenda-body">Body</label>
+                <select id="agenda-body" required></select>
+              </div>
+              <div class="field">
+                <label for="agenda-date">Meeting Date</label>
+                <input id="agenda-date" type="date" required>
+              </div>
+              <div class="field">
+                <label for="agenda-time">Meeting Time</label>
+                <input id="agenda-time" type="time">
+              </div>
+              <div class="field" style="min-width:190px;">
+                <label for="agenda-template">Template (optional)</label>
+                <select id="agenda-template"><option value="">(Blank Agenda)</option></select>
+              </div>
+              <button type="submit" class="btn primary">Create Agenda</button>
+            </form>
+            <div id="agenda-form-error" class="error-msg" role="alert"></div>
+          </div>
+
+          <div class="card" id="agenda-filters-card" style="padding:.85rem 1.15rem;">
+            <div class="row" style="align-items:flex-end;">
+              <div class="field" style="flex:1.3; min-width:170px;">
+                <label for="filter-agenda-search">Search Title</label>
+                <input id="filter-agenda-search" type="search" placeholder="Filter by title…">
+              </div>
+              <div class="field" style="min-width:170px;">
+                <label>Body</label>
+                <details id="filter-agenda-body" class="multi-filter">
+                  <summary>All Bodies</summary>
+                  <div class="multi-filter-menu"></div>
+                </details>
+              </div>
+              <div class="field" style="min-width:185px;">
+                <label>Category</label>
+                <details id="filter-agenda-category" class="multi-filter">
+                  <summary>All Categories</summary>
+                  <div class="multi-filter-menu"></div>
+                </details>
+              </div>
+              <div class="field" style="min-width:140px;">
+                <label for="filter-agenda-date-from">Date From</label>
+                <input id="filter-agenda-date-from" type="date">
+              </div>
+              <div class="field" style="min-width:140px;">
+                <label for="filter-agenda-date-to">Date To</label>
+                <input id="filter-agenda-date-to" type="date">
+              </div>
+              <button type="button" id="filter-agenda-clear" class="btn sm">Clear Filters</button>
+            </div>
+          </div>
+
+          <div id="agenda-categories-container"></div>
+        </div>
+
+        <!-- Detail / Editor & Contents view -->
+        <div id="agenda-detail-view" hidden>
+          <div class="between" style="margin-bottom:1rem;">
+            <div>
+              <button type="button" id="back-to-agendas" class="btn sm">&larr; All Agendas</button>
+              <div style="display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin-top:.5rem;">
+                <h1 id="detail-title" style="margin:0;"></h1>
+                <span id="detail-status-badge" class="badge draft"></span>
+              </div>
+              <div id="detail-activity-log" class="muted" style="font-size:.84rem; margin-top:.35rem;"></div>
+            </div>
+            <div class="actions">
+              <select id="detail-status-select" class="btn" style="width:auto;" aria-label="Agenda Category"></select>
+              <button type="button" id="detail-clone-btn" class="btn">Clone</button>
+              <button type="button" id="detail-save-tpl-btn" class="btn">Save as Template</button>
+              <a id="view-summary-pdf" class="btn" target="_blank">Agenda-Only PDF</a>
+              <a id="view-packet-pdf" class="btn primary" target="_blank">Agenda PDF</a>
+              <a id="dl-packet-pdf" class="btn">Download PDF</a>
+            </div>
+          </div>
+
+          <form id="edit-agenda-meta-form" class="card row" style="padding:.85rem 1.15rem; margin-bottom:1rem;">
+            <div class="field" style="min-width:190px;">
+              <label for="detail-body-select">Body</label>
+              <select id="detail-body-select" required></select>
+            </div>
+            <div class="field">
+              <label for="detail-date-input">Meeting Date</label>
+              <input id="detail-date-input" type="date" required>
+            </div>
+            <div class="field">
+              <label for="detail-time-input">Meeting Time</label>
+              <input id="detail-time-input" type="time">
+            </div>
+            <button type="submit" class="btn sm primary">Save Details</button>
+            <span id="detail-save-msg" class="ok-msg" style="margin:0;"></span>
+          </form>
+
+          <div id="agenda-backlog-popup" class="card" style="background:#fffbeb; border-color:#fcd34d; margin-bottom:1rem;" hidden>
+            <div class="between" style="margin-bottom:.6rem;">
+              <strong id="agenda-backlog-popup-title" style="color:#92400e;">Todos &amp; Backlog Ready for This Agenda</strong>
+              <button type="button" id="agenda-backlog-popup-dismiss" class="btn sm">Dismiss</button>
+            </div>
+            <div id="agenda-backlog-popup-list" style="display:flex; flex-direction:column; gap:.45rem;"></div>
+          </div>
+
+          <div class="tabs">
+            <button type="button" id="tab-edit" class="btn sm active">Edit Items &amp; Documents</button>
+            <button type="button" id="tab-contents" class="btn sm">Contents Page &amp; Order</button>
+            <button type="button" id="tab-minutes" class="btn sm">Record Minutes</button>
+          </div>
+
+          <div id="agenda-edit-pane">
+            <div class="card">
+              <div class="between" style="margin-bottom:.75rem;">
+                <h2 style="margin:0;">Add Agenda Item</h2>
+                <button type="button" id="open-import-agenda-btn" class="btn sm">Import from Another Agenda…</button>
+              </div>
+              <form id="add-item-form">
+                <div class="row">
+                  <div class="field" style="min-width:160px;">
+                    <label for="item-section">Section (optional)</label>
+                    <input id="item-section" list="agenda-sections-datalist" placeholder="e.g. Consent">
+                    <datalist id="agenda-sections-datalist"></datalist>
+                  </div>
+                  <div class="field" style="flex:1; min-width:200px;">
+                    <label for="item-title">Item Title</label>
+                    <input id="item-title" required placeholder="e.g. Approval of Minutes">
+                  </div>
+                  <div class="field" style="flex:1; min-width:200px;">
+                    <label for="item-desc">Description (optional)</label>
+                    <input id="item-desc" placeholder="Brief summary or notes">
+                  </div>
+                  <button type="submit" class="btn primary">Add Item</button>
+                </div>
+                <div class="row" style="margin-top:.55rem;">
+                  <div class="field" style="min-width:160px;">
+                    <label for="item-presenter">Presenter (optional)</label>
+                    <input id="item-presenter" placeholder="e.g. City Engineer">
+                  </div>
+                  <div class="field" style="flex:1; min-width:200px;">
+                    <label for="item-motion">Recommended Motion (optional)</label>
+                    <input id="item-motion" placeholder="e.g. Move to approve Resolution 2026-14">
+                  </div>
+                  <div class="field" style="min-width:160px;">
+                    <label for="item-fiscal">Fiscal Impact (optional)</label>
+                    <input id="item-fiscal" placeholder="e.g. $25,000 General Fund">
+                  </div>
+                  <div class="field" style="min-width:130px;">
+                    <label for="item-revision">Badge</label>
+                    <select id="item-revision">
+                      <option value="">None</option>
+                      <option value="revised">Revised</option>
+                      <option value="addendum">Addendum</option>
+                    </select>
+                  </div>
+                </div>
+              </form>
+              <div id="item-form-error" class="error-msg" role="alert"></div>
+            </div>
+
+            <div class="actions" style="margin-bottom:.65rem; justify-content:flex-end;">
+              <button type="button" id="collapse-all-btn" class="btn sm">Collapse All</button>
+              <button type="button" id="expand-all-btn" class="btn sm">Expand All</button>
+            </div>
+            <div id="items-container"></div>
+          </div>
+
+          <div id="agenda-contents-pane" hidden>
+            <div class="card">
+              <div id="contents-header" style="margin-bottom:1rem;"></div>
+              <h2>Table of Contents</h2>
+              <ol id="toc-list" class="toc-list"></ol>
+            </div>
+            <div class="card">
+              <h2>Agenda Items in Order</h2>
+              <div id="ordered-items"></div>
+            </div>
+          </div>
+
+          <div id="agenda-minutes-pane" hidden>
+            <div class="card">
+              <div class="between" style="margin-bottom:.85rem;">
+                <h2 style="margin:0;">Meeting Attendance &amp; Notes</h2>
+                <div class="actions">
+                  <a id="view-minutes-pdf" class="btn sm primary" target="_blank">View Minutes PDF</a>
+                  <a id="dl-minutes-pdf" class="btn sm">Download Minutes PDF</a>
+                </div>
+              </div>
+              <form id="minutes-meta-form">
+                <div class="field" style="margin-bottom:.75rem;">
+                  <label for="minutes-attendance">Attendance / Roll Call</label>
+                  <textarea id="minutes-attendance" rows="2" placeholder="Present: Mayor, Councilmembers... Absent: ..."></textarea>
+                </div>
+                <div class="field" style="margin-bottom:.75rem;">
+                  <label for="minutes-notes">General Meeting Notes (Call to order, adjournment time, etc.)</label>
+                  <textarea id="minutes-notes" rows="2" placeholder="Called to order at 6:30 PM; adjourned at 8:15 PM."></textarea>
+                </div>
+                <div class="actions">
+                  <button type="submit" class="btn sm primary">Save Attendance &amp; Notes</button>
+                  <span id="minutes-save-msg" class="ok-msg" style="margin:0;"></span>
+                </div>
+              </form>
+            </div>
+            <datalist id="minutes-action-datalist">
+              <option value="Approved"></option>
+              <option value="Approved as Amended"></option>
+              <option value="Denied"></option>
+              <option value="Tabled"></option>
+              <option value="Referred"></option>
+              <option value="No Action"></option>
+              <option value="Informational"></option>
+            </datalist>
+            <div id="minutes-items-container"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="section-preferences" hidden>
+        <h1>Agenda Preferences</h1>
+        <div class="card">
+          <p class="muted" style="margin-top:0;">
+            These settings apply to all agendas when generating a PDF packet.
+          </p>
+          <form id="prefs-form">
+            <label style="display:flex; align-items:center; gap:.55rem; margin-bottom:.75rem; cursor:pointer;">
+              <input id="pref-cover-sheets" type="checkbox" style="width:auto;">
+              <span>Include a cover sheet before each agenda item (with the item title and TOC page number pointing to the cover sheet)</span>
+            </label>
+            <label style="display:flex; align-items:center; gap:.55rem; margin-bottom:1.25rem; cursor:pointer;">
+              <input id="pref-page-numbers" type="checkbox" style="width:auto;">
+              <span>Add agenda page numbers to each page (e.g. Page 1 of 18)</span>
+            </label>
+
+            <h2 style="margin:1rem 0 .75rem; font-size:1rem;">Cover Sheet Details</h2>
+            <div class="field" style="margin-bottom:.9rem;">
+              <label for="pref-logo-file">City Logo (prints on first page)</label>
+              <div style="display:flex; align-items:center; gap:.75rem; flex-wrap:wrap;">
+                <img id="pref-logo-preview" alt="City Logo" hidden style="max-height:72px; max-width:220px; border:1px solid #cbd2d9; border-radius:4px; padding:4px; background:#fff;">
+                <input id="pref-logo-file" type="file" accept="image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp" style="width:auto;">
+                <button type="button" id="pref-logo-remove" class="btn sm danger" hidden>Remove Logo</button>
+              </div>
+              <div id="pref-logo-drop" class="drop-zone" style="margin-top:.5rem;">Drag &amp; drop a city logo image (PNG, JPG, GIF, WEBP) here</div>
+            </div>
+            <div class="row" style="margin-bottom:.75rem;">
+              <div class="field" style="flex:1; min-width:200px;">
+                <label for="pref-city-name">City Name</label>
+                <input id="pref-city-name" placeholder="e.g. City of Northfield">
+              </div>
+              <div class="field" style="flex:1; min-width:220px;">
+                <label for="pref-meeting-location">Meeting Location</label>
+                <input id="pref-meeting-location" placeholder="e.g. City Hall Council Chambers">
+              </div>
+              <div class="field" style="min-width:150px;">
+                <label for="pref-meeting-time">Meeting Time</label>
+                <input id="pref-meeting-time" type="time">
+              </div>
+            </div>
+            <div class="field" style="margin-bottom:1.1rem;">
+              <label for="pref-other-notes">Other Notes &amp; Special Information (cover sheet)</label>
+              <textarea id="pref-other-notes" rows="3" placeholder="Special announcements, remote participation link, or public hearing notice..."></textarea>
+            </div>
+
+            <h2 style="margin:1rem 0 .4rem; font-size:1rem;">Below-Agenda Disclosures</h2>
+            <div class="field" style="margin-bottom:1.1rem;">
+              <label for="pref-footer-disclosures">Additional Notes / Required Disclosures (appears below the agenda / Table of Contents)</label>
+              <textarea id="pref-footer-disclosures" rows="4" placeholder="Statutory notices, ADA accommodation statement, or disclosures not part of the meeting itself..."></textarea>
+            </div>
+
+            <h2 style="margin:1rem 0 .4rem; font-size:1rem;">Governing Bodies</h2>
+            <p class="muted" style="margin:0 0 .6rem;">
+              Bodies available in the dropdown when creating a new agenda.
+            </p>
+            <div id="pref-bodies-list" class="actions" style="margin-bottom:.65rem;"></div>
+            <div class="row" style="margin-bottom:1.1rem;">
+              <div class="field" style="min-width:220px;">
+                <input id="pref-new-body" placeholder="Add body (e.g. Budget Committee)">
+              </div>
+              <button type="button" id="pref-add-body" class="btn sm">Add Body</button>
+            </div>
+
+            <h2 style="margin:1rem 0 .4rem; font-size:1rem;">Agenda Sections</h2>
+            <p class="muted" style="margin:0 0 .6rem;">
+              Common sections shown in the section dropdown when adding or editing items (custom entries are also allowed).
+            </p>
+            <div id="pref-sections-list" class="actions" style="margin-bottom:.65rem;"></div>
+            <div class="row" style="margin-bottom:1.1rem;">
+              <div class="field" style="min-width:220px;">
+                <input id="pref-new-section" placeholder="Add section (e.g. Executive Session)">
+              </div>
+              <button type="button" id="pref-add-section" class="btn sm">Add Section</button>
+            </div>
+
+            <h2 style="margin:1rem 0 .4rem; font-size:1rem;">Agenda Categories</h2>
+            <p class="muted" style="margin:0 0 .6rem;">
+              Categories shown in Manage Agendas. Enable &ldquo;Warn when removing&rdquo; to require confirmation before moving an agenda out of that category.
+            </p>
+            <div id="pref-categories-list" style="display:flex; flex-direction:column; gap:.4rem; margin-bottom:.65rem;"></div>
+            <div class="row" style="margin-bottom:1.1rem; align-items:center;">
+              <div class="field" style="min-width:220px;">
+                <input id="pref-new-category" placeholder="Add category (e.g. Archived Agendas)">
+              </div>
+              <label style="display:inline-flex; align-items:center; gap:.4rem; font-size:.88rem; cursor:pointer;">
+                <input id="pref-new-category-warn" type="checkbox" style="width:auto;">
+                <span>Warn when removing</span>
+              </label>
+              <button type="button" id="pref-add-category" class="btn sm">Add Category</button>
+            </div>
+
+            <button type="submit" class="btn primary">Save Preferences</button>
+            <div id="prefs-msg" class="ok-msg" role="status"></div>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Meeting Templates</h2>
+          <p class="muted" style="margin-top:0;">
+            Reusable templates available when creating a new agenda. You can also save any agenda as a template from its detail page.
+          </p>
+          <div id="pref-templates-list" class="muted">Loading…</div>
+        </div>
+      </section>
+
+      <!-- ==================================================== TODOS & BACKLOG -->
+      <section id="section-backlog" hidden>
+        <h1>Todos &amp; Item Backlog</h1>
+
+        <div class="card">
+          <h2>Add Todo or Backlog Item</h2>
+          <form id="create-backlog-form">
+            <div class="row" style="margin-bottom:.75rem;">
+              <div class="field" style="flex:2; min-width:220px;">
+                <label for="backlog-title">Title</label>
+                <input id="backlog-title" required placeholder="e.g. Review Water Rates Ordinance">
+              </div>
+              <div class="field" style="flex:1; min-width:150px;">
+                <label for="backlog-assigned">Assigned To (optional)</label>
+                <input id="backlog-assigned" placeholder="e.g. City Engineer">
+              </div>
+              <div class="field" style="flex:1; min-width:160px;">
+                <label for="backlog-target-body">Target Body</label>
+                <select id="backlog-target-body"><option value="">Any Body</option></select>
+              </div>
+              <div class="field">
+                <label for="backlog-target-date">Due / Pop-Up Date</label>
+                <input id="backlog-target-date" type="date">
+              </div>
+            </div>
+            <div class="row" style="margin-bottom:.75rem;">
+              <div class="field" style="min-width:200px;">
+                <label for="backlog-recurrence">Schedule / Recurrence</label>
+                <select id="backlog-recurrence">
+                  <option value="none">One-time (by due date)</option>
+                  <option value="every_agenda">Every Agenda</option>
+                  <option value="monthly">Monthly (recurring)</option>
+                  <option value="quarterly">Quarterly (recurring)</option>
+                  <option value="yearly">Yearly (by date)</option>
+                  <option value="first_agenda_month">First Agenda in Month…</option>
+                </select>
+              </div>
+              <div class="field" id="backlog-rec-month-wrap" hidden>
+                <label for="backlog-rec-month">Month</label>
+                <select id="backlog-rec-month">
+                  <option value="1">January</option>
+                  <option value="2">February</option>
+                  <option value="3">March</option>
+                  <option value="4">April</option>
+                  <option value="5">May</option>
+                  <option value="6">June</option>
+                  <option value="7">July</option>
+                  <option value="8">August</option>
+                  <option value="9">September</option>
+                  <option value="10">October</option>
+                  <option value="11">November</option>
+                  <option value="12">December</option>
+                </select>
+              </div>
+              <div class="field" style="flex:1; min-width:140px;">
+                <label for="backlog-section">Section</label>
+                <input id="backlog-section" list="agenda-sections-datalist" placeholder="e.g. New Business">
+              </div>
+              <div class="field" style="flex:1; min-width:150px;">
+                <label for="backlog-presenter">Presenter</label>
+                <input id="backlog-presenter" placeholder="e.g. Public Works Director">
+              </div>
+              <div class="field" style="flex:1; min-width:150px;">
+                <label for="backlog-fiscal">Fiscal Impact</label>
+                <input id="backlog-fiscal" placeholder="e.g. $50,000">
+              </div>
+            </div>
+            <div class="row" style="margin-bottom:.75rem;">
+              <div class="field" style="flex:1; min-width:220px;">
+                <label for="backlog-motion">Recommended Motion</label>
+                <input id="backlog-motion" placeholder="e.g. Move to approve...">
+              </div>
+              <div class="field" style="flex:2; min-width:240px;">
+                <label for="backlog-desc">Description / Follow-up Notes</label>
+                <textarea id="backlog-desc" rows="2" placeholder="Context, staff summary, or follow-up instructions"></textarea>
+              </div>
+            </div>
+            <button type="submit" class="btn primary">Add to Todos &amp; Backlog</button>
+            <span id="backlog-form-error" class="error-msg" style="margin-left:.75rem;" role="alert"></span>
+          </form>
+        </div>
+
+        <div class="card">
+          <div class="between" style="margin-bottom:.85rem;">
+            <h2 style="margin:0;">Scheduled Todos &amp; Unassigned Items (<span id="backlog-count">0</span>)</h2>
+            <div class="row" style="gap:.5rem; align-items:center;">
+              <select id="backlog-filter-status" class="btn sm" aria-label="Filter by Status" style="width:auto;">
+                <option value="active">Open &amp; In Progress</option>
+                <option value="all">All Statuses</option>
+                <option value="open">Open Only</option>
+                <option value="in_progress">In Progress</option>
+                <option value="done">Completed</option>
+              </select>
+              <select id="backlog-filter-body" class="btn sm" aria-label="Filter by Target Body" style="width:auto;">
+                <option value="">All Bodies</option>
+              </select>
+              <select id="backlog-filter-due" class="btn sm" aria-label="Filter by Schedule" style="width:auto;">
+                <option value="all">All Schedules</option>
+                <option value="due">Due Today or Earlier</option>
+                <option value="recurring">Recurring Only</option>
+                <option value="scheduled">Has Due Date</option>
+              </select>
+              <input id="backlog-filter-search" class="btn sm" placeholder="Search..." style="width:170px;">
+            </div>
+          </div>
+          <div id="backlog-list"></div>
+        </div>
+      </section>
+
+      <section id="section-nonstaff" hidden>
+        <p class="muted">Signed in. No workspace items are available yet.</p>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="pw-dialog">
+    <h2>Change Password</h2>
+    <form id="change-pw-form">
+      <div class="field">
+        <label for="cur-pw">Current Password</label>
+        <input id="cur-pw" type="password" autocomplete="current-password" required>
+      </div>
+      <div class="field">
+        <label for="new-pw">New Password (min 8 characters)</label>
+        <input id="new-pw" type="password" autocomplete="new-password" minlength="8" required>
+      </div>
+      <div class="field">
+        <label for="confirm-pw">Confirm New Password</label>
+        <input id="confirm-pw" type="password" autocomplete="new-password" minlength="8" required>
+      </div>
+      <div id="pw-msg" class="error-msg" role="alert"></div>
+      <div class="dialog-actions">
+        <button type="button" id="cancel-pw" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Update Password</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="create-todo-dialog" style="max-width:460px;">
+    <h2>Create Action Item / Todo</h2>
+    <form id="modal-todo-form">
+      <div class="field">
+        <label for="modal-todo-title">Todo Title</label>
+        <input id="modal-todo-title" required>
+      </div>
+      <div class="row" style="gap:.65rem; margin-bottom:.85rem;">
+        <div class="field" style="flex:1; margin-bottom:0;">
+          <label for="modal-todo-assigned">Assigned To</label>
+          <input id="modal-todo-assigned" placeholder="e.g. City Manager">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label for="modal-todo-due">Due Date</label>
+          <input id="modal-todo-due" type="date">
+        </div>
+      </div>
+      <div class="row" style="gap:.65rem; margin-bottom:.85rem;">
+        <div class="field" style="flex:1; margin-bottom:0;">
+          <label for="modal-todo-rec">Recurrence</label>
+          <select id="modal-todo-rec">
+            <option value="none">One-time</option>
+            <option value="every_agenda">Every Agenda</option>
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="yearly">Yearly</option>
+            <option value="first_agenda_month">First Agenda in Month…</option>
+          </select>
+        </div>
+        <div class="field" id="modal-todo-month-wrap" style="margin-bottom:0;" hidden>
+          <label for="modal-todo-month">Month</label>
+          <select id="modal-todo-month">
+            <option value="1">January</option>
+            <option value="2">February</option>
+            <option value="3">March</option>
+            <option value="4">April</option>
+            <option value="5">May</option>
+            <option value="6">June</option>
+            <option value="7">July</option>
+            <option value="8">August</option>
+            <option value="9">September</option>
+            <option value="10">October</option>
+            <option value="11">November</option>
+            <option value="12">December</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="modal-todo-notes">Follow-up Notes</label>
+        <textarea id="modal-todo-notes" rows="2" placeholder="Work assigned / follow-up details for future agenda"></textarea>
+      </div>
+      <div id="modal-todo-err" class="error-msg" role="alert"></div>
+      <div class="dialog-actions">
+        <button type="button" id="cancel-modal-todo" class="btn">Cancel</button>
+        <button type="submit" class="btn primary">Create Todo</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="import-agenda-dialog" style="max-width:620px;">
+    <div class="between" style="margin-bottom:.85rem;">
+      <h2 style="margin:0;">Import Section or Item from Another Agenda</h2>
+      <button type="button" id="close-import-agenda" class="btn sm">Close</button>
+    </div>
+    <div class="field">
+      <label for="import-source-agenda">Source Agenda</label>
+      <select id="import-source-agenda"></select>
+    </div>
+    <div id="import-source-content" style="max-height:55vh; overflow-y:auto; display:flex; flex-direction:column; gap:.65rem;"></div>
+  </dialog>
+
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
