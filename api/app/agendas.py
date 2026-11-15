@@ -36,8 +36,8 @@ from .agenda_pdf import build_agenda_packet_pdf, build_minutes_pdf, render_singl
 from .auth import current_user
 from .db import _read_secret, pool
 
-STAFF_ROLES = {"staff_member", "admin"}
-COUNCIL_ACCESS_ROLES = STAFF_ROLES | {"council_member"}
+STAFF_ROLES = {"admin_staff", "admin"}
+COUNCIL_ACCESS_ROLES = STAFF_ROLES | {"council_member", "non_admin_staff"}
 DEFAULT_BODIES = ["City Council", "Parks Committee", "Planning Commission"]
 DEFAULT_SECTIONS = ["Opening", "Consent", "Old Business", "New Business", "Public Hearing", "Closing"]
 DEFAULT_CATEGORIES = [
@@ -1510,7 +1510,7 @@ def list_council_submissions(user: dict = Depends(get_council_or_staff_user)):
         "LEFT JOIN agendas ta ON ta.id = s.target_agenda_id "
     )
     params: list = []
-    if user["role"] == "council_member":
+    if user["role"] not in STAFF_ROLES:
         sql += "WHERE s.submitted_by = %s "
         params.append(user["id"])
     else:
@@ -2547,10 +2547,10 @@ def generate_agenda_pdf(
         agenda = _load_agenda(conn, agenda_id)
         if not agenda:
             raise HTTPException(status_code=404, detail="Agenda not found")
-        if user["role"] == "council_member":
+        if user["role"] not in STAFF_ROLES:
             if not summary:
                 raise HTTPException(
-                    status_code=403, detail="Council members may only access agenda-only PDFs"
+                    status_code=403, detail="Only administrative staff may access full packet PDFs"
                 )
             if not _is_council_finalized(conn, agenda_id):
                 raise HTTPException(

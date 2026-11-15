@@ -96,6 +96,7 @@ def bootstrap() -> None:
             )
         elif existing_admin[0] != "admin":
             conn.execute("UPDATE users SET role = 'admin' WHERE username = 'admin'")
+        conn.execute("UPDATE users SET role = 'admin_staff' WHERE role = 'staff_member'")
         conn.execute("DELETE FROM sessions WHERE expires_at < now()")
 
 

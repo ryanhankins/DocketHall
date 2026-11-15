@@ -63,7 +63,7 @@ function renderUsers(users) {
       tdRole.textContent = ROLE_LABELS.admin;
     } else {
       const sel = document.createElement('select');
-      for (const key of ['council_member', 'staff_member', 'read_only']) {
+      for (const key of ['council_member', 'admin_staff', 'non_admin_staff', 'read_only']) {
         const opt = document.createElement('option');
         opt.value = key; opt.textContent = ROLE_LABELS[key]; opt.selected = u.role === key;
         sel.appendChild(opt);

@@ -121,8 +121,8 @@ async function routeFromHash(isAdmin, isStaff, isCouncil) {
     `${state.me.username} (${ROLE_LABELS[state.me.role] || state.me.role})`;
 
   const isAdmin = state.me.role === 'admin';
-  const isStaff = state.me.role === 'staff_member' || isAdmin;
-  const isCouncil = state.me.role === 'council_member';
+  const isStaff = state.me.role === 'admin_staff' || isAdmin;
+  const isCouncil = state.me.role === 'council_member' || state.me.role === 'non_admin_staff';
   if (isAdmin || isStaff || isCouncil) {
     document.getElementById('menu').hidden = false;
     if (isAdmin) document.getElementById('menu-admin').hidden = false;
@@ -132,7 +132,14 @@ async function routeFromHash(isAdmin, isStaff, isCouncil) {
       refreshBackupBanner();
       document.getElementById('backup-banner-download-btn')?.addEventListener('click', downloadBackupArchive);
     }
-    if (isCouncil) document.getElementById('menu-council').hidden = false;
+    if (isCouncil) {
+      document.getElementById('menu-council').hidden = false;
+      const label = ROLE_LABELS[state.me.role] || 'Council Member';
+      const menuH = document.getElementById('menu-council-heading');
+      const secH = document.getElementById('section-council-heading');
+      if (menuH) menuH.textContent = label;
+      if (secH) secH.textContent = label;
+    }
     await routeFromHash(isAdmin, isStaff, isCouncil);
     window.addEventListener('popstate', () => routeFromHash(isAdmin, isStaff, isCouncil));
   } else {

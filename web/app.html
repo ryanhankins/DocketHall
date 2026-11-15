@@ -49,8 +49,8 @@
         <button type="button" data-section="preferences">Agenda Preferences</button>
       </div>
       <div id="menu-council" hidden>
-        <h2>Council Member</h2>
-        <button type="button" data-section="council">Council Agendas</button>
+        <h2 id="menu-council-heading">Council Member</h2>
+        <button type="button" data-section="council">Agendas &amp; Submissions</button>
       </div>
     </nav>
 
@@ -88,7 +88,8 @@
               <label for="new-role">User Type</label>
               <select id="new-role">
                 <option value="council_member">Council Member</option>
-                <option value="staff_member">Staff Member</option>
+                <option value="admin_staff">Administrative Staff</option>
+                <option value="non_admin_staff">Non-Administrative Staff</option>
                 <option value="read_only">Read-Only</option>
               </select>
             </div>
@@ -628,7 +629,7 @@
       </section>
 
       <section id="section-council" hidden>
-        <h1>Council Member</h1>
+        <h1 id="section-council-heading">Council Member</h1>
 
         <div class="card">
           <h2>Submit Agenda Item</h2>
