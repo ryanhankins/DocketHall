@@ -1,0 +1,55 @@
+# Copyright 2026 Ryan Hankins
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""Core site branding & general preferences endpoints."""
+from fastapi import APIRouter, Depends, File, UploadFile
+
+from . import agendas
+from .auth import require_permission
+
+router = APIRouter(prefix="/api/branding", tags=["branding"])
+
+
+@router.get("")
+def get_branding():
+    return agendas.get_preferences_branding()
+
+
+@router.put("")
+def update_branding(
+    body: agendas.GeneralPreferencesIn,
+    user: dict = Depends(require_permission("settings.manage", "agendas.manage")),
+):
+    return agendas.update_general_preferences(body, user)
+
+
+@router.get("/logo")
+def get_branding_logo():
+    return agendas.get_preferences_logo()
+
+
+@router.post("/logo")
+async def upload_branding_logo(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_permission("settings.manage", "agendas.manage")),
+):
+    return await agendas.upload_preferences_logo(file=file, _=user)
+
+
+@router.delete("/logo")
+def delete_branding_logo(
+    user: dict = Depends(require_permission("settings.manage", "agendas.manage")),
+):
+    return agendas.delete_preferences_logo(user)

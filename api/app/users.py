@@ -20,9 +20,10 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from psycopg.errors import UniqueViolation
+from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
-from .auth import hash_password, require_admin
+from .auth import effective_permissions, hash_password, require_admin
 from .db import pool
 
 UserRole = Literal["council_member", "admin_staff", "non_admin_staff", "read_only"]
@@ -50,6 +51,7 @@ def generate_password(length: int = 14) -> str:
 
 
 def _row_to_user(row) -> dict:
+    explicit = list(row[6]) if len(row) > 6 and row[6] else []
     return {
         "id": row[0],
         "username": row[1],
@@ -57,6 +59,8 @@ def _row_to_user(row) -> dict:
         "is_active": row[3],
         "created_at": row[4].isoformat() if row[4] else None,
         "last_login_at": row[5].isoformat() if row[5] else None,
+        "permissions": explicit,
+        "effective_permissions": effective_permissions(row[2], explicit),
     }
 
 
@@ -66,18 +70,20 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 class CreateUserIn(BaseModel):
     username: str
     role: UserRole
+    permissions: list[str] = []
 
 
 class UpdateUserIn(BaseModel):
     is_active: bool | None = None
     role: UserRole | None = None
+    permissions: list[str] | None = None
 
 
 @router.get("")
 def list_users(_: dict = Depends(require_admin)):
     with pool.connection() as conn:
         rows = conn.execute(
-            "SELECT id, username, role, is_active, created_at, last_login_at "
+            "SELECT id, username, role, is_active, created_at, last_login_at, permissions "
             "FROM users ORDER BY id"
         ).fetchall()
     return [_row_to_user(r) for r in rows]
@@ -91,14 +97,15 @@ def create_user(body: CreateUserIn, _: dict = Depends(require_admin)):
             status_code=400,
             detail="Username must be 2-64 characters (letters, digits, ., _, -).",
         )
+    clean_perms = sorted({str(p).strip() for p in body.permissions if str(p).strip()})
     password = generate_password()
     try:
         with pool.connection() as conn:
             row = conn.execute(
-                "INSERT INTO users (username, password_hash, role) "
-                "VALUES (%s, %s, %s) "
-                "RETURNING id, username, role, is_active, created_at, last_login_at",
-                (username, hash_password(password), body.role),
+                "INSERT INTO users (username, password_hash, role, permissions) "
+                "VALUES (%s, %s, %s, %s) "
+                "RETURNING id, username, role, is_active, created_at, last_login_at, permissions",
+                (username, hash_password(password), body.role, Jsonb(clean_perms)),
             ).fetchone()
     except UniqueViolation:
         raise HTTPException(status_code=409, detail="Username already exists")
@@ -110,7 +117,7 @@ def create_user(body: CreateUserIn, _: dict = Depends(require_admin)):
 
 @router.patch("/{user_id}")
 def update_user(user_id: int, body: UpdateUserIn, admin: dict = Depends(require_admin)):
-    if body.is_active is None and body.role is None:
+    if body.is_active is None and body.role is None and body.permissions is None:
         raise HTTPException(status_code=400, detail="No fields to update")
     if user_id == admin["id"]:
         if body.is_active is False:
@@ -127,13 +134,19 @@ def update_user(user_id: int, body: UpdateUserIn, admin: dict = Depends(require_
         if existing[1] == "admin" and body.role is not None:
             raise HTTPException(status_code=400, detail="Cannot change admin role")
 
+        perms_param = (
+            Jsonb(sorted({str(p).strip() for p in body.permissions if str(p).strip()}))
+            if body.permissions is not None
+            else None
+        )
         row = conn.execute(
             "UPDATE users SET "
             "is_active = COALESCE(%s, is_active), "
-            "role = COALESCE(%s, role) "
+            "role = COALESCE(%s, role), "
+            "permissions = COALESCE(%s, permissions) "
             "WHERE id = %s "
-            "RETURNING id, username, role, is_active, created_at, last_login_at",
-            (body.is_active, body.role, user_id),
+            "RETURNING id, username, role, is_active, created_at, last_login_at, permissions",
+            (body.is_active, body.role, perms_param, user_id),
         ).fetchone()
         if body.is_active is False:
             conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))

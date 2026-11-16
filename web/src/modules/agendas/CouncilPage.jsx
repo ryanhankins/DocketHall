@@ -1,0 +1,374 @@
+/*
+ * Copyright 2026 Ryan Hankins
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ROLE_LABELS, api, formatSize, formatTime12h } from '../../core/api.js';
+import { useToast } from '../../core/toast.jsx';
+
+export default function CouncilPage({ me }) {
+  const [agendas, setAgendas] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
+  const [title, setTitle] = useState('');
+  const [section, setSection] = useState('');
+  const [targetAgendaId, setTargetAgendaId] = useState('');
+  const [targetDate, setTargetDate] = useState('');
+  const [targetNote, setTargetNote] = useState('');
+  const [motion, setMotion] = useState('');
+  const [fiscal, setFiscal] = useState('');
+  const [description, setDescription] = useState('');
+  const [queuedFiles, setQueuedFiles] = useState([]);
+  const [dropActive, setDropActive] = useState(false);
+  const [dragRowId, setDragRowId] = useState(null);
+  const [msg, setMsg] = useState({ text: '', isError: false });
+  const fileInputRef = useRef(null);
+  const showToast = useToast();
+
+  const loadData = useCallback(async () => {
+    const [ags, subs] = await Promise.all([
+      api('/api/agendas/finalized'),
+      api('/api/agendas/council-submissions'),
+    ]);
+    setAgendas(Array.isArray(ags) ? ags : []);
+    setSubmissions(Array.isArray(subs) ? subs : []);
+  }, []);
+
+  useEffect(() => {
+    loadData().catch(e => showToast(e.message, 'error'));
+  }, [loadData, showToast]);
+
+  useEffect(() => {
+    const prevent = (e) => {
+      if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener('dragover', prevent);
+    window.addEventListener('drop', prevent);
+    return () => {
+      window.removeEventListener('dragover', prevent);
+      window.removeEventListener('drop', prevent);
+    };
+  }, []);
+
+  const uploadSubmissionFiles = async (subId, files) => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    let uploaded = 0;
+    for (const file of list) {
+      const fd = new FormData();
+      fd.append('file', file);
+      await api(`/api/agendas/council-submissions/${subId}/documents`, { method: 'POST', body: fd });
+      uploaded += 1;
+    }
+    showToast(`Uploaded ${uploaded} attachment(s)`, 'ok');
+    await loadData();
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setMsg({ text: '', isError: false });
+    try {
+      const created = await api('/api/agendas/council-submissions', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim(),
+          section: section.trim(),
+          recommended_motion: motion.trim(),
+          fiscal_impact: fiscal.trim(),
+          target_agenda_id: targetAgendaId ? Number(targetAgendaId) : null,
+          target_date: targetDate,
+          target_note: targetNote.trim(),
+        }),
+      });
+      for (const file of queuedFiles) {
+        const fd = new FormData();
+        fd.append('file', file);
+        await api(`/api/agendas/council-submissions/${created.id}/documents`, { method: 'POST', body: fd });
+      }
+      setTitle('');
+      setSection('');
+      setTargetAgendaId('');
+      setTargetDate('');
+      setTargetNote('');
+      setMotion('');
+      setFiscal('');
+      setDescription('');
+      setQueuedFiles([]);
+      setMsg({ text: 'Agenda item submitted for staff review.', isError: false });
+      showToast('Submitted to staff', 'ok');
+      await loadData();
+    } catch (err) {
+      setMsg({ text: err.message, isError: true });
+    }
+  };
+
+  const headingLabel = ROLE_LABELS[me?.role] || 'Council Member';
+
+  return (
+    <section id="section-council">
+      <h1>{headingLabel}</h1>
+
+      <div className="card">
+        <h2>Finalized Agendas</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          View finalized meeting agendas and packets.
+        </p>
+        <table>
+          <thead>
+            <tr><th>Meeting</th><th>Body</th><th>Date</th><th>Time</th><th>Items</th><th>Packet</th></tr>
+          </thead>
+          <tbody>
+            {!agendas.length ? (
+              <tr><td colSpan={6} className="muted">No finalized agendas yet.</td></tr>
+            ) : agendas.map(a => (
+              <tr key={a.id}>
+                <td>{a.title}</td>
+                <td>{a.body || '—'}</td>
+                <td>{a.meeting_date || '—'}</td>
+                <td>{a.meeting_time ? formatTime12h(a.meeting_time) : '—'}</td>
+                <td>{a.item_count}</td>
+                <td>
+                  <div className="actions">
+                    <a className="btn sm" href={`/api/agendas/${a.id}/packet.pdf?summary=1`} target="_blank" rel="noreferrer">Summary</a>
+                    <a className="btn sm primary" href={`/api/agendas/${a.id}/packet.pdf`} target="_blank" rel="noreferrer">Full Packet</a>
+                    <a className="btn sm" href={`/api/agendas/${a.id}/packet.pdf?download=1`} target="_blank" rel="noreferrer">Download</a>
+                    <a className="btn sm" href={`/api/agendas/${a.id}/minutes.pdf`} target="_blank" rel="noreferrer">Minutes</a>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card">
+        <h2>Submit an Agenda Item</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Propose an item for an upcoming agenda. Staff will review and assign it to an agenda.
+        </p>
+        <form id="council-submit-form" onSubmit={handleSubmit}>
+          <div className="row" style={{ marginBottom: '.75rem' }}>
+            <div className="field" style={{ flex: 2, minWidth: '220px' }}>
+              <label htmlFor="cs-title">Item Title</label>
+              <input id="cs-title" required placeholder="e.g. Resolution Supporting Park Trail Grant" value={title} onChange={(e) => setTitle(e.target.value)} />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: '160px' }}>
+              <label htmlFor="cs-section">Suggested Section (optional)</label>
+              <input id="cs-section" placeholder="e.g. New Business" value={section} onChange={(e) => setSection(e.target.value)} />
+            </div>
+          </div>
+          <div className="row" style={{ marginBottom: '.75rem' }}>
+            <div className="field" style={{ flex: 1, minWidth: '200px' }}>
+              <label htmlFor="cs-target-agenda">Requested Agenda (optional)</label>
+              <select id="cs-target-agenda" value={targetAgendaId} onChange={(e) => setTargetAgendaId(e.target.value)}>
+                <option value="">Any upcoming agenda</option>
+                {agendas.map(a => (
+                  <option key={a.id} value={a.id}>{a.meeting_date ? `${a.title} (${a.meeting_date})` : a.title}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="cs-target-date">Requested Meeting Date (optional)</label>
+              <input id="cs-target-date" type="date" value={targetDate} onChange={(e) => setTargetDate(e.target.value)} />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: '180px' }}>
+              <label htmlFor="cs-target-note">Timing Note (optional)</label>
+              <input id="cs-target-note" placeholder="e.g. Next City Council meeting" value={targetNote} onChange={(e) => setTargetNote(e.target.value)} />
+            </div>
+          </div>
+          <div className="row" style={{ marginBottom: '.75rem' }}>
+            <div className="field" style={{ flex: 1, minWidth: '200px' }}>
+              <label htmlFor="cs-motion">Recommended Motion (optional)</label>
+              <input id="cs-motion" placeholder="e.g. Move to approve..." value={motion} onChange={(e) => setMotion(e.target.value)} />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: '180px' }}>
+              <label htmlFor="cs-fiscal">Fiscal Impact (optional)</label>
+              <input id="cs-fiscal" placeholder="e.g. None / $5,000" value={fiscal} onChange={(e) => setFiscal(e.target.value)} />
+            </div>
+          </div>
+          <div className="field" style={{ marginBottom: '.75rem' }}>
+            <label htmlFor="cs-desc">Description / Background</label>
+            <textarea id="cs-desc" rows={3} placeholder="Context, background, or supporting details..." value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+          <div className="field" style={{ marginBottom: '.85rem' }}>
+            <label htmlFor="cs-files">Attachments (optional &mdash; PDF, Word, Excel, PowerPoint, Image, Text)</label>
+            <div
+              id="cs-drop-zone"
+              className={`drop-zone${dropActive ? ' file-drag-over' : ''}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => fileInputRef.current?.click()}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInputRef.current?.click(); } }}
+              onDragOver={(e) => { e.preventDefault(); setDropActive(true); }}
+              onDragLeave={() => setDropActive(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDropActive(false);
+                const files = Array.from(e.dataTransfer?.files || []);
+                if (files.length) setQueuedFiles(prev => [...prev, ...files]);
+              }}
+            >
+              Drag &amp; drop files here, or click to select attachments
+            </div>
+            <input
+              id="cs-files"
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => {
+                const files = Array.from(e.target.files || []);
+                if (files.length) setQueuedFiles(prev => [...prev, ...files]);
+                e.target.value = '';
+              }}
+            />
+            {queuedFiles.length > 0 && (
+              <div id="cs-file-list" style={{ display: 'flex', flexWrap: 'wrap', gap: '.4rem', marginTop: '.45rem' }}>
+                {queuedFiles.map((f, idx) => (
+                  <span key={`${f.name}-${idx}`} className="badge draft" style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
+                    <span>{f.name} ({formatSize(f.size)})</span>
+                    <button
+                      type="button"
+                      aria-label={`Remove ${f.name}`}
+                      style={{ border: 0, background: 'transparent', cursor: 'pointer', fontWeight: 700, padding: 0, lineHeight: 1 }}
+                      onClick={() => setQueuedFiles(prev => prev.filter((_, i) => i !== idx))}
+                    >
+                      &times;
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          <button type="submit" className="btn primary">Submit Item</button>
+          {msg.text && <div className={msg.isError ? 'error-msg' : 'ok-msg'} role="status">{msg.text}</div>}
+        </form>
+      </div>
+
+      <div className="card">
+        <h2>My Submissions</h2>
+        <table>
+          <thead>
+            <tr><th>Title</th><th>Requested</th><th>Status</th><th>Attachments &amp; Notes</th></tr>
+          </thead>
+          <tbody>
+            {!submissions.length ? (
+              <tr><td colSpan={4} className="muted">No submissions yet.</td></tr>
+            ) : submissions.map(s => {
+              const reqText = s.target_agenda_title || s.target_date || s.target_note || 'Any upcoming agenda';
+              const badgeCls = s.status === 'accepted' ? 'badge active' : (s.status === 'declined' ? 'badge disabled' : 'badge draft');
+              const docs = Array.isArray(s.documents) ? s.documents : [];
+              return (
+                <tr
+                  key={s.id}
+                  style={dragRowId === s.id ? { background: '#eff6ff' } : undefined}
+                  onDragOver={(e) => {
+                    if (s.status !== 'declined' && Array.from(e.dataTransfer?.types || []).includes('Files')) {
+                      e.preventDefault();
+                      setDragRowId(s.id);
+                    }
+                  }}
+                  onDragLeave={() => { if (dragRowId === s.id) setDragRowId(null); }}
+                  onDrop={async (e) => {
+                    if (s.status !== 'declined' && e.dataTransfer?.files?.length) {
+                      e.preventDefault();
+                      setDragRowId(null);
+                      try {
+                        await uploadSubmissionFiles(s.id, e.dataTransfer.files);
+                      } catch (err) {
+                        showToast(err.message, 'error');
+                      }
+                    }
+                  }}
+                >
+                  <td>{s.title}</td>
+                  <td>{reqText}</td>
+                  <td><span className={badgeCls}>{s.status}</span></td>
+                  <td>
+                    <div className="muted" style={{ fontSize: '.85rem', marginBottom: docs.length ? '.35rem' : 0 }}>
+                      {s.review_note || (s.accepted_agenda_title ? `Added to ${s.accepted_agenda_title}` : 'Awaiting staff review')}
+                    </div>
+                    {docs.length > 0 && (
+                      <ul style={{ margin: '0 0 .4rem', paddingLeft: '1.1rem', fontSize: '.84rem' }}>
+                        {docs.map(d => (
+                          <li key={d.id} style={{ marginBottom: '.2rem' }}>
+                            <a href={`/api/agendas/council-submissions/${s.id}/documents/${d.id}/download`} target="_blank" rel="noreferrer">{d.title}</a>
+                            {' '}
+                            <span className={d.approval_status === 'approved' ? 'badge active' : (d.approval_status === 'declined' ? 'badge disabled' : 'badge draft')}>
+                              {d.approval_status === 'pending_staff' ? 'Pending staff approval' : d.approval_status}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="actions">
+                      {s.status !== 'declined' && (
+                        <>
+                          <input
+                            id={`sub-file-inp-${s.id}`}
+                            type="file"
+                            multiple
+                            hidden
+                            onChange={async (e) => {
+                              try {
+                                await uploadSubmissionFiles(s.id, e.target.files);
+                              } catch (err) {
+                                showToast(err.message, 'error');
+                              } finally {
+                                e.target.value = '';
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="btn sm"
+                            onClick={() => document.getElementById(`sub-file-inp-${s.id}`)?.click()}
+                          >
+                            + Add Attachment (or drop on row)
+                          </button>
+                        </>
+                      )}
+                      {s.status === 'pending' && (
+                        <button
+                          type="button"
+                          className="btn sm danger"
+                          onClick={async () => {
+                            if (!confirm(`Delete pending submission "${s.title}"?`)) return;
+                            try {
+                              await api(`/api/agendas/council-submissions/${s.id}`, { method: 'DELETE' });
+                              showToast('Submission deleted', 'ok');
+                              await loadData();
+                            } catch (err) {
+                              showToast(err.message, 'error');
+                            }
+                          }}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}

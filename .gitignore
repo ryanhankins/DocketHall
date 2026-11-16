@@ -3,3 +3,5 @@ __pycache__/
 .env
 secrets/
 .DS_Store
+web/node_modules/
+web/dist/

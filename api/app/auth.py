@@ -21,7 +21,7 @@ import os
 import secrets
 from datetime import timedelta
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from .db import pool
@@ -31,17 +31,40 @@ SESSION_TTL = timedelta(hours=int(os.environ.get("SESSION_TTL_HOURS", "8")))
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "false").lower() == "true"
 PBKDF2_ITERATIONS = 600_000
 
+ROLE_PRESET_PERMISSIONS: dict[str, list[str]] = {
+    "admin": ["*"],
+    "admin_staff": ["agendas.manage", "settings.manage"],
+    "council_member": ["agendas.submit"],
+    "non_admin_staff": ["agendas.submit"],
+    "read_only": [],
+}
+
+
+def effective_permissions(role: str, explicit: list[str] | None = None) -> list[str]:
+    """Return sorted unique permissions combining role presets and explicit user grants."""
+    perms = set(ROLE_PRESET_PERMISSIONS.get(role, []))
+    if explicit:
+        perms.update(str(p).strip() for p in explicit if str(p).strip())
+    return sorted(perms)
+
+
+def has_permission(user: dict, perm: str) -> bool:
+    perms = user.get("permissions") or []
+    return "*" in perms or perm in perms
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id             BIGSERIAL PRIMARY KEY,
     username       TEXT NOT NULL UNIQUE,
     password_hash  TEXT NOT NULL,
     role           TEXT NOT NULL DEFAULT 'read_only',
+    permissions    JSONB NOT NULL DEFAULT '[]'::jsonb,
     is_active      BOOLEAN NOT NULL DEFAULT TRUE,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_login_at  TIMESTAMPTZ
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'read_only';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '[]'::jsonb;
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash  TEXT PRIMARY KEY,          -- sha256 of the cookie value; raw token never stored
     user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -120,11 +143,20 @@ def current_user(request: Request) -> dict | None:
         return None
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT u.id, u.username, u.role FROM sessions s JOIN users u ON u.id = s.user_id "
+            "SELECT u.id, u.username, u.role, u.permissions "
+            "FROM sessions s JOIN users u ON u.id = s.user_id "
             "WHERE s.token_hash = %s AND s.expires_at > now() AND u.is_active",
             (_token_hash(token),),
         ).fetchone()
-    return {"id": row[0], "username": row[1], "role": row[2]} if row else None
+    if not row:
+        return None
+    explicit = list(row[3]) if row[3] else []
+    return {
+        "id": row[0],
+        "username": row[1],
+        "role": row[2],
+        "permissions": effective_permissions(row[2], explicit),
+    }
 
 
 def require_admin(request: Request) -> dict:
@@ -134,6 +166,18 @@ def require_admin(request: Request) -> dict:
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+def require_permission(*perms: str):
+    """FastAPI dependency requiring at least one of the specified permissions."""
+    def _dep(request: Request) -> dict:
+        user = current_user(request)
+        if not user:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        if not any(has_permission(user, p) for p in perms):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+    return _dep
 
 
 @router.post("/login")

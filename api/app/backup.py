@@ -32,106 +32,27 @@ from starlette.background import BackgroundTask
 
 from .agendas import _bucket, _minio, get_staff_user
 from .db import pool
+from .registry import get_module_backup_tables
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
 
 BACKUP_FORMAT = "civicdesk-backup-v1"
 _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
-# Table definitions in foreign-key dependency order.
+# Core table definitions in foreign-key dependency order.
 # (table_name, columns, jsonb_columns, has_serial_id)
-_EXPORT_TABLES: list[tuple[str, list[str], set[str], bool]] = [
+_CORE_TABLES: list[tuple[str, list[str], set[str], bool]] = [
     (
         "users",
-        ["id", "username", "password_hash", "role", "is_active", "created_at", "last_login_at"],
-        set(),
+        ["id", "username", "password_hash", "role", "permissions", "is_active", "created_at", "last_login_at"],
+        {"permissions"},
         True,
-    ),
-    (
-        "agendas",
-        [
-            "id", "title", "body", "meeting_date", "meeting_time", "status",
-            "finalized_at", "created_by", "created_at", "updated_at",
-            "minutes_attendance", "minutes_notes",
-        ],
-        set(),
-        True,
-    ),
-    (
-        "agenda_items",
-        [
-            "id", "agenda_id", "position", "title", "description", "section",
-            "presenter", "recommended_motion", "fiscal_impact", "revision_status",
-            "target_body", "target_date", "created_at", "todo_status", "assigned_to",
-            "recurrence", "recurrence_month", "source_agenda_id", "source_item_id",
-            "completed_at", "minutes_action", "minutes_motion_by", "minutes_second_by",
-            "minutes_vote", "minutes_notes",
-        ],
-        set(),
-        True,
-    ),
-    (
-        "agenda_documents",
-        [
-            "id", "agenda_item_id", "position", "title", "filename",
-            "content_type", "size_bytes", "sha256", "object_key",
-            "uploaded_by", "created_at",
-        ],
-        set(),
-        True,
-    ),
-    (
-        "backlog_agenda_links",
-        ["backlog_item_id", "agenda_id", "created_at"],
-        set(),
-        False,
-    ),
-    (
-        "agenda_status_log",
-        ["id", "agenda_id", "action", "actor_username", "note", "created_at"],
-        set(),
-        True,
-    ),
-    (
-        "agenda_templates",
-        ["id", "name", "body", "meeting_time", "items", "created_at", "updated_at"],
-        {"items"},
-        True,
-    ),
-    (
-        "council_submissions",
-        [
-            "id", "submitted_by", "submitted_username", "title", "description",
-            "section", "recommended_motion", "fiscal_impact", "target_agenda_id",
-            "target_date", "target_note", "status", "accepted_agenda_id",
-            "accepted_item_id", "reviewed_by", "reviewed_username", "review_note",
-            "created_at", "reviewed_at",
-        ],
-        set(),
-        True,
-    ),
-    (
-        "council_submission_documents",
-        [
-            "id", "submission_id", "title", "filename", "content_type", "size_bytes",
-            "sha256", "object_key", "uploaded_by", "uploaded_username", "approval_status",
-            "reviewed_by", "reviewed_username", "agenda_doc_id", "created_at", "reviewed_at",
-        ],
-        set(),
-        True,
-    ),
-    (
-        "agenda_preferences",
-        [
-            "id", "include_item_cover_sheets", "include_page_numbers", "city_title", "city_name",
-            "meeting_location", "meeting_time", "other_notes", "footer_disclosures",
-            "bodies", "sections", "categories", "city_logo_key",
-            "backup_reminder_days", "last_backup_at", "updated_at",
-        ],
-        {"bodies", "sections", "categories"},
-        False,
     ),
 ]
+
+
+def _get_export_tables() -> list[tuple[str, list[str], set[str], bool]]:
+    return _CORE_TABLES + get_module_backup_tables()
 
 
 def _json_val(v):
@@ -266,7 +187,7 @@ def export_archive(user: dict = Depends(get_staff_user)):
     include_users = user["role"] == "admin"
     table_data: dict[str, list[dict]] = {}
     with pool.connection() as conn:
-        for tname, cols, _, _ in _EXPORT_TABLES:
+        for tname, cols, _, _ in _get_export_tables():
             if tname == "users" and not include_users:
                 continue
             table_data[tname] = _fetch_table(conn, tname, cols)
@@ -460,7 +381,8 @@ async def import_archive(
 
             table_rows: dict[str, list[dict]] = {}
             has_users = ("data/users.json" in names) and (user["role"] == "admin")
-            for tname, _, _, _ in _EXPORT_TABLES:
+            export_tables = _get_export_tables()
+            for tname, _, _, _ in export_tables:
                 if tname == "users" and not has_users:
                     continue
                 path = f"data/{tname}.json"
@@ -489,10 +411,10 @@ async def import_archive(
             else:
                 conn.execute("TRUNCATE TABLE sessions CASCADE")
 
-            truncate_targets = [t for t, _, _, _ in reversed(_EXPORT_TABLES) if (t != "users" or has_users)]
+            truncate_targets = [t for t, _, _, _ in reversed(export_tables) if (t != "users" or has_users)]
             conn.execute(f"TRUNCATE TABLE {', '.join(truncate_targets)} RESTART IDENTITY CASCADE")
 
-            for tname, cols, jsonb_cols, has_serial in _EXPORT_TABLES:
+            for tname, cols, jsonb_cols, has_serial in export_tables:
                 if tname not in table_rows:
                     continue
                 rows = table_rows[tname]
@@ -509,8 +431,11 @@ async def import_archive(
                         v = row.get(c)
                         if not has_users and c in user_fk_cols and v is not None and v not in existing_user_ids:
                             v = None
-                        if c in jsonb_cols and v is not None:
-                            v = Jsonb(v)
+                        if c in jsonb_cols:
+                            if v is None and c == "permissions":
+                                v = []
+                            if v is not None:
+                                v = Jsonb(v)
                         vals.append(v)
                     conn.execute(insert_sql, tuple(vals))
 

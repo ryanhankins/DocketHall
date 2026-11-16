@@ -50,6 +50,9 @@ create_secret minio_root_user     "${MINIO_ROOT_USER:-civicdesk}"
 create_secret minio_root_password "${MINIO_ROOT_PASSWORD:-$(rand)}"
 
 # 3. Images
+echo "==> Building frontend bundle"
+(cd web && ([ -d node_modules ] || npm ci) && npm run build)
+
 echo "==> Building images"
 IMAGES="api:api web:web minio:minio minio-init:minio/init"
 for pair in $IMAGES; do
