@@ -21,6 +21,7 @@ import { useToast } from '../../core/toast.jsx';
 
 export default function CouncilPage({ me }) {
   const [agendas, setAgendas] = useState([]);
+  const [targets, setTargets] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [title, setTitle] = useState('');
   const [section, setSection] = useState('');
@@ -38,11 +39,13 @@ export default function CouncilPage({ me }) {
   const showToast = useToast();
 
   const loadData = useCallback(async () => {
-    const [ags, subs] = await Promise.all([
-      api('/api/agendas/finalized'),
-      api('/api/agendas/council-submissions'),
+    const [ags, tgts, subs] = await Promise.all([
+      api('/api/agendas/council'),
+      api('/api/agendas/council/targets'),
+      api('/api/agendas/council/submissions'),
     ]);
     setAgendas(Array.isArray(ags) ? ags : []);
+    setTargets(Array.isArray(tgts) ? tgts : []);
     setSubmissions(Array.isArray(subs) ? subs : []);
   }, []);
 
@@ -71,7 +74,7 @@ export default function CouncilPage({ me }) {
     for (const file of list) {
       const fd = new FormData();
       fd.append('file', file);
-      await api(`/api/agendas/council-submissions/${subId}/documents`, { method: 'POST', body: fd });
+      await api(`/api/agendas/council/submissions/${subId}/documents`, { method: 'POST', body: fd });
       uploaded += 1;
     }
     showToast(`Uploaded ${uploaded} attachment(s)`, 'ok');
@@ -82,7 +85,7 @@ export default function CouncilPage({ me }) {
     e.preventDefault();
     setMsg({ text: '', isError: false });
     try {
-      const created = await api('/api/agendas/council-submissions', {
+      const created = await api('/api/agendas/council/submissions', {
         method: 'POST',
         body: JSON.stringify({
           title: title.trim(),
@@ -98,7 +101,7 @@ export default function CouncilPage({ me }) {
       for (const file of queuedFiles) {
         const fd = new FormData();
         fd.append('file', file);
-        await api(`/api/agendas/council-submissions/${created.id}/documents`, { method: 'POST', body: fd });
+        await api(`/api/agendas/council/submissions/${created.id}/documents`, { method: 'POST', body: fd });
       }
       setTitle('');
       setSection('');
@@ -177,7 +180,7 @@ export default function CouncilPage({ me }) {
               <label htmlFor="cs-target-agenda">Requested Agenda (optional)</label>
               <select id="cs-target-agenda" value={targetAgendaId} onChange={(e) => setTargetAgendaId(e.target.value)}>
                 <option value="">Any upcoming agenda</option>
-                {agendas.map(a => (
+                {targets.map(a => (
                   <option key={a.id} value={a.id}>{a.meeting_date ? `${a.title} (${a.meeting_date})` : a.title}</option>
                 ))}
               </select>
@@ -307,10 +310,10 @@ export default function CouncilPage({ me }) {
                       <ul style={{ margin: '0 0 .4rem', paddingLeft: '1.1rem', fontSize: '.84rem' }}>
                         {docs.map(d => (
                           <li key={d.id} style={{ marginBottom: '.2rem' }}>
-                            <a href={`/api/agendas/council-submissions/${s.id}/documents/${d.id}/download`} target="_blank" rel="noreferrer">{d.title}</a>
+                            <span>{d.title || d.filename}</span>
                             {' '}
                             <span className={d.approval_status === 'approved' ? 'badge active' : (d.approval_status === 'declined' ? 'badge disabled' : 'badge draft')}>
-                              {d.approval_status === 'pending_staff' ? 'Pending staff approval' : d.approval_status}
+                              {d.approval_status === 'pending' ? 'Pending staff approval' : d.approval_status}
                             </span>
                           </li>
                         ))}
@@ -350,7 +353,7 @@ export default function CouncilPage({ me }) {
                           onClick={async () => {
                             if (!confirm(`Delete pending submission "${s.title}"?`)) return;
                             try {
-                              await api(`/api/agendas/council-submissions/${s.id}`, { method: 'DELETE' });
+                              await api(`/api/agendas/council/submissions/${s.id}`, { method: 'DELETE' });
                               showToast('Submission deleted', 'ok');
                               await loadData();
                             } catch (err) {

@@ -33,7 +33,7 @@ PBKDF2_ITERATIONS = 600_000
 
 ROLE_PRESET_PERMISSIONS: dict[str, list[str]] = {
     "admin": ["*"],
-    "admin_staff": ["agendas.manage", "permits.manage", "settings.manage"],
+    "admin_staff": ["agendas.manage", "permits.manage", "codification.manage", "settings.manage"],
     "council_member": ["agendas.submit"],
     "non_admin_staff": ["agendas.submit"],
     "applicant": ["permits.submit"],

@@ -146,7 +146,7 @@ export default function CoreShell() {
     if (hash.startsWith('agendas') || hash === 'backlog') {
       setOpenSubmenus(prev => (prev['agenda-management'] ? prev : { ...prev, 'agenda-management': true }));
     }
-    if (hash.startsWith('preferences')) {
+    if (hash.startsWith('preferences') || hash === 'permits-catalog-admin') {
       setOpenSubmenus(prev => (prev.preferences ? prev : { ...prev, preferences: true }));
     }
   }, [hash]);
@@ -186,7 +186,9 @@ export default function CoreShell() {
         if (params) {
           const activeSection = hash.startsWith('agendas/')
             ? 'agendas'
-            : (hash === 'preferences' ? 'preferences-agenda' : hash);
+            : (hash === 'preferences'
+                ? 'preferences-agenda'
+                : (hash === 'permits-catalog-admin' ? 'preferences-permits' : hash));
           return {
             component: r.component,
             props: {

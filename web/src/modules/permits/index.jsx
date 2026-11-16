@@ -24,7 +24,9 @@ const PermitCatalogAdminPage = React.lazy(() => import('./PermitCatalogAdminPage
 
 const permitsModule = {
   id: 'permits',
-  prefNavItems: [],
+  prefNavItems: [
+    { section: 'preferences-permits', label: 'Permit Preferences', permission: 'permits.manage' },
+  ],
   routes: [
     {
       match: (hash) => {
@@ -50,7 +52,7 @@ const permitsModule = {
       component: PermitsReviewPage,
     },
     {
-      match: (hash) => (hash === 'permits-catalog-admin' ? {} : null),
+      match: (hash) => (hash === 'preferences-permits' || hash === 'permits-catalog-admin' ? {} : null),
       permission: 'permits.manage',
       component: PermitCatalogAdminPage,
     },

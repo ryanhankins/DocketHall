@@ -520,7 +520,7 @@ function InlineTextDocForm({ agendaId, itemId, onUploaded }) {
         e.preventDefault();
         setErr('');
         try {
-          const updated = await api(`/api/agendas/${agendaId}/items/${itemId}/text`, {
+          const updated = await api(`/api/agendas/${agendaId}/items/${itemId}/text-documents`, {
             method: 'POST',
             body: JSON.stringify({ title: title.trim(), body }),
           });

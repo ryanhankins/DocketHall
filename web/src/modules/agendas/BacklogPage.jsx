@@ -510,7 +510,7 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
                             {d.title} <span className="muted">({formatSize(d.size_bytes)})</span>
                           </span>
                           <div className="actions">
-                            <a className="btn sm" href={`/api/agendas/backlog/${it.id}/documents/${d.id}/download`} target="_blank" rel="noreferrer">Download</a>
+                            <a className="btn sm" href={`/api/agendas/backlog/documents/${d.id}/download`} target="_blank" rel="noreferrer">Download</a>
                             <button
                               type="button"
                               className="btn sm danger"

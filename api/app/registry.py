@@ -43,7 +43,7 @@ def register_module(mod: CivicModule) -> None:
 
 
 def get_enabled_module_ids() -> list[str]:
-    raw = os.environ.get("ENABLED_MODULES", "agendas,permits")
+    raw = os.environ.get("ENABLED_MODULES", "agendas,permits,codification")
     return [m.strip() for m in raw.split(",") if m.strip()]
 
 

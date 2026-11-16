@@ -12,6 +12,7 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         app: resolve(__dirname, 'app.html'),
         portal: resolve(__dirname, 'portal.html'),
+        code: resolve(__dirname, 'code.html'),
       },
     },
   },

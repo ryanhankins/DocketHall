@@ -35,7 +35,12 @@ export async function api(path, opts = {}) {
     throw new Error('Session expired');
   }
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.detail || 'Request failed');
+  if (!r.ok) {
+    const msg = Array.isArray(data.detail)
+      ? data.detail.map(d => d.msg || JSON.stringify(d)).join('; ')
+      : (typeof data.detail === 'string' ? data.detail : (data.detail ? JSON.stringify(data.detail) : 'Request failed'));
+    throw new Error(msg || 'Request failed');
+  }
   return data;
 }
 
