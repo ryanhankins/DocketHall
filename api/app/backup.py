@@ -48,6 +48,12 @@ _CORE_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         {"permissions"},
         True,
     ),
+    (
+        "core_modules",
+        ["module_id", "enabled", "updated_at"],
+        set(),
+        False,
+    ),
 ]
 
 

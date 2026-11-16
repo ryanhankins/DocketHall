@@ -21,6 +21,7 @@ import { loadEnabledFrontendModules } from './registry.js';
 import { useToast } from './toast.jsx';
 
 const UsersPage = React.lazy(() => import('./UsersPage.jsx'));
+const ModulesPage = React.lazy(() => import('./ModulesPage.jsx'));
 const GeneralPrefsPage = React.lazy(() => import('./GeneralPrefsPage.jsx'));
 const BackupRestorePage = React.lazy(() => import('./BackupRestorePage.jsx'));
 
@@ -75,6 +76,15 @@ export default function CoreShell() {
     const onHashChange = () => setHash(location.hash.replace(/^#/, ''));
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  const reloadModules = useCallback(async () => {
+    const modResp = await api('/api/modules');
+    const mods = Array.isArray(modResp.modules) ? modResp.modules : [];
+    setModulesMeta(mods);
+    setPermissionsCatalog(Array.isArray(modResp.permissions_catalog) ? modResp.permissions_catalog : []);
+    const loaded = await loadEnabledFrontendModules(mods.map(m => m.id));
+    setFrontendMods(loaded);
   }, []);
 
   useEffect(() => {
@@ -156,6 +166,9 @@ export default function CoreShell() {
     if (!me) return null;
     if (hash === 'users' && isAdmin) {
       return { component: UsersPage, props: { me, permissionsCatalog }, activeSection: 'users' };
+    }
+    if (hash === 'modules' && isAdmin) {
+      return { component: ModulesPage, props: { onModulesChanged: reloadModules }, activeSection: 'modules' };
     }
     if (hash === 'preferences-general' && canManageSettings) {
       return {
@@ -280,6 +293,13 @@ export default function CoreShell() {
                   onClick={() => navigate('#users')}
                 >
                   Manage Users
+                </button>
+                <button
+                  type="button"
+                  className={activeSection === 'modules' ? 'active' : ''}
+                  onClick={() => navigate('#modules')}
+                >
+                  Manage Modules
                 </button>
               </div>
             )}

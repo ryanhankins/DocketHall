@@ -15,7 +15,7 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
 from . import auth, backup, branding, registry, users
 from .db import open_pool, pool
@@ -28,7 +28,8 @@ register_builtin_modules()
 async def lifespan(app: FastAPI):
     open_pool()
     auth.bootstrap()
-    for mod in registry.get_enabled_modules():
+    registry.bootstrap()
+    for mod in registry.get_all_registered_modules():
         mod.bootstrap()
     yield
     pool.close()
@@ -41,9 +42,9 @@ app.include_router(branding.router)
 app.include_router(backup.router)
 app.include_router(registry.router)
 
-for mod in registry.get_enabled_modules():
+for mod in registry.get_all_registered_modules():
     for r in mod.routers:
-        app.include_router(r)
+        app.include_router(r, dependencies=[Depends(registry.require_module_enabled(mod.id))])
 
 
 @app.get("/api/health")
