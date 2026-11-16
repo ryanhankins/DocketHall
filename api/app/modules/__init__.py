@@ -15,8 +15,10 @@
 
 """Available CivicDesk feature modules."""
 from .agendas_module import MODULE as AGENDAS_MODULE
+from .permits_module import MODULE as PERMITS_MODULE
 from ..registry import register_module
 
 
 def register_builtin_modules() -> None:
     register_module(AGENDAS_MODULE)
+    register_module(PERMITS_MODULE)

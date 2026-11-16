@@ -1,0 +1,347 @@
+/*
+ * Copyright 2026 Ryan Hankins
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { api, formatSize } from '../../core/api.js';
+import { useToast } from '../../core/toast.jsx';
+
+export default function PermitApplyPage({ initialTypeId = null, initialUseId = null, onNavigate }) {
+  const [catalog, setCatalog] = useState({ settings: {}, types: [], uses: [] });
+  const [typeId, setTypeId] = useState('');
+  const [useId, setUseId] = useState('');
+  const [applicantName, setApplicantName] = useState('');
+  const [applicantEmail, setApplicantEmail] = useState('');
+  const [applicantPhone, setApplicantPhone] = useState('');
+  const [propertyAddress, setPropertyAddress] = useState('');
+  const [buildingName, setBuildingName] = useState('');
+  const [suiteName, setSuiteName] = useState('');
+  const [parcelId, setParcelId] = useState('');
+  const [ownerName, setOwnerName] = useState('');
+  const [contractorName, setContractorName] = useState('');
+  const [contractorLicense, setContractorLicense] = useState('');
+  const [projectDesc, setProjectDesc] = useState('');
+  const [estValue, setEstValue] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+
+  const [docCategory, setDocCategory] = useState('Certificate of Insurance');
+  const [queuedDocs, setQueuedDocs] = useState([]); // { file, category }
+  const [dropActive, setDropActive] = useState(false);
+  const [parcelSearch, setParcelSearch] = useState('');
+  const [parcelResults, setParcelResults] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState('');
+  const fileRef = useRef(null);
+  const showToast = useToast();
+
+  useEffect(() => {
+    api('/api/permits/public/catalog')
+      .then((data) => {
+        setCatalog(data);
+        const types = data.types || [];
+        const uses = data.uses || [];
+        const chosenType = (initialTypeId && types.find(t => t.id === initialTypeId)) || types[0];
+        if (chosenType) {
+          setTypeId(String(chosenType.id));
+          const typeUses = uses.filter(u => u.permit_type_id === chosenType.id);
+          const chosenUse = (initialUseId && typeUses.find(u => u.id === initialUseId)) || typeUses[0];
+          if (chosenUse) setUseId(String(chosenUse.id));
+        }
+      })
+      .catch(e => showToast(e.message, 'error'));
+  }, [initialTypeId, initialUseId, showToast]);
+
+  const availableUses = useMemo(
+    () => (catalog.uses || []).filter(u => String(u.permit_type_id) === String(typeId)),
+    [catalog.uses, typeId],
+  );
+
+  const selectedUse = useMemo(
+    () => availableUses.find(u => String(u.id) === String(useId)) || null,
+    [availableUses, useId],
+  );
+
+  const addFiles = (files) => {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+    setQueuedDocs(prev => [...prev, ...list.map(file => ({ file, category: docCategory }))]);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErr('');
+    setSubmitting(true);
+    try {
+      const created = await api('/api/permits', {
+        method: 'POST',
+        body: JSON.stringify({
+          permit_type_id: Number(typeId),
+          permit_use_id: Number(useId),
+          applicant_name: applicantName.trim(),
+          applicant_email: applicantEmail.trim(),
+          applicant_phone: applicantPhone.trim(),
+          property_address: propertyAddress.trim(),
+          building_name: buildingName.trim(),
+          suite_name: suiteName.trim(),
+          parcel_id: parcelId.trim(),
+          owner_name: ownerName.trim(),
+          contractor_name: contractorName.trim(),
+          contractor_license: contractorLicense.trim(),
+          project_description: projectDesc.trim(),
+          estimated_value: estValue.trim(),
+          accepted_terms: acceptedTerms,
+        }),
+      });
+      for (const item of queuedDocs) {
+        const fd = new FormData();
+        fd.append('file', item.file);
+        fd.append('doc_category', item.category);
+        await api(`/api/permits/${created.id}/documents`, { method: 'POST', body: fd });
+      }
+      showToast(`Permit ${created.permit_number} submitted`, 'ok');
+      onNavigate('#my-permits');
+    } catch (error) {
+      setErr(error.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <section id="section-permits-apply">
+      <div className="between" style={{ marginBottom: '1rem' }}>
+        <h1 style={{ margin: 0 }}>Apply for a Permit</h1>
+        <a href="/portal" target="_blank" rel="noreferrer" className="btn sm">View Public Permits Portal</a>
+      </div>
+
+      {catalog.settings?.required_documents_note && (
+        <div className="card" style={{ background: '#f8fafc' }}>
+          <h2 style={{ marginBottom: '.45rem' }}>Required Documents &amp; Instructions</h2>
+          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: '.9rem', color: '#334e68' }}>
+            {catalog.settings.required_documents_note}
+          </pre>
+        </div>
+      )}
+
+      <div className="card">
+        <form onSubmit={handleSubmit}>
+          <div className="row" style={{ marginBottom: '.85rem' }}>
+            <div className="field" style={{ flex: 1, minWidth: '220px' }}>
+              <label htmlFor="permit-type-sel">Permit Type</label>
+              <select
+                id="permit-type-sel"
+                required
+                value={typeId}
+                onChange={(e) => {
+                  const nextType = e.target.value;
+                  setTypeId(nextType);
+                  const firstUse = (catalog.uses || []).find(u => String(u.permit_type_id) === nextType);
+                  setUseId(firstUse ? String(firstUse.id) : '');
+                }}
+              >
+                {(catalog.types || []).map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="field" style={{ flex: 2, minWidth: '260px' }}>
+              <label htmlFor="permit-use-sel">Permit Application / Use</label>
+              <select id="permit-use-sel" required value={useId} onChange={(e) => setUseId(e.target.value)}>
+                {availableUses.map(u => (
+                  <option key={u.id} value={u.id}>{u.name}{u.fee_amount ? ` (${u.fee_amount})` : ''}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {selectedUse && (selectedUse.requires_coi || selectedUse.requires_plans || selectedUse.requires_survey) && (
+            <div className="muted" style={{ fontSize: '.86rem', marginBottom: '.85rem' }}>
+              <strong>Checklist for this permit:</strong>{' '}
+              {[
+                selectedUse.requires_coi && 'Certificate of Insurance',
+                selectedUse.requires_plans && 'Design Plans',
+                selectedUse.requires_survey && 'Land Survey / Photos',
+              ].filter(Boolean).join(' · ')}
+            </div>
+          )}
+
+          <div className="row" style={{ marginBottom: '.75rem', alignItems: 'flex-end' }}>
+            <div className="field" style={{ flex: 2, minWidth: '220px' }}>
+              <label htmlFor="perm-parcel-lookup">Parcel Lookup (optional — search saved parcels)</label>
+              <input
+                id="perm-parcel-lookup"
+                type="search"
+                placeholder="Search by Parcel ID, Address, or Owner..."
+                value={parcelSearch}
+                onChange={async (e) => {
+                  const q = e.target.value;
+                  setParcelSearch(q);
+                  if (q.trim().length >= 2) {
+                    const list = await api(`/api/permits/parcels?q=${encodeURIComponent(q)}`).catch(() => []);
+                    setParcelResults(Array.isArray(list) ? list : []);
+                  } else {
+                    setParcelResults([]);
+                  }
+                }}
+              />
+            </div>
+            {parcelResults.length > 0 && (
+              <div className="field" style={{ flex: 2, minWidth: '240px' }}>
+                <label>Select Matching Parcel</label>
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const pr = parcelResults.find(x => String(x.id) === e.target.value);
+                    if (pr) {
+                      if (pr.address) setPropertyAddress(pr.address);
+                      if (pr.building_name) setBuildingName(pr.building_name);
+                      if (pr.suite_name) setSuiteName(pr.suite_name);
+                      if (pr.parcel_id) setParcelId(pr.parcel_id);
+                      if (pr.owner_name) setOwnerName(pr.owner_name);
+                      setParcelResults([]);
+                    }
+                  }}
+                >
+                  <option value="">Choose parcel to auto-fill…</option>
+                  {parcelResults.map(pr => (
+                    <option key={pr.id} value={pr.id}>
+                      {pr.parcel_id} — {pr.address || pr.owner_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <div className="row" style={{ marginBottom: '.75rem' }}>
+            <div className="field" style={{ flex: 2, minWidth: '220px' }}>
+              <label htmlFor="perm-app-name">Applicant Full Name *</label>
+              <input id="perm-app-name" required value={applicantName} onChange={(e) => setApplicantName(e.target.value)} />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: '180px' }}>
+              <label htmlFor="perm-app-email">Email</label>
+              <input id="perm-app-email" type="email" value={applicantEmail} onChange={(e) => setApplicantEmail(e.target.value)} />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: '160px' }}>
+              <label htmlFor="perm-app-phone">Phone</label>
+              <input id="perm-app-phone" value={applicantPhone} onChange={(e) => setApplicantPhone(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="row" style={{ marginBottom: '.75rem' }}>
+            <div className="field" style={{ flex: 2, minWidth: '240px' }}>
+              <label htmlFor="perm-prop-addr">Land Address *</label>
+              <input id="perm-prop-addr" required placeholder="e.g. 207 Birchwood Ave" value={propertyAddress} onChange={(e) => setPropertyAddress(e.target.value)} />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: '150px' }}>
+              <label htmlFor="perm-bldg">Building Name</label>
+              <input id="perm-bldg" value={buildingName} onChange={(e) => setBuildingName(e.target.value)} />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: '120px' }}>
+              <label htmlFor="perm-suite">Suite / Unit ID</label>
+              <input id="perm-suite" value={suiteName} onChange={(e) => setSuiteName(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="row" style={{ marginBottom: '.75rem' }}>
+            <div className="field" style={{ flex: 1, minWidth: '160px' }}>
+              <label htmlFor="perm-parcel">Parcel Number</label>
+              <input id="perm-parcel" value={parcelId} onChange={(e) => setParcelId(e.target.value)} />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: '180px' }}>
+              <label htmlFor="perm-owner">Owner Name</label>
+              <input id="perm-owner" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: '150px' }}>
+              <label htmlFor="perm-value">Estimated Project Value</label>
+              <input id="perm-value" placeholder="e.g. $15,000" value={estValue} onChange={(e) => setEstValue(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="row" style={{ marginBottom: '.75rem' }}>
+            <div className="field" style={{ flex: 1, minWidth: '200px' }}>
+              <label htmlFor="perm-contractor">Contractor Name (if applicable)</label>
+              <input id="perm-contractor" value={contractorName} onChange={(e) => setContractorName(e.target.value)} />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: '180px' }}>
+              <label htmlFor="perm-license">Contractor State License #</label>
+              <input id="perm-license" value={contractorLicense} onChange={(e) => setContractorLicense(e.target.value)} />
+            </div>
+          </div>
+
+          <div className="field" style={{ marginBottom: '.85rem' }}>
+            <label htmlFor="perm-desc">Project Description / Scope of Work</label>
+            <textarea id="perm-desc" rows={3} placeholder="Describe the proposed work, dimensions, setbacks, etc." value={projectDesc} onChange={(e) => setProjectDesc(e.target.value)} />
+          </div>
+
+          <div className="field" style={{ marginBottom: '.9rem' }}>
+            <label>Upload Supporting Documents (COI, Design Plans, Survey)</label>
+            <div className="row" style={{ marginBottom: '.4rem', alignItems: 'center' }}>
+              <select value={docCategory} onChange={(e) => setDocCategory(e.target.value)} style={{ width: 'auto' }}>
+                <option value="Certificate of Insurance">Certificate of Insurance</option>
+                <option value="Design Plans">Design Plans</option>
+                <option value="Land Survey / Photos">Land Survey / Photos</option>
+                <option value="Other">Other</option>
+              </select>
+              <button type="button" className="btn sm" onClick={() => fileRef.current?.click()}>Select Files</button>
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => { addFiles(e.target.files); e.target.value = ''; }}
+              />
+            </div>
+            <div
+              className={`drop-zone${dropActive ? ' file-drag-over' : ''}`}
+              onDragOver={(e) => { e.preventDefault(); setDropActive(true); }}
+              onDragLeave={() => setDropActive(false)}
+              onDrop={(e) => { e.preventDefault(); setDropActive(false); addFiles(e.dataTransfer?.files); }}
+            >
+              Drag &amp; drop supporting documents here (tagged as &ldquo;{docCategory}&rdquo;)
+            </div>
+            {queuedDocs.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.4rem', marginTop: '.45rem' }}>
+                {queuedDocs.map((q, idx) => (
+                  <span key={`${q.file.name}-${idx}`} className="badge draft" style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
+                    <span>[{q.category}] {q.file.name} ({formatSize(q.file.size)})</span>
+                    <button
+                      type="button"
+                      style={{ border: 0, background: 'transparent', cursor: 'pointer', fontWeight: 700, padding: 0, lineHeight: 1 }}
+                      onClick={() => setQueuedDocs(prev => prev.filter((_, i) => i !== idx))}
+                    >
+                      &times;
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginBottom: '1rem', cursor: 'pointer' }}>
+            <input type="checkbox" style={{ width: 'auto' }} checked={acceptedTerms} onChange={(e) => setAcceptedTerms(e.target.checked)} />
+            <span>I certify that the information and documents provided are accurate and that all contractors hold valid licenses.</span>
+          </label>
+
+          <button type="submit" className="btn primary" disabled={submitting}>
+            {submitting ? 'Submitting…' : 'Submit Permit Application'}
+          </button>
+          {err && <div className="error-msg" role="alert">{err}</div>}
+        </form>
+      </div>
+    </section>
+  );
+}

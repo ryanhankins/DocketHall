@@ -33,9 +33,10 @@ PBKDF2_ITERATIONS = 600_000
 
 ROLE_PRESET_PERMISSIONS: dict[str, list[str]] = {
     "admin": ["*"],
-    "admin_staff": ["agendas.manage", "settings.manage"],
+    "admin_staff": ["agendas.manage", "permits.manage", "settings.manage"],
     "council_member": ["agendas.submit"],
     "non_admin_staff": ["agendas.submit"],
+    "applicant": ["permits.submit"],
     "read_only": [],
 }
 
@@ -132,6 +133,11 @@ class LoginIn(BaseModel):
     password: str
 
 
+class RegisterIn(BaseModel):
+    username: str
+    password: str
+
+
 class ChangePasswordIn(BaseModel):
     current_password: str
     new_password: str
@@ -205,6 +211,45 @@ def login(body: LoginIn, response: Response):
         httponly=True, secure=COOKIE_SECURE, samesite="strict", path="/",
     )
     return {"username": body.username}
+
+
+@router.post("/register", status_code=201)
+def register(body: RegisterIn, response: Response):
+    """Self-service registration for citizen/contractor permit applicants."""
+    import re
+    from psycopg.errors import UniqueViolation
+
+    username = body.username.strip()
+    if not re.match(r"^[a-zA-Z0-9._-]{2,64}$", username):
+        raise HTTPException(
+            status_code=400,
+            detail="Username must be 2-64 characters (letters, digits, ., _, -).",
+        )
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    try:
+        with pool.connection() as conn:
+            row = conn.execute(
+                "INSERT INTO users (username, password_hash, role) "
+                "VALUES (%s, %s, 'applicant') RETURNING id",
+                (username, hash_password(body.password)),
+            ).fetchone()
+            token = secrets.token_urlsafe(32)
+            conn.execute(
+                "INSERT INTO sessions (token_hash, user_id, expires_at) "
+                "VALUES (%s, %s, now() + %s)",
+                (_token_hash(token), row[0], SESSION_TTL),
+            )
+    except UniqueViolation:
+        raise HTTPException(status_code=409, detail="Username is already taken")
+
+    response.set_cookie(
+        SESSION_COOKIE, token,
+        max_age=int(SESSION_TTL.total_seconds()),
+        httponly=True, secure=COOKIE_SECURE, samesite="strict", path="/",
+    )
+    return {"username": username, "role": "applicant"}
 
 
 @router.post("/logout")

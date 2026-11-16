@@ -24,6 +24,7 @@
  */
 const MODULE_LOADERS = {
   agendas: () => import('../modules/agendas/index.jsx'),
+  permits: () => import('../modules/permits/index.jsx'),
 };
 
 export async function loadEnabledFrontendModules(enabledModuleIds) {

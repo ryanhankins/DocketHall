@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from .auth import effective_permissions, hash_password, require_admin
 from .db import pool
 
-UserRole = Literal["council_member", "admin_staff", "non_admin_staff", "read_only"]
+UserRole = Literal["council_member", "admin_staff", "non_admin_staff", "applicant", "read_only"]
 _USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{2,64}$")
 
 _LOWER = "abcdefghjkmnpqrstuvwxyz"

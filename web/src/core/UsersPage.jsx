@@ -126,6 +126,7 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
               <option value="council_member">Council Member</option>
               <option value="admin_staff">Administrative Staff</option>
               <option value="non_admin_staff">Non-Administrative Staff</option>
+              <option value="applicant">Applicant / Citizen</option>
               <option value="read_only">Read-Only</option>
             </select>
           </div>
@@ -197,6 +198,7 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
                         <option value="council_member">Council Member</option>
                         <option value="admin_staff">Administrative Staff</option>
                         <option value="non_admin_staff">Non-Administrative Staff</option>
+                        <option value="applicant">Applicant / Citizen</option>
                         <option value="read_only">Read-Only</option>
                       </select>
                     )}

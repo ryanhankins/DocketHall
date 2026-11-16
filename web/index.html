@@ -54,11 +54,20 @@
     <input id="username" name="username" autocomplete="username" required autofocus>
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required>
-    <button type="submit">Sign in</button>
+    <button type="submit" id="submit-btn">Sign in</button>
     <p id="error" role="alert"></p>
+    <div style="margin-top:.75rem; text-align:center; font-size:.88rem; display:flex; flex-direction:column; gap:.45rem;">
+      <a href="#" id="toggle-mode" style="color:#2563eb; text-decoration:none;">Need a citizen/contractor account? Register</a>
+      <a href="/portal" style="color:#52606d; text-decoration:none;">Browse Public Permits Portal &rarr;</a>
+    </div>
   </form>
 
   <script>
+    const params = new URLSearchParams(location.search);
+    const nextUrl = params.get('next');
+    const safeNext = (nextUrl && nextUrl.startsWith('/app')) ? nextUrl : '/app';
+    let registerMode = params.get('register') === '1';
+
     // Load public city branding title if configured.
     fetch('/api/branding')
       .then(r => r.ok ? r.json() : null)
@@ -75,18 +84,37 @@
 
     // Already signed in? Go straight to the app.
     fetch('/api/me', { credentials: 'same-origin' })
-      .then(r => { if (r.ok) location.replace('/app'); });
+      .then(r => { if (r.ok) location.replace(safeNext); });
 
     const form = document.getElementById('login');
     const error = document.getElementById('error');
-    const button = form.querySelector('button');
+    const button = document.getElementById('submit-btn');
+    const toggle = document.getElementById('toggle-mode');
+
+    function syncMode() {
+      button.textContent = registerMode ? 'Create Applicant Account' : 'Sign in';
+      form.password.autocomplete = registerMode ? 'new-password' : 'current-password';
+      form.password.minLength = registerMode ? 8 : 1;
+      toggle.textContent = registerMode
+        ? 'Already have an account? Sign in'
+        : 'Need a citizen/contractor account? Register';
+      error.textContent = '';
+    }
+    syncMode();
+
+    toggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      registerMode = !registerMode;
+      syncMode();
+    });
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       error.textContent = '';
       button.disabled = true;
       try {
-        const r = await fetch('/api/login', {
+        const endpoint = registerMode ? '/api/register' : '/api/login';
+        const r = await fetch(endpoint, {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
@@ -95,10 +123,13 @@
             password: form.password.value,
           }),
         });
-        if (r.ok) { location.replace('/app'); return; }
-        error.textContent = r.status === 429
-          ? 'Too many attempts. Please wait a minute.'
-          : 'Invalid username or password.';
+        if (r.ok) { location.replace(safeNext); return; }
+        const data = await r.json().catch(() => ({}));
+        if (r.status === 429) {
+          error.textContent = 'Too many attempts. Please wait a minute.';
+        } else {
+          error.textContent = data.detail || (registerMode ? 'Registration failed.' : 'Invalid username or password.');
+        }
       } catch {
         error.textContent = 'Unable to reach the server.';
       } finally {
