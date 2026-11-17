@@ -960,6 +960,18 @@ function PublicHomePage() {
       </header>
 
       <main style={{ maxWidth: 1180, margin: '0 auto', padding: '1.25rem' }}>
+        {me?.is_default_password && (
+          <div
+            className="banner show"
+            role="alert"
+            style={{ background: '#fef2f2', borderColor: '#f87171', color: '#991b1b', marginBottom: '1rem' }}
+          >
+            <span>
+              <strong>Security Warning:</strong> You are signed in with the default administrator password (<code>admin</code>). Please change your password immediately.
+            </span>
+            <a className="btn sm danger" href="/app">Change Password in Workspace</a>
+          </div>
+        )}
         {enabledModules === null ? (
           <div className="muted">Loading public services…</div>
         ) : visibleTabs.length === 0 ? (

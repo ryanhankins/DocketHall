@@ -15,4 +15,5 @@
 
 FROM nginx:1.27-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY security_headers.conf /etc/nginx/security_headers.conf
 COPY dist /usr/share/nginx/html

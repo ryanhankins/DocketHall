@@ -163,7 +163,7 @@ def reset_password(user_id: int, _: dict = Depends(require_admin)):
     password = generate_password()
     with pool.connection() as conn:
         row = conn.execute(
-            "UPDATE users SET password_hash = %s WHERE id = %s RETURNING id, username",
+            "UPDATE users SET password_hash = %s, is_default_password = FALSE WHERE id = %s RETURNING id, username",
             (hash_password(password), user_id),
         ).fetchone()
         if not row:

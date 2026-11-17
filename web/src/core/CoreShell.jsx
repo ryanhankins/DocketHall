@@ -393,6 +393,28 @@ export default function CoreShell() {
         )}
 
         <main>
+          {me?.is_default_password && (
+            <div
+              className="banner show"
+              role="alert"
+              style={{ background: '#fef2f2', borderColor: '#f87171', color: '#991b1b', marginBottom: '1rem' }}
+            >
+              <span>
+                <strong>Security Warning:</strong> You are signed in with the default administrator password (<code>admin</code>). Please change your password immediately.
+              </span>
+              <button
+                type="button"
+                className="btn sm danger"
+                onClick={() => {
+                  setCurPw(''); setNewPw(''); setConfirmPw(''); setPwMsg({ text: '', isError: false });
+                  setPwOpen(true);
+                }}
+              >
+                Change Password Now
+              </button>
+            </div>
+          )}
+
           {backupStatus.overdue && canManageSettings && (
             <div className="banner show" role="alert" style={{ background: '#fef2f2', borderColor: '#fca5a5', color: '#991b1b', marginBottom: '1rem' }}>
               <span>
@@ -441,6 +463,7 @@ export default function CoreShell() {
                 body: JSON.stringify({ current_password: curPw, new_password: newPw }),
               });
               setCurPw(''); setNewPw(''); setConfirmPw('');
+              setMe(prev => (prev ? { ...prev, is_default_password: newPw === 'admin' } : prev));
               setPwMsg({ text: 'Password updated.', isError: false });
             } catch (err) {
               setPwMsg({ text: err.message, isError: true });

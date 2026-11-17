@@ -65,14 +65,16 @@ CREATE TABLE IF NOT EXISTS users (
     email          TEXT NOT NULL DEFAULT '',
     password_hash  TEXT NOT NULL,
     role           TEXT NOT NULL DEFAULT 'read_only',
-    permissions    JSONB NOT NULL DEFAULT '[]'::jsonb,
-    is_active      BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_login_at  TIMESTAMPTZ
+    permissions         JSONB NOT NULL DEFAULT '[]'::jsonb,
+    is_active           BOOLEAN NOT NULL DEFAULT TRUE,
+    is_default_password BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_login_at       TIMESTAMPTZ
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'read_only';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_default_password BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash  TEXT PRIMARY KEY,          -- sha256 of the cookie value; raw token never stored
     user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -118,15 +120,22 @@ def bootstrap() -> None:
         conn.execute("SELECT pg_advisory_xact_lock(424242)")  # safe with >1 replica
         conn.execute(SCHEMA)
         existing_admin = conn.execute(
-            "SELECT role FROM users WHERE username = 'admin'"
+            "SELECT role, password_hash FROM users WHERE username = 'admin'"
         ).fetchone()
         if not existing_admin:
             conn.execute(
-                "INSERT INTO users (username, password_hash, role) VALUES (%s, %s, 'admin')",
+                "INSERT INTO users (username, password_hash, role, is_default_password) "
+                "VALUES (%s, %s, 'admin', TRUE)",
                 ("admin", hash_password("admin")),
             )
-        elif existing_admin[0] != "admin":
-            conn.execute("UPDATE users SET role = 'admin' WHERE username = 'admin'")
+        else:
+            if existing_admin[0] != "admin":
+                conn.execute("UPDATE users SET role = 'admin' WHERE username = 'admin'")
+            is_def = verify_password("admin", existing_admin[1])
+            conn.execute(
+                "UPDATE users SET is_default_password = %s WHERE username = 'admin'",
+                (is_def,),
+            )
         conn.execute("UPDATE users SET role = 'admin_staff' WHERE role = 'staff_member'")
         conn.execute("DELETE FROM sessions WHERE expires_at < now()")
 
@@ -157,7 +166,7 @@ def current_user(request: Request) -> dict | None:
         return None
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT u.id, u.username, u.role, u.permissions, u.email "
+            "SELECT u.id, u.username, u.role, u.permissions, u.email, u.is_default_password "
             "FROM sessions s JOIN users u ON u.id = s.user_id "
             "WHERE s.token_hash = %s AND s.expires_at > now() AND u.is_active",
             (_token_hash(token),),
@@ -170,6 +179,7 @@ def current_user(request: Request) -> dict | None:
         "username": row[1],
         "role": row[2],
         "email": row[4] or "",
+        "is_default_password": bool(row[5]),
         "permissions": effective_permissions(row[2], explicit),
     }
 
@@ -304,8 +314,8 @@ def change_password(body: ChangePasswordIn, request: Request):
         if not (row and verify_password(body.current_password, row[0])):
             raise HTTPException(status_code=400, detail="Current password is incorrect")
         conn.execute(
-            "UPDATE users SET password_hash = %s WHERE id = %s",
-            (hash_password(body.new_password), user["id"]),
+            "UPDATE users SET password_hash = %s, is_default_password = %s WHERE id = %s",
+            (hash_password(body.new_password), body.new_password == "admin", user["id"]),
         )
         # Keep the current session alive; revoke any other active sessions.
         conn.execute(
