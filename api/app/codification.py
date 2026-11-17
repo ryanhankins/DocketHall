@@ -18,6 +18,7 @@ import io
 import os
 import re
 import uuid
+from xml.sax.saxutils import escape as _xml_escape
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import RedirectResponse, Response
@@ -317,6 +318,7 @@ def get_section_pdf(section_id: int):
         if not row:
             raise HTTPException(status_code=404, detail="Code section not found")
 
+    safe_sec = _SAFE_FILENAME_RE.sub("_", str(row[0] or "section")).strip("._") or "section"
     if row[6]:
         obj = _minio().get_object(_bucket(), row[6])
         try:
@@ -327,31 +329,37 @@ def get_section_pdf(section_id: int):
         return Response(
             content=data,
             media_type="application/pdf",
-            headers={"Content-Disposition": f'inline; filename="Section-{row[0]}.pdf"'},
+            headers={"Content-Disposition": f'inline; filename="Section-{safe_sec}.pdf"'},
         )
 
-    if not row[2].strip() and row[5].strip():
-        return RedirectResponse(url=row[5].strip(), status_code=302)
+    src_url = (row[5] or "").strip()
+    if not row[2].strip() and src_url.lower().startswith(("http://", "https://")):
+        return RedirectResponse(url=src_url, status_code=302)
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=54, rightMargin=54, topMargin=54, bottomMargin=54)
     styles = getSampleStyleSheet()
     story = [
-        Paragraph(f"<b>{row[7]} {row[8]}</b>", styles["Normal"]),
-        Paragraph(f"<b>Section {row[0]} — {row[1]}</b>", styles["Title"]),
+        Paragraph(f"<b>{_xml_escape(str(row[7] or ''))} {_xml_escape(str(row[8] or ''))}</b>", styles["Normal"]),
+        Paragraph(f"<b>Section {_xml_escape(str(row[0] or ''))} — {_xml_escape(str(row[1] or ''))}</b>", styles["Title"]),
     ]
     if row[3] or row[4]:
-        story.append(Paragraph(f"Ordinance: {row[3] or '—'} | Effective: {row[4] or '—'}", styles["Normal"]))
+        story.append(
+            Paragraph(
+                f"Ordinance: {_xml_escape(str(row[3] or '—'))} | Effective: {_xml_escape(str(row[4] or '—'))}",
+                styles["Normal"],
+            )
+        )
     story.append(Spacer(1, 12))
     for para in (row[2] or "Full text available in the official City Code PDF.").splitlines():
         if para.strip():
-            story.append(Paragraph(para.strip(), styles["Normal"]))
+            story.append(Paragraph(_xml_escape(para.strip()), styles["Normal"]))
             story.append(Spacer(1, 6))
     doc.build(story)
     return Response(
         content=buf.getvalue(),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="Section-{row[0]}.pdf"'},
+        headers={"Content-Disposition": f'inline; filename="Section-{safe_sec}.pdf"'},
     )
 
 

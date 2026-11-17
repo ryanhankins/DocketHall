@@ -107,24 +107,24 @@ function PublicPermitsPortal() {
             </>
           )}
 
-          {(s.fee_schedule_url || s.payment_instructions) && (
+          {(s.fee_schedule_url || s.payment_instructions || s.payment_url) && (
             <div className="row" style={{ gap: '1rem', alignItems: 'flex-start' }}>
-              {s.payment_instructions && (
-                <div style={{ flex: 2, minWidth: '240px' }}>
-                  <h2>Permit Payment</h2>
+              <div style={{ flex: 2, minWidth: '240px' }}>
+                <h2>Permit Payment &amp; Fee Schedule</h2>
+                {s.payment_instructions && (
                   <p className="muted" style={{ marginTop: 0 }}>{s.payment_instructions}</p>
-                  <div className="actions">
-                    {s.payment_url && (
-                      <a className="btn sm primary" href={s.payment_url} target="_blank" rel="noreferrer">Online Payment</a>
-                    )}
-                    {s.fee_schedule_url && (
-                      <a className="btn sm" href={s.fee_schedule_url} target="_blank" rel="noreferrer">
-                        {s.fee_schedule_label || 'Fee Schedule'}
-                      </a>
-                    )}
-                  </div>
+                )}
+                <div className="actions">
+                  {s.payment_url && (
+                    <a className="btn sm primary" href={s.payment_url} target="_blank" rel="noreferrer">Online Payment</a>
+                  )}
+                  {s.fee_schedule_url && (
+                    <a className="btn sm" href={s.fee_schedule_url} target="_blank" rel="noreferrer">
+                      {s.fee_schedule_label || 'Fee Schedule'}
+                    </a>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           )}
         </div>

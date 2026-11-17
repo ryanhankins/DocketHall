@@ -250,7 +250,7 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
     const bl = Array.isArray(backlog) ? backlog : [];
     onBacklogCount?.(bl);
     const today = new Date().toISOString().slice(0, 10);
-    setDueBacklogCount(bl.filter(b => b.target_date && b.target_date <= today).length);
+    setDueBacklogCount(bl.filter(b => b.todo_status !== 'done' && b.target_date && b.target_date <= today).length);
 
     await loadSubs();
   }, [loadSubs, onBacklogCount]);

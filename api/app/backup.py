@@ -296,6 +296,9 @@ def export_archive(user: dict = Depends(get_staff_user)):
             object_keys.extend(
                 cd["object_key"] for cd in table_data.get("complaint_documents", []) if cd.get("object_key")
             )
+            object_keys.extend(
+                pd["object_key"] for pd in table_data.get("permit_documents", []) if pd.get("object_key")
+            )
             for pref in table_data.get("agenda_preferences", []):
                 if pref.get("city_logo_key"):
                     object_keys.append(pref["city_logo_key"])
@@ -436,12 +439,15 @@ async def import_archive(
                 placeholders = ", ".join(["%s"] * len(cols))
                 insert_sql = f"INSERT INTO {tname} ({col_sql}) VALUES ({placeholders})"
 
-                user_fk_cols = {"created_by", "uploaded_by", "submitted_by", "reviewed_by"}
+                user_id_fk_cols = {
+                    "created_by", "uploaded_by", "submitted_by", "reviewed_by",
+                    "applicant_user_id", "complainant_user_id",
+                }
                 for row in rows:
                     vals = []
                     for c in cols:
                         v = row.get(c)
-                        if not has_users and c in user_fk_cols and v is not None and v not in existing_user_ids:
+                        if not has_users and c in user_id_fk_cols and isinstance(v, int) and v not in existing_user_ids:
                             v = None
                         if c == "email" and v is None:
                             v = ""

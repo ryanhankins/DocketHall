@@ -137,7 +137,7 @@ def _hydrate_records(conn, rows: list[tuple]) -> list[dict]:
     out = []
     for r in rows:
         exp_str = (r[6] or "").strip()
-        notice_days = int(r[7] or 30)
+        notice_days = int(r[7]) if r[7] is not None else 30
         expiry_flag = ""
         if exp_str and r[8] in ("active", "pending"):
             try:
@@ -213,10 +213,17 @@ def download_public_file(file_id: int):
     finally:
         obj.close()
         obj.release_conn()
+    safe_fn = _SAFE_FILENAME_RE.sub("_", row[0] or "document").strip("._") or "document"
+    raw_ctype = (row[1] or "application/octet-stream").split(";")[0].strip().lower()
+    safe_inline = raw_ctype in {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif", "text/plain"}
+    disp = "inline" if safe_inline else "attachment"
     return Response(
         content=data,
-        media_type=row[1] or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{row[0]}"'},
+        media_type=raw_ctype if safe_inline else "application/octet-stream",
+        headers={
+            "Content-Disposition": f'{disp}; filename="{safe_fn}"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
@@ -315,9 +322,9 @@ def update_record(
             "updated_at = now() "
             "WHERE id = %s RETURNING id",
             (
-                body.doc_number.strip() if body.doc_number is not None else None,
-                body.category.strip() if body.category is not None else None,
-                body.title.strip() if body.title is not None else None,
+                (body.doc_number.strip() or None) if body.doc_number is not None else None,
+                (body.category.strip() or None) if body.category is not None else None,
+                (body.title.strip() or None) if body.title is not None else None,
                 body.counterparty.strip() if body.counterparty is not None else None,
                 body.effective_date.strip() if body.effective_date is not None else None,
                 body.expiration_date.strip() if body.expiration_date is not None else None,
@@ -398,10 +405,17 @@ def download_record_file(
     finally:
         obj.close()
         obj.release_conn()
+    safe_fn = _SAFE_FILENAME_RE.sub("_", row[0] or "document").strip("._") or "document"
+    raw_ctype = (row[1] or "application/octet-stream").split(";")[0].strip().lower()
+    safe_inline = raw_ctype in {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif", "text/plain"}
+    disp = "inline" if safe_inline else "attachment"
     return Response(
         content=data,
-        media_type=row[1] or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{row[0]}"'},
+        media_type=raw_ctype if safe_inline else "application/octet-stream",
+        headers={
+            "Content-Disposition": f'{disp}; filename="{safe_fn}"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

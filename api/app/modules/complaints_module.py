@@ -77,7 +77,7 @@ MODULE = CivicModule(
             "id": "complaints-resident",
             "label": "Complaints",
             "section_title": "Complaints (Sec. 618)",
-            "permission": "complaints.submit",
+            "permission": "complaints.log",
             "items": [
                 {"section": "complaints-file", "label": "File a Complaint", "permission": "complaints.submit"},
                 {"section": "my-complaints", "label": "My Complaints", "permission": "complaints.submit"},

@@ -183,7 +183,7 @@ function ItemCard({
           dragDocRef.current = null;
           onAgendaUpdated(await api(`/api/agendas/${agenda.id}/items/${srcItemId}/documents/${docId}`, {
             method: 'PATCH',
-            body: JSON.stringify({ target_item_id: item.id, target_position: docs.length + 1 }),
+            body: JSON.stringify({ target_item_id: item.id, position: docs.length + 1 }),
           }));
           return;
         }
@@ -311,9 +311,8 @@ function ItemCard({
               }))}
             >
               <option value="">Ready / Normal</option>
-              <option value="Draft">Draft</option>
-              <option value="Needs Revision">Needs Revision</option>
-              <option value="Approved">Approved</option>
+              <option value="revised">Revised</option>
+              <option value="addendum">Addendum</option>
             </select>
 
             <TransferSelect
@@ -417,7 +416,7 @@ function ItemCard({
                     } else {
                       const newPos = before ? targetIdx + 1 : targetIdx + 2;
                       onAgendaUpdated(await api(`/api/agendas/${agenda.id}/items/${srcItemId}/documents/${docId}`, {
-                        method: 'PATCH', body: JSON.stringify({ target_item_id: item.id, target_position: newPos }),
+                        method: 'PATCH', body: JSON.stringify({ target_item_id: item.id, position: newPos }),
                       }));
                     }
                   }}
@@ -522,7 +521,7 @@ function InlineTextDocForm({ agendaId, itemId, onUploaded }) {
         try {
           const updated = await api(`/api/agendas/${agendaId}/items/${itemId}/text-documents`, {
             method: 'POST',
-            body: JSON.stringify({ title: title.trim(), body }),
+            body: JSON.stringify({ title: title.trim(), content: body }),
           });
           setTitle('');
           setBody('');
@@ -660,9 +659,8 @@ export default function AgendaItemsTab({
               <label htmlFor="item-revision">Revision Status</label>
               <select id="item-revision" value={revision} onChange={(e) => setRevision(e.target.value)}>
                 <option value="">Ready / Normal</option>
-                <option value="Draft">Draft</option>
-                <option value="Needs Revision">Needs Revision</option>
-                <option value="Approved">Approved</option>
+                <option value="revised">Revised</option>
+                <option value="addendum">Addendum</option>
               </select>
             </div>
           </div>

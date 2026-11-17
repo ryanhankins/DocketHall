@@ -21,7 +21,7 @@ import { useToast } from '../../core/toast.jsx';
 import { COMPLAINT_STATUSES, StatusBadge } from './constants.jsx';
 
 export default function ComplaintLogPage() {
-  const toast = useToast();
+  const showToast = useToast();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
@@ -40,11 +40,11 @@ export default function ComplaintLogPage() {
       setItems(list);
       setSelected((prev) => (prev ? list.find((r) => r.id === prev.id) || null : null));
     } catch (err) {
-      toast.error(err.message || 'Failed to load complaint log');
+      showToast(err.message || 'Failed to load complaint log', 'error');
     } finally {
       setLoading(false);
     }
-  }, [q, statusFilter, toast]);
+  }, [q, statusFilter, showToast]);
 
   useEffect(() => {
     loadLog();
@@ -152,7 +152,7 @@ export default function ComplaintLogPage() {
           <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}>{selected.complaint_number}</h3>
-              <button type="button" className="btn btn-sm" onClick={() => setSelected(null)}>
+              <button type="button" className="btn sm" onClick={() => setSelected(null)}>
                 Close
               </button>
             </div>

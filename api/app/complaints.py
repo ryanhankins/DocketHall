@@ -20,11 +20,12 @@ Notice of Violation (<=60-day deadline), Council referral, and final resolution.
 import hashlib
 import io
 import os
+import re
 import secrets
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from .agendas import _bucket, _minio
@@ -32,6 +33,10 @@ from .auth import current_user, has_permission, require_permission
 from .db import pool
 
 router = APIRouter(prefix="/api/complaints", tags=["complaints"])
+
+MAX_COMPLAINT_DOC_BYTES = 25 * 1024 * 1024
+_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_SAFE_INLINE_TYPES = {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif", "text/plain"}
 
 VALID_CHANNELS = {"written", "oral", "anonymous"}
 VALID_STATUSES = {
@@ -139,15 +144,6 @@ def bootstrap() -> None:
 
 def _iso(v) -> str:
     return v.isoformat() if v else ""
-
-
-def _next_complaint_number(conn) -> str:
-    year = date.today().year
-    row = conn.execute(
-        "SELECT COALESCE(MAX(id), 0) + 1 FROM complaints"
-    ).fetchone()
-    seq = row[0] if row else 1
-    return f"CMP-{year}-{seq:04d}"
 
 
 def _fetch_docs(conn, complaint_id: int, include_confidential: bool) -> list[dict]:
@@ -321,14 +317,27 @@ def _create_complaint_row(body: ComplaintCreateIn, user: dict | None, allow_staf
     cphone = "" if is_anon else body.complainant_phone.strip()
     caddr = "" if is_anon else body.complainant_address.strip()
 
-    uid = user["id"] if (user and not is_anon) else None
-    uname = user["username"] if (user and not is_anon) else ""
+    staff_on_behalf = (
+        allow_staff_channel
+        and (
+            channel == "oral"
+            or (bool(cname) and user is not None and cname.lower() != user["username"].lower())
+        )
+    )
+    if is_anon or staff_on_behalf or not user:
+        uid = None
+        uname = ""
+    else:
+        uid = user["id"]
+        uname = user["username"]
+
+    year = date.today().year
+    temp_cnum = f"CMP-{year}-{secrets.token_hex(6)}"
 
     with pool.connection() as conn:
         with conn.transaction():
-            cnum = _next_complaint_number(conn)
-            row = conn.execute(
-                f"""
+            inserted = conn.execute(
+                """
                 INSERT INTO complaints (
                     complaint_number, intake_channel, is_anonymous, is_real_property_complaint,
                     complainant_user_id, complainant_username,
@@ -337,10 +346,10 @@ def _create_complaint_row(body: ComplaintCreateIn, user: dict | None, allow_staf
                     conduct_description, date_observed
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING {_SELECT_COLS}
+                RETURNING id
                 """,
                 (
-                    cnum,
+                    temp_cnum,
                     "anonymous" if is_anon else channel,
                     is_anon,
                     body.is_real_property_complaint,
@@ -357,19 +366,26 @@ def _create_complaint_row(body: ComplaintCreateIn, user: dict | None, allow_staf
                     body.date_observed.strip(),
                 ),
             ).fetchone()
+            cid = inserted[0]
+            cnum = f"CMP-{year}-{cid:04d}"
+            row = conn.execute(
+                f"UPDATE complaints SET complaint_number = %s WHERE id = %s RETURNING {_SELECT_COLS}",
+                (cnum, cid),
+            ).fetchone()
+            actor = "anonymous" if is_anon else (user["username"] if user else "public")
             conn.execute(
                 """
                 INSERT INTO complaint_activity_log (complaint_id, action, actor_username, is_internal, note)
                 VALUES (%s, 'submitted', %s, FALSE, %s)
                 """,
                 (
-                    row[0],
-                    user["username"] if user else "public",
+                    cid,
+                    actor,
                     f"Complaint {cnum} filed ({'anonymous' if is_anon else channel}). No filing fee.",
                 ),
             )
-            docs = _fetch_docs(conn, row[0], include_confidential=True)
-            act = _fetch_activity(conn, row[0], include_internal=False)
+            docs = _fetch_docs(conn, cid, include_confidential=True)
+            act = _fetch_activity(conn, cid, include_internal=False)
     return _serialize_private(row, docs=docs, activity=act, include_internal=False)
 
 
@@ -440,7 +456,7 @@ def my_complaints(user: dict = Depends(require_permission("complaints.submit", "
         ).fetchall()
         items = []
         for r in rows:
-            docs = _fetch_docs(conn, r[0], include_confidential=False)
+            docs = _fetch_docs(conn, r[0], include_confidential=True)
             act = _fetch_activity(conn, r[0], include_internal=False)
             items.append(_serialize_private(r, docs=docs, activity=act, include_internal=False))
     return {"items": items}
@@ -625,21 +641,28 @@ async def upload_complaint_document(
         cat = "other"
 
     with pool.connection() as conn:
-        exists = conn.execute("SELECT id, complainant_user_id FROM complaints WHERE id = %s", (complaint_id,)).fetchone()
+        exists = conn.execute(
+            "SELECT id, complainant_user_id, (created_at > now() - interval '10 minutes') "
+            "FROM complaints WHERE id = %s",
+            (complaint_id,),
+        ).fetchone()
         if not exists:
             raise HTTPException(status_code=404, detail="Complaint not found")
 
     is_staff = bool(user and has_permission(user, "complaints.manage"))
-    if is_confidential and not is_staff:
-        # Public submitters' attachments default to confidential only if marked, or staff can mark confidential
-        pass
+    is_owner = bool(user and exists[1] is not None and user["id"] == exists[1])
+    is_recent_public = bool(exists[1] is None and exists[2])
+    if not (is_staff or is_owner or is_recent_public):
+        raise HTTPException(status_code=403, detail="Not authorized to upload documents to this complaint")
 
-    raw = await file.read()
-    if len(raw) > 25 * 1024 * 1024:
+    raw = await file.read(MAX_COMPLAINT_DOC_BYTES + 1)
+    if len(raw) > MAX_COMPLAINT_DOC_BYTES:
         raise HTTPException(status_code=413, detail="File exceeds 25 MB limit")
+    if not raw:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     sha = hashlib.sha256(raw).hexdigest()
-    safe_name = os.path.basename(file.filename or "attachment")
+    safe_name = _SAFE_FILENAME_RE.sub("_", os.path.basename(file.filename or "attachment")).strip("._") or "attachment"
     object_key = f"complaints/{complaint_id}/{secrets.token_hex(8)}_{safe_name}"
     ctype = file.content_type or "application/octet-stream"
 
@@ -676,11 +699,11 @@ async def upload_complaint_document(
             )
             conn.execute("UPDATE complaints SET updated_at = now() WHERE id = %s", (complaint_id,))
             row = conn.execute(f"SELECT {_SELECT_COLS} FROM complaints WHERE id = %s", (complaint_id,)).fetchone()
-            docs = _fetch_docs(conn, complaint_id, include_confidential=is_staff)
+            docs = _fetch_docs(conn, complaint_id, include_confidential=(is_staff or is_owner))
             act = _fetch_activity(conn, complaint_id, include_internal=is_staff)
 
-    if is_staff:
-        return _serialize_private(row, docs=docs, activity=act, include_internal=True)
+    if is_staff or is_owner:
+        return _serialize_private(row, docs=docs, activity=act, include_internal=is_staff)
     return _serialize_public(row, docs=docs, activity=act)
 
 
@@ -708,13 +731,22 @@ def download_complaint_document(doc_id: int, request: Request):
             raise HTTPException(status_code=403, detail="Confidential document")
 
     obj = _minio().get_object(_bucket(), object_key)
-    data = obj.read()
-    obj.close()
-    obj.release_conn()
-    return StreamingResponse(
-        io.BytesIO(data),
-        media_type=ctype or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    try:
+        data = obj.read()
+    finally:
+        obj.close()
+        obj.release_conn()
+    safe_fn = _SAFE_FILENAME_RE.sub("_", filename or "attachment").strip("._") or "attachment"
+    raw_ctype = (ctype or "application/octet-stream").split(";")[0].strip().lower()
+    safe_inline = raw_ctype in _SAFE_INLINE_TYPES
+    disp = "inline" if safe_inline else "attachment"
+    return Response(
+        content=data,
+        media_type=raw_ctype if safe_inline else "application/octet-stream",
+        headers={
+            "Content-Disposition": f'{disp}; filename="{safe_fn}"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

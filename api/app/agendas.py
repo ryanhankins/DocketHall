@@ -33,7 +33,7 @@ from PIL import Image as PILImage
 from pydantic import BaseModel
 
 from .agenda_pdf import build_agenda_packet_pdf, build_minutes_pdf, render_single_document_pdf
-from .auth import current_user
+from .auth import current_user, has_permission
 from .db import _read_secret, pool
 
 STAFF_ROLES = {"admin_staff", "admin"}
@@ -307,11 +307,15 @@ def bootstrap() -> None:
             )
 
 
+def _is_agenda_staff(user: dict) -> bool:
+    return has_permission(user, "agendas.manage") or has_permission(user, "settings.manage")
+
+
 def get_staff_user(request: Request) -> dict:
     user = current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    if user["role"] not in STAFF_ROLES:
+    if not _is_agenda_staff(user):
         raise HTTPException(status_code=403, detail="Staff access required")
     return user
 
@@ -321,12 +325,12 @@ def get_council_or_staff_user(request: Request) -> dict:
     user = current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    if user["role"] not in COUNCIL_ACCESS_ROLES:
+    if not (_is_agenda_staff(user) or has_permission(user, "agendas.submit")):
         raise HTTPException(status_code=403, detail="Council or staff access required")
     return user
 
 
-_COUNCIL_FINALIZED_WHERE = "STRPOS(LOWER(a.status), 'finalized') > 0"
+_COUNCIL_FINALIZED_WHERE = "(a.finalized_at IS NOT NULL OR LOWER(a.status) LIKE 'finalized%%')"
 
 
 def _is_council_finalized(conn, agenda_id: int) -> bool:
@@ -387,6 +391,25 @@ def _log_agenda_event(conn, agenda_id: int, action: str, actor: str = "", note: 
         "VALUES (%s, %s, %s, %s)",
         (agenda_id, action, actor, note),
     )
+
+
+def _doc_type_label(filename: str, content_type: str = "") -> str:
+    fname_l = (filename or "").lower()
+    if fname_l.endswith(".pdf"):
+        return "PDF"
+    if fname_l.endswith(".docx"):
+        return "DOCX"
+    if fname_l.endswith(".xlsx"):
+        return "XLSX"
+    if fname_l.endswith(".pptx"):
+        return "PPTX"
+    if fname_l.endswith(".csv"):
+        return "CSV"
+    if fname_l.endswith(".png"):
+        return "PNG"
+    if fname_l.endswith((".jpg", ".jpeg")):
+        return "JPG"
+    return "TEXT"
 
 
 def _load_agenda(conn, agenda_id: int) -> dict | None:
@@ -922,6 +945,7 @@ def list_templates(_: dict = Depends(get_staff_user)):
             "body": r[2],
             "meeting_time": r[3],
             "items": list(r[4]) if r[4] else [],
+            "item_count": len(r[4]) if r[4] else 0,
             "created_at": r[5].isoformat() if r[5] else None,
             "updated_at": r[6].isoformat() if r[6] else None,
         }
@@ -1413,7 +1437,7 @@ def assign_backlog_item(
 @router.get("")
 def list_agendas(status: str | None = None, _: dict = Depends(get_staff_user)):
     sql = (
-        "SELECT a.id, a.title, a.body, a.meeting_date, a.status, a.finalized_at, "
+        "SELECT a.id, a.title, a.body, a.meeting_date, a.meeting_time, a.status, a.finalized_at, "
         "       a.created_at, a.updated_at, "
         "       COUNT(DISTINCT i.id) AS item_count, "
         "       COUNT(d.id) AS doc_count "
@@ -1435,12 +1459,13 @@ def list_agendas(status: str | None = None, _: dict = Depends(get_staff_user)):
             "title": r[1],
             "body": r[2],
             "meeting_date": r[3].isoformat() if r[3] else None,
-            "status": r[4],
-            "finalized_at": r[5].isoformat() if r[5] else None,
-            "created_at": r[6].isoformat() if r[6] else None,
-            "updated_at": r[7].isoformat() if r[7] else None,
-            "item_count": r[8],
-            "doc_count": r[9],
+            "meeting_time": r[4],
+            "status": r[5],
+            "finalized_at": r[6].isoformat() if r[6] else None,
+            "created_at": r[7].isoformat() if r[7] else None,
+            "updated_at": r[8].isoformat() if r[8] else None,
+            "item_count": r[9],
+            "doc_count": r[10],
         }
         for r in rows
     ]
@@ -1562,7 +1587,7 @@ def list_council_submissions(user: dict = Depends(get_council_or_staff_user)):
         "LEFT JOIN agendas ta ON ta.id = s.target_agenda_id "
     )
     params: list = []
-    if user["role"] not in STAFF_ROLES:
+    if not has_permission(user, "agendas.manage"):
         sql += "WHERE s.submitted_by = %s "
         params.append(user["id"])
     else:
@@ -1731,12 +1756,12 @@ async def upload_council_submission_document(
             ).fetchone()
             if not sub:
                 raise HTTPException(status_code=404, detail="Submission not found")
-            if user["role"] not in STAFF_ROLES and sub[0] != user["id"]:
+            if not has_permission(user, "agendas.manage") and sub[0] != user["id"]:
                 raise HTTPException(status_code=403, detail="You may only attach files to your own submissions")
             if sub[1] == "declined":
                 raise HTTPException(status_code=400, detail="Cannot attach files to a declined submission")
 
-            approval_status = "pending" if (sub[1] == "accepted" and user["role"] not in STAFF_ROLES) else "approved"
+            approval_status = "pending" if (sub[1] == "accepted" and not has_permission(user, "agendas.manage")) else "approved"
             obj_key = f"submissions/{sub_id}/{uuid.uuid4().hex[:12]}_{safe_name}"
             _minio().put_object(
                 _bucket(), obj_key, io.BytesIO(data), length=len(data), content_type=content_type
@@ -1953,7 +1978,7 @@ def delete_council_submission(sub_id: int, user: dict = Depends(get_council_or_s
         ).fetchone()
         if not sub:
             raise HTTPException(status_code=404, detail="Submission not found")
-        if user["role"] not in STAFF_ROLES and sub[0] != user["id"]:
+        if not has_permission(user, "agendas.manage") and sub[0] != user["id"]:
             raise HTTPException(status_code=403, detail="You may only delete your own submissions")
         if sub[1] != "pending":
             raise HTTPException(status_code=400, detail="Only pending submissions can be deleted")
@@ -2827,11 +2852,7 @@ def generate_agenda_pdf(
         agenda = _load_agenda(conn, agenda_id)
         if not agenda:
             raise HTTPException(status_code=404, detail="Agenda not found")
-        if user["role"] not in STAFF_ROLES:
-            if not summary:
-                raise HTTPException(
-                    status_code=403, detail="Only administrative staff may access full packet PDFs"
-                )
+        if not has_permission(user, "agendas.manage"):
             if not _is_council_finalized(conn, agenda_id):
                 raise HTTPException(
                     status_code=403, detail="Access restricted to finalized agendas"
@@ -2868,13 +2889,15 @@ def generate_agenda_pdf(
 def generate_minutes_pdf(
     agenda_id: int,
     download: bool = False,
-    _: dict = Depends(get_staff_user),
+    user: dict = Depends(get_council_or_staff_user),
 ):
     with pool.connection() as conn:
         agenda = _load_agenda(conn, agenda_id)
+        if not agenda:
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        if not has_permission(user, "agendas.manage") and not _is_council_finalized(conn, agenda_id):
+            raise HTTPException(status_code=403, detail="Access restricted to finalized agendas")
         prefs = _load_preferences(conn)
-    if not agenda:
-        raise HTTPException(status_code=404, detail="Agenda not found")
 
     def fetch_doc(object_key: str) -> bytes:
         obj = _minio().get_object(_bucket(), object_key)

@@ -21,7 +21,7 @@ import { useToast } from '../../core/toast.jsx';
 import { StatusBadge } from './constants.jsx';
 
 export default function MyComplaintsPage({ onNavigate }) {
-  const toast = useToast();
+  const showToast = useToast();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -32,7 +32,7 @@ export default function MyComplaintsPage({ onNavigate }) {
         const data = await api('/api/complaints/mine');
         if (active) setItems(data.items || []);
       } catch (err) {
-        if (active) toast.error(err.message || 'Failed to load your complaints');
+        if (active) showToast(err.message || 'Failed to load your complaints', 'error');
       } finally {
         if (active) setLoading(false);
       }
@@ -40,7 +40,7 @@ export default function MyComplaintsPage({ onNavigate }) {
     return () => {
       active = false;
     };
-  }, [toast]);
+  }, [showToast]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -51,7 +51,7 @@ export default function MyComplaintsPage({ onNavigate }) {
             Track non-anonymous complaints you have submitted. Anonymous filings are tracked in the public Complaint Log Book.
           </p>
         </div>
-        <button type="button" className="btn btn-primary" onClick={() => onNavigate('complaints-file')}>
+        <button type="button" className="btn primary" onClick={() => onNavigate('complaints-file')}>
           + File a Complaint
         </button>
       </div>

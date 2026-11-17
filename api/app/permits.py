@@ -20,6 +20,7 @@ import io
 import os
 import re
 import uuid
+from xml.sax.saxutils import escape as _xml_escape
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -905,10 +906,17 @@ def download_permit_document(
         obj.close()
         obj.release_conn()
 
+    safe_fn = _SAFE_FILENAME_RE.sub("_", row[0] or "document").strip("._") or "document"
+    raw_ctype = (row[1] or "application/octet-stream").split(";")[0].strip().lower()
+    safe_inline = raw_ctype in {"application/pdf", "image/png", "image/jpeg", "image/webp", "image/gif", "text/plain"}
+    disp = "inline" if safe_inline else "attachment"
     return Response(
         content=data,
-        media_type=row[1] or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{row[0]}"'},
+        media_type=raw_ctype if safe_inline else "application/octet-stream",
+        headers={
+            "Content-Disposition": f'{disp}; filename="{safe_fn}"',
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
@@ -946,8 +954,8 @@ def get_permit_pdf(
     doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=54, rightMargin=54, topMargin=54, bottomMargin=54)
     styles = getSampleStyleSheet()
     story = [
-        Paragraph(f"<b>PERMIT {permit['permit_number']}</b>", styles["Title"]),
-        Paragraph(f"Status: <b>{permit['status'].replace('_', ' ').title()}</b>", styles["Normal"]),
+        Paragraph(f"<b>PERMIT {_xml_escape(str(permit['permit_number'] or ''))}</b>", styles["Title"]),
+        Paragraph(f"Status: <b>{_xml_escape(str(permit['status'] or '').replace('_', ' ').title())}</b>", styles["Normal"]),
         Spacer(1, 12),
     ]
     rows = [
@@ -974,17 +982,25 @@ def get_permit_pdf(
     ]))
     story.append(tbl)
     if permit["project_description"]:
-        story.extend([Spacer(1, 12), Paragraph("<b>Project Description</b>", styles["Heading3"]), Paragraph(permit["project_description"], styles["Normal"])])
+        story.extend([Spacer(1, 12), Paragraph("<b>Project Description</b>", styles["Heading3"]), Paragraph(_xml_escape(str(permit["project_description"])), styles["Normal"])])
     if permit["review_notes"]:
-        story.extend([Spacer(1, 12), Paragraph("<b>Staff Review Notes</b>", styles["Heading3"]), Paragraph(permit["review_notes"], styles["Normal"])])
+        story.extend([Spacer(1, 12), Paragraph("<b>Staff Review Notes</b>", styles["Heading3"]), Paragraph(_xml_escape(str(permit["review_notes"])), styles["Normal"])])
     if permit.get("workflow_steps"):
         story.extend([Spacer(1, 12), Paragraph("<b>Workflow Reviews</b>", styles["Heading3"])])
         for w in permit["workflow_steps"]:
-            story.append(Paragraph(f"• {w['step_name']} ({w['department'] or 'General'}): {w['status']} {('— ' + w['notes']) if w['notes'] else ''}", styles["Normal"]))
+            notes_part = f" — {_xml_escape(str(w['notes']))}" if w["notes"] else ""
+            story.append(Paragraph(
+                f"• {_xml_escape(str(w['step_name'] or ''))} ({_xml_escape(str(w['department'] or 'General'))}): {_xml_escape(str(w['status'] or ''))}{notes_part}",
+                styles["Normal"],
+            ))
     if permit.get("inspections"):
         story.extend([Spacer(1, 12), Paragraph("<b>Inspections</b>", styles["Heading3"])])
         for ins in permit["inspections"]:
-            story.append(Paragraph(f"• {ins['inspection_type']} ({ins['scheduled_date'] or 'unscheduled'}): {ins['result']} {('— ' + ins['notes']) if ins['notes'] else ''}", styles["Normal"]))
+            notes_part = f" — {_xml_escape(str(ins['notes']))}" if ins["notes"] else ""
+            story.append(Paragraph(
+                f"• {_xml_escape(str(ins['inspection_type'] or ''))} ({_xml_escape(str(ins['scheduled_date'] or 'unscheduled'))}): {_xml_escape(str(ins['result'] or ''))}{notes_part}",
+                styles["Normal"],
+            ))
     doc.build(story)
     return Response(
         content=buf.getvalue(),
