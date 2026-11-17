@@ -22,11 +22,36 @@ import { ROLE_LABELS, formatDate, formatSize, formatTime12h } from './core/api.j
 import { COMPLAINT_STATUSES, ORDINANCE_PRESETS, StatusBadge } from './modules/complaints/constants.jsx';
 
 const TAB_DEFS = [
-  { id: 'agendas', label: 'Meeting Agendas & Minutes' },
-  { id: 'permits', label: 'Permits & Fees' },
-  { id: 'codification', label: 'City Code' },
-  { id: 'records', label: 'Public Records' },
-  { id: 'complaints', label: 'Complaints (Sec. 618)' },
+  {
+    id: 'agendas',
+    label: 'Meeting Agendas & Minutes',
+    description: 'Browse finalized meeting agendas, full packets, and approved minutes.',
+    actionLabel: 'Browse Agendas →',
+  },
+  {
+    id: 'permits',
+    label: 'Permits & Fees',
+    description: 'Search permit types, view fee schedules, and apply online (account required to submit).',
+    actionLabel: 'Explore Permits →',
+  },
+  {
+    id: 'codification',
+    label: 'City Code',
+    description: 'Search municipal code chapters, read ordinances, and download official section PDFs.',
+    actionLabel: 'Search City Code →',
+  },
+  {
+    id: 'records',
+    label: 'Public Records',
+    description: 'Browse publicly published contracts, resolutions, ordinances, and city agreements.',
+    actionLabel: 'Browse Records →',
+  },
+  {
+    id: 'complaints',
+    label: 'Complaints (Sec. 618)',
+    description: 'View the public Complaint Log Book or file a complaint at no cost (no account required).',
+    actionLabel: 'Open Complaints →',
+  },
 ];
 
 function AuthModal({ open, initialRegister, nextUrl, reason, onClose }) {
@@ -821,7 +846,7 @@ function PublicHomePage() {
   const [branding, setBranding] = useState({ city_title: '', has_city_logo: false });
   const [enabledModules, setEnabledModules] = useState(null);
   const [me, setMe] = useState(null);
-  const [activeTab, setActiveTab] = useState('');
+  const [activeTab, setActiveTab] = useState('overview');
 
   const [authModal, setAuthModal] = useState(() => ({
     open: params.has('next') || params.get('register') === '1',
@@ -856,11 +881,23 @@ function PublicHomePage() {
         const list = Array.isArray(d.enabled) ? d.enabled : [];
         setEnabledModules(list);
         const hashTab = location.hash.replace(/^#/, '');
-        const firstTab = TAB_DEFS.find((t) => list.includes(t.id))?.id || '';
-        setActiveTab(list.includes(hashTab) ? hashTab : firstTab);
+        setActiveTab(list.includes(hashTab) ? hashTab : 'overview');
       })
       .catch(() => setEnabledModules([]));
   }, [params]);
+
+  useEffect(() => {
+    const onHash = () => {
+      const h = location.hash.replace(/^#/, '');
+      if (!h || h === 'overview') {
+        setActiveTab('overview');
+      } else if (enabledModules?.includes(h)) {
+        setActiveTab(h);
+      }
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, [enabledModules]);
 
   const visibleTabs = useMemo(() => {
     if (!enabledModules) return [];
@@ -873,13 +910,20 @@ function PublicHomePage() {
 
   function selectTab(tabId) {
     setActiveTab(tabId);
-    history.replaceState(null, '', `#${tabId}`);
+    const targetHash = tabId === 'overview' ? '#overview' : `#${tabId}`;
+    if (location.hash !== targetHash) {
+      history.pushState(null, '', targetHash);
+    }
   }
 
   return (
     <>
       <header>
-        <div className="brand" style={{ display: 'flex', alignItems: 'center', gap: '.55rem' }}>
+        <div
+          className="brand"
+          style={{ display: 'flex', alignItems: 'center', gap: '.55rem', cursor: 'pointer' }}
+          onClick={() => selectTab('overview')}
+        >
           {branding.has_city_logo && (
             <img alt="City Logo" src="/api/branding/logo" style={{ height: '52px', width: 'auto', borderRadius: '4px', objectFit: 'contain' }} />
           )}
@@ -916,47 +960,83 @@ function PublicHomePage() {
       </header>
 
       <main style={{ maxWidth: 1180, margin: '0 auto', padding: '1.25rem' }}>
-        <div className="card" style={{ marginBottom: '1rem' }}>
-          <h1 style={{ margin: '0 0 .35rem' }}>Public Services &amp; Records Portal</h1>
-          <p className="muted" style={{ margin: '0 0 .9rem' }}>
-            Browse finalized meeting agendas &amp; minutes, permit catalogs, City Code, public records, and the Complaint Log Book — no account required. Sign in only when you need to apply for a permit, track personal submissions, or access staff/council tools.
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {visibleTabs.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className={`btn sm${activeTab === t.id ? ' primary' : ''}`}
-                onClick={() => selectTab(t.id)}
-              >
-                {t.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              className="btn sm"
-              style={{ marginLeft: 'auto' }}
-              onClick={() => (me ? (location.href = '/app') : openAuth('/app', false, 'Sign in to access Staff, Council, or Applicant workspace tools.'))}
-            >
-              {me ? 'Open Workspace →' : 'Staff & Council Sign In →'}
-            </button>
-          </div>
-        </div>
-
         {enabledModules === null ? (
           <div className="muted">Loading public services…</div>
         ) : visibleTabs.length === 0 ? (
           <div className="card">
             <p className="muted" style={{ margin: 0 }}>No public modules are currently enabled. Please sign in to access administration.</p>
           </div>
+        ) : activeTab === 'overview' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div className="card">
+              <h1 style={{ margin: '0 0 .35rem' }}>Public Services &amp; Records Portal</h1>
+              <p className="muted" style={{ margin: 0 }}>
+                Explore public city services below — no account required to view finalized agendas, City Code, public records, permit schedules, or to file a complaint.
+              </p>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))',
+                gap: '1rem',
+              }}
+            >
+              {visibleTabs.map((t) => (
+                <div
+                  key={t.id}
+                  className="card"
+                  onClick={() => selectTab(t.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      selectTab(t.id);
+                    }
+                  }}
+                  style={{
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: '.75rem',
+                    marginBottom: 0,
+                  }}
+                >
+                  <div>
+                    <h2 style={{ margin: '0 0 .35rem', fontSize: '1.1rem' }}>{t.label}</h2>
+                    <p className="muted" style={{ margin: 0, fontSize: '.92rem', lineHeight: 1.45 }}>
+                      {t.description}
+                    </p>
+                  </div>
+                  <div style={{ fontSize: '.9rem', fontWeight: 600, color: '#2563eb' }}>
+                    {t.actionLabel}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         ) : (
-          <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div>
+              <a
+                href="#overview"
+                onClick={(e) => {
+                  e.preventDefault();
+                  selectTab('overview');
+                }}
+                style={{ fontSize: '.92rem', fontWeight: 500, color: '#2563eb', textDecoration: 'none' }}
+              >
+                ← All Public Services
+              </a>
+            </div>
             {activeTab === 'agendas' && <AgendasPublicTab />}
             {activeTab === 'permits' && <PermitsPublicTab me={me} onRequireAuth={openAuth} />}
             {activeTab === 'codification' && <CodePublicTab />}
             {activeTab === 'records' && <RecordsPublicTab />}
             {activeTab === 'complaints' && <ComplaintsPublicTab me={me} onRequireAuth={openAuth} />}
-          </>
+          </div>
         )}
       </main>
 
