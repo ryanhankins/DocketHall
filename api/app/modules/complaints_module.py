@@ -1,0 +1,89 @@
+# Copyright 2026 Ryan Hankins
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""Administrative Complaints module definition (Section 618)."""
+from .. import complaints
+from ..registry import CivicModule
+
+COMPLAINTS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
+    (
+        "complaints",
+        [
+            "id", "complaint_number", "intake_channel", "is_anonymous", "is_real_property_complaint",
+            "complainant_user_id", "complainant_username", "complainant_name", "complainant_email",
+            "complainant_phone", "complainant_address",
+            "subject_property_address", "subject_person_name", "ordinance_section",
+            "conduct_description", "date_observed",
+            "status", "assigned_to", "assisting_agency", "investigation_report", "internal_notes",
+            "nov_issued_at", "nov_issuing_official", "nov_violation_datetime",
+            "nov_required_action", "nov_compliance_deadline", "hearing_requested_at",
+            "council_meeting_date", "final_resolution", "resolved_at",
+            "created_at", "updated_at",
+        ],
+        set(),
+        True,
+    ),
+    (
+        "complaint_documents",
+        [
+            "id", "complaint_id", "doc_category", "is_confidential", "title", "filename",
+            "content_type", "size_bytes", "sha256", "object_key", "uploaded_by", "created_at",
+        ],
+        set(),
+        True,
+    ),
+    (
+        "complaint_activity_log",
+        ["id", "complaint_id", "action", "actor_username", "is_internal", "note", "created_at"],
+        set(),
+        True,
+    ),
+]
+
+MODULE = CivicModule(
+    id="complaints",
+    name="Administrative Complaints",
+    description="Zero-fee complaint intake, MN Stat. 13.44 confidential complainant tracking, public Complaint Log Book, investigations, and Notices of Violation (Section 618).",
+    routers=[complaints.router],
+    bootstrap=complaints.bootstrap,
+    permissions=[
+        {"key": "complaints.manage", "label": "Investigate Complaints, Manage Log Book & Issue Notices"},
+        {"key": "complaints.submit", "label": "File Complaints & Track My Complaints"},
+        {"key": "complaints.log", "label": "View Public Complaint Log Book"},
+    ],
+    nav_groups=[
+        {
+            "id": "complaints-staff",
+            "label": "Complaints & Enforcement",
+            "section_title": "Staff",
+            "permission": "complaints.manage",
+            "items": [
+                {"section": "complaints-manage", "label": "Complaint Queue & Investigations", "permission": "complaints.manage"},
+            ],
+        },
+        {
+            "id": "complaints-resident",
+            "label": "Complaints",
+            "section_title": "Complaints (Sec. 618)",
+            "permission": "complaints.submit",
+            "items": [
+                {"section": "complaints-file", "label": "File a Complaint", "permission": "complaints.submit"},
+                {"section": "my-complaints", "label": "My Complaints", "permission": "complaints.submit"},
+                {"section": "complaints-log", "label": "Complaint Log Book", "permission": "complaints.log"},
+            ],
+        },
+    ],
+    backup_tables=COMPLAINTS_BACKUP_TABLES,
+)

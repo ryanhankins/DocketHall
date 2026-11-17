@@ -52,6 +52,7 @@ def generate_password(length: int = 14) -> str:
 
 def _row_to_user(row) -> dict:
     explicit = list(row[6]) if len(row) > 6 and row[6] else []
+    email = row[7] if len(row) > 7 and row[7] else ""
     return {
         "id": row[0],
         "username": row[1],
@@ -61,6 +62,7 @@ def _row_to_user(row) -> dict:
         "last_login_at": row[5].isoformat() if row[5] else None,
         "permissions": explicit,
         "effective_permissions": effective_permissions(row[2], explicit),
+        "email": email,
     }
 
 
@@ -70,12 +72,14 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 class CreateUserIn(BaseModel):
     username: str
     role: UserRole
+    email: str = ""
     permissions: list[str] = []
 
 
 class UpdateUserIn(BaseModel):
     is_active: bool | None = None
     role: UserRole | None = None
+    email: str | None = None
     permissions: list[str] | None = None
 
 
@@ -83,7 +87,7 @@ class UpdateUserIn(BaseModel):
 def list_users(_: dict = Depends(require_admin)):
     with pool.connection() as conn:
         rows = conn.execute(
-            "SELECT id, username, role, is_active, created_at, last_login_at, permissions "
+            "SELECT id, username, role, is_active, created_at, last_login_at, permissions, email "
             "FROM users ORDER BY id"
         ).fetchall()
     return [_row_to_user(r) for r in rows]
@@ -102,10 +106,10 @@ def create_user(body: CreateUserIn, _: dict = Depends(require_admin)):
     try:
         with pool.connection() as conn:
             row = conn.execute(
-                "INSERT INTO users (username, password_hash, role, permissions) "
-                "VALUES (%s, %s, %s, %s) "
-                "RETURNING id, username, role, is_active, created_at, last_login_at, permissions",
-                (username, hash_password(password), body.role, Jsonb(clean_perms)),
+                "INSERT INTO users (username, email, password_hash, role, permissions) "
+                "VALUES (%s, %s, %s, %s, %s) "
+                "RETURNING id, username, role, is_active, created_at, last_login_at, permissions, email",
+                (username, body.email.strip(), hash_password(password), body.role, Jsonb(clean_perms)),
             ).fetchone()
     except UniqueViolation:
         raise HTTPException(status_code=409, detail="Username already exists")
@@ -117,7 +121,7 @@ def create_user(body: CreateUserIn, _: dict = Depends(require_admin)):
 
 @router.patch("/{user_id}")
 def update_user(user_id: int, body: UpdateUserIn, admin: dict = Depends(require_admin)):
-    if body.is_active is None and body.role is None and body.permissions is None:
+    if body.is_active is None and body.role is None and body.email is None and body.permissions is None:
         raise HTTPException(status_code=400, detail="No fields to update")
     if user_id == admin["id"]:
         if body.is_active is False:
@@ -143,10 +147,11 @@ def update_user(user_id: int, body: UpdateUserIn, admin: dict = Depends(require_
             "UPDATE users SET "
             "is_active = COALESCE(%s, is_active), "
             "role = COALESCE(%s, role), "
+            "email = COALESCE(%s, email), "
             "permissions = COALESCE(%s, permissions) "
             "WHERE id = %s "
-            "RETURNING id, username, role, is_active, created_at, last_login_at, permissions",
-            (body.is_active, body.role, perms_param, user_id),
+            "RETURNING id, username, role, is_active, created_at, last_login_at, permissions, email",
+            (body.is_active, body.role, body.email.strip() if body.email is not None else None, perms_param, user_id),
         ).fetchone()
         if body.is_active is False:
             conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))

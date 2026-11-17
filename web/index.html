@@ -52,6 +52,10 @@
     <h1><span id="login-city-title" hidden></span>CivicDesk</h1>
     <label for="username">Username</label>
     <input id="username" name="username" autocomplete="username" required autofocus>
+    <div id="email-wrap" hidden>
+      <label for="email">Email (optional)</label>
+      <input id="email" name="email" type="email" autocomplete="email" placeholder="you@example.com">
+    </div>
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required>
     <button type="submit" id="submit-btn">Sign in</button>
@@ -91,9 +95,11 @@
     const error = document.getElementById('error');
     const button = document.getElementById('submit-btn');
     const toggle = document.getElementById('toggle-mode');
+    const emailWrap = document.getElementById('email-wrap');
 
     function syncMode() {
       button.textContent = registerMode ? 'Create Applicant Account' : 'Sign in';
+      if (emailWrap) emailWrap.hidden = !registerMode;
       form.password.autocomplete = registerMode ? 'new-password' : 'current-password';
       form.password.minLength = registerMode ? 8 : 1;
       toggle.textContent = registerMode
@@ -121,6 +127,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             username: form.username.value.trim(),
+            email: registerMode ? (form.email?.value || '').trim() : undefined,
             password: form.password.value,
           }),
         });

@@ -33,11 +33,16 @@ PBKDF2_ITERATIONS = 600_000
 
 ROLE_PRESET_PERMISSIONS: dict[str, list[str]] = {
     "admin": ["*"],
-    "admin_staff": ["agendas.manage", "permits.manage", "codification.manage", "settings.manage"],
-    "council_member": ["agendas.submit"],
-    "non_admin_staff": ["agendas.submit"],
-    "applicant": ["permits.submit"],
-    "read_only": [],
+    "admin_staff": [
+        "agendas.manage", "permits.manage", "codification.manage",
+        "records.manage", "records.view",
+        "complaints.manage", "complaints.submit", "complaints.log",
+        "settings.manage",
+    ],
+    "council_member": ["agendas.submit", "complaints.submit", "complaints.log"],
+    "non_admin_staff": ["agendas.submit", "complaints.submit", "complaints.log"],
+    "applicant": ["permits.submit", "complaints.submit", "complaints.log"],
+    "read_only": ["complaints.log"],
 }
 
 
@@ -57,6 +62,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id             BIGSERIAL PRIMARY KEY,
     username       TEXT NOT NULL UNIQUE,
+    email          TEXT NOT NULL DEFAULT '',
     password_hash  TEXT NOT NULL,
     role           TEXT NOT NULL DEFAULT 'read_only',
     permissions    JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -66,6 +72,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'read_only';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS sessions (
     token_hash  TEXT PRIMARY KEY,          -- sha256 of the cookie value; raw token never stored
     user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -136,6 +143,7 @@ class LoginIn(BaseModel):
 class RegisterIn(BaseModel):
     username: str
     password: str
+    email: str = ""
 
 
 class ChangePasswordIn(BaseModel):
@@ -149,7 +157,7 @@ def current_user(request: Request) -> dict | None:
         return None
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT u.id, u.username, u.role, u.permissions "
+            "SELECT u.id, u.username, u.role, u.permissions, u.email "
             "FROM sessions s JOIN users u ON u.id = s.user_id "
             "WHERE s.token_hash = %s AND s.expires_at > now() AND u.is_active",
             (_token_hash(token),),
@@ -161,6 +169,7 @@ def current_user(request: Request) -> dict | None:
         "id": row[0],
         "username": row[1],
         "role": row[2],
+        "email": row[4] or "",
         "permissions": effective_permissions(row[2], explicit),
     }
 
@@ -231,9 +240,9 @@ def register(body: RegisterIn, response: Response):
     try:
         with pool.connection() as conn:
             row = conn.execute(
-                "INSERT INTO users (username, password_hash, role) "
-                "VALUES (%s, %s, 'applicant') RETURNING id",
-                (username, hash_password(body.password)),
+                "INSERT INTO users (username, email, password_hash, role) "
+                "VALUES (%s, %s, %s, 'applicant') RETURNING id",
+                (username, body.email.strip(), hash_password(body.password)),
             ).fetchone()
             token = secrets.token_urlsafe(32)
             conn.execute(

@@ -44,7 +44,7 @@ _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _CORE_TABLES: list[tuple[str, list[str], set[str], bool]] = [
     (
         "users",
-        ["id", "username", "password_hash", "role", "permissions", "is_active", "created_at", "last_login_at"],
+        ["id", "username", "email", "password_hash", "role", "permissions", "is_active", "created_at", "last_login_at"],
         {"permissions"},
         True,
     ),
@@ -214,7 +214,7 @@ def export_archive(user: dict = Depends(get_staff_user)):
             # 2. Human-readable agendas & attachments index
             items_by_agenda: dict[int, list[dict]] = {}
             backlog_items: list[dict] = []
-            for it in table_data["agenda_items"]:
+            for it in table_data.get("agenda_items", []):
                 if it["agenda_id"] is None:
                     backlog_items.append(it)
                 else:
@@ -223,16 +223,16 @@ def export_archive(user: dict = Depends(get_staff_user)):
                 lst.sort(key=lambda x: (x["position"], x["id"]))
 
             docs_by_item: dict[int, list[dict]] = {}
-            for d in table_data["agenda_documents"]:
+            for d in table_data.get("agenda_documents", []):
                 docs_by_item.setdefault(d["agenda_item_id"], []).append(d)
             for lst in docs_by_item.values():
                 lst.sort(key=lambda x: (x["position"], x["id"]))
 
             logs_by_agenda: dict[int, list[dict]] = {}
-            for lg in table_data["agenda_status_log"]:
+            for lg in table_data.get("agenda_status_log", []):
                 logs_by_agenda.setdefault(lg["agenda_id"], []).append(lg)
 
-            for ag in table_data["agendas"]:
+            for ag in table_data.get("agendas", []):
                 folder = f"{ag['meeting_date'] or 'undated'}_{ag['id']}_{_slug(ag['title'])}"
                 md = _render_agenda_md(
                     ag,
@@ -278,19 +278,25 @@ def export_archive(user: dict = Depends(get_staff_user)):
                             s["reviewed_username"], s["review_note"],
                             s["created_at"] or "", s["reviewed_at"] or "",
                         ]
-                        for s in table_data["council_submissions"]
+                        for s in table_data.get("council_submissions", [])
                     ],
                 ),
             )
-            zf.writestr("human/preferences.json", json.dumps(table_data["agenda_preferences"], indent=2))
-            zf.writestr("human/templates.json", json.dumps(table_data["agenda_templates"], indent=2))
+            zf.writestr("human/preferences.json", json.dumps(table_data.get("agenda_preferences", []), indent=2))
+            zf.writestr("human/templates.json", json.dumps(table_data.get("agenda_templates", []), indent=2))
 
             # 4. Binary files from MinIO (documents + logo)
-            object_keys: list[str] = [d["object_key"] for d in table_data["agenda_documents"] if d.get("object_key")]
+            object_keys: list[str] = [d["object_key"] for d in table_data.get("agenda_documents", []) if d.get("object_key")]
             object_keys.extend(
                 sd["object_key"] for sd in table_data.get("council_submission_documents", []) if sd.get("object_key")
             )
-            for pref in table_data["agenda_preferences"]:
+            object_keys.extend(
+                rf["object_key"] for rf in table_data.get("repository_files", []) if rf.get("object_key")
+            )
+            object_keys.extend(
+                cd["object_key"] for cd in table_data.get("complaint_documents", []) if cd.get("object_key")
+            )
+            for pref in table_data.get("agenda_preferences", []):
                 if pref.get("city_logo_key"):
                     object_keys.append(pref["city_logo_key"])
             seen_keys: set[str] = set()
@@ -437,6 +443,8 @@ async def import_archive(
                         v = row.get(c)
                         if not has_users and c in user_fk_cols and v is not None and v not in existing_user_ids:
                             v = None
+                        if c == "email" and v is None:
+                            v = ""
                         if c in jsonb_cols:
                             if v is None and c == "permissions":
                                 v = []
