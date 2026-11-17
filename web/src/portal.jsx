@@ -71,13 +71,18 @@ function PublicPermitsPortal() {
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#f5f7fa' }}>
       <a href="#portal-main" style={{ position: 'absolute', left: '-9999px' }}>Skip To Main Content</a>
       <header>
-        <div className="brand" style={{ display: 'flex', alignItems: 'center', gap: '.55rem' }}>
+        <a
+          href="/"
+          className="brand"
+          style={{ display: 'flex', alignItems: 'center', gap: '.55rem', textDecoration: 'none', color: 'inherit' }}
+          title="Go to main page"
+        >
           {branding.has_city_logo && (
             <img src="/api/branding/logo" alt="City Logo" style={{ height: '56px', width: 'auto', borderRadius: '4px', objectFit: 'contain' }} />
           )}
           {branding.city_title && <span>{branding.city_title}</span>}
           <span>Permits Portal</span>
-        </div>
+        </a>
         <div className="user-bar">
           {me ? (
             <>

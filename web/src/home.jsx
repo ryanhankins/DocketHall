@@ -919,17 +919,21 @@ function PublicHomePage() {
   return (
     <>
       <header>
-        <div
+        <a
+          href="/#overview"
           className="brand"
-          style={{ display: 'flex', alignItems: 'center', gap: '.55rem', cursor: 'pointer' }}
-          onClick={() => selectTab('overview')}
+          style={{ display: 'flex', alignItems: 'center', gap: '.55rem', textDecoration: 'none', color: 'inherit' }}
+          onClick={(e) => {
+            e.preventDefault();
+            selectTab('overview');
+          }}
         >
           {branding.has_city_logo && (
             <img alt="City Logo" src="/api/branding/logo" style={{ height: '52px', width: 'auto', borderRadius: '4px', objectFit: 'contain' }} />
           )}
           {branding.city_title && <span>{branding.city_title}</span>}
           <span>CivicDesk</span>
-        </div>
+        </a>
         <div className="user-bar">
           {me ? (
             <>
