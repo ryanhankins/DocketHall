@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { api, formatDate, formatSize } from '../../core/api.js';
+import { api, formatDate, formatSize, hasPermission } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
 import {
   ASSISTING_AGENCIES,
@@ -27,6 +27,7 @@ import {
 
 export default function ComplaintsManagePage({ me }) {
   const showToast = useToast();
+  const canViewPrivate = hasPermission(me, 'complaints.view_private');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
@@ -383,7 +384,11 @@ export default function ComplaintsManagePage({ me }) {
               }}
             >
               <strong>Confidential Complainant Data (MN Stat. § 13.44 — Never in Public Log):</strong>
-              {selected.is_anonymous ? (
+              {!canViewPrivate ? (
+                <div className="muted">
+                  Restricted — requires <code>complaints.view_private</code> permission.
+                </div>
+              ) : selected.is_anonymous ? (
                 <div>Filed anonymously</div>
               ) : (
                 <div>

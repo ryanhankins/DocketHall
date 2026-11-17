@@ -60,6 +60,7 @@ MODULE = CivicModule(
     bootstrap=complaints.bootstrap,
     permissions=[
         {"key": "complaints.manage", "label": "Investigate Complaints, Manage Log Book & Issue Notices"},
+        {"key": "complaints.view_private", "label": "View Confidential Complainant Identity & Private Data (MN Stat. 13.44)"},
         {"key": "complaints.submit", "label": "File Complaints & Track My Complaints"},
         {"key": "complaints.log", "label": "View Public Complaint Log Book"},
     ],

@@ -246,19 +246,28 @@ def _serialize_public(row, docs: list[dict] | None = None, activity: list[dict] 
     }
 
 
-def _serialize_private(row, docs: list[dict] | None = None, activity: list[dict] | None = None, include_internal: bool = True) -> dict:
-    """Full representation for complaints.manage staff (or the complainant viewing their own filing)."""
+def _serialize_private(
+    row,
+    docs: list[dict] | None = None,
+    activity: list[dict] | None = None,
+    include_internal: bool = True,
+    include_complainant_private: bool = True,
+) -> dict:
+    """Representation for staff (with complainant private data gated on complaints.view_private)
+    or the complainant viewing their own filing.
+    """
     base = _serialize_public(row, docs=docs, activity=activity)
     base.update(
         {
-            "complainant_user_id": row[5],
-            "complainant_username": row[6],
-            "complainant_name": row[7],
-            "complainant_email": row[8],
-            "complainant_phone": row[9],
-            "complainant_address": row[10],
+            "complainant_user_id": row[5] if include_complainant_private else None,
+            "complainant_username": row[6] if include_complainant_private else "",
+            "complainant_name": row[7] if include_complainant_private else "",
+            "complainant_email": row[8] if include_complainant_private else "",
+            "complainant_phone": row[9] if include_complainant_private else "",
+            "complainant_address": row[10] if include_complainant_private else "",
             "assigned_to": row[17],
             "internal_notes": row[20] if include_internal else "",
+            "can_view_private": include_complainant_private,
         }
     )
     return base
@@ -468,17 +477,26 @@ def list_complaints_staff(
     status: str = Query(""),
     user: dict = Depends(require_permission("complaints.manage")),
 ):
-    """Full staff complaint queue including confidential complainant fields."""
+    """Staff complaint queue; confidential complainant fields require complaints.view_private."""
+    can_view_private = has_permission(user, "complaints.view_private")
     clauses = ["1=1"]
     params: list = []
     if q.strip():
         like = f"%{q.strip()}%"
-        clauses.append(
-            "(complaint_number ILIKE %s OR subject_property_address ILIKE %s "
-            "OR subject_person_name ILIKE %s OR complainant_name ILIKE %s "
-            "OR ordinance_section ILIKE %s OR conduct_description ILIKE %s)"
-        )
-        params.extend([like, like, like, like, like, like])
+        if can_view_private:
+            clauses.append(
+                "(complaint_number ILIKE %s OR subject_property_address ILIKE %s "
+                "OR subject_person_name ILIKE %s OR complainant_name ILIKE %s "
+                "OR ordinance_section ILIKE %s OR conduct_description ILIKE %s)"
+            )
+            params.extend([like, like, like, like, like, like])
+        else:
+            clauses.append(
+                "(complaint_number ILIKE %s OR subject_property_address ILIKE %s "
+                "OR subject_person_name ILIKE %s "
+                "OR ordinance_section ILIKE %s OR conduct_description ILIKE %s)"
+            )
+            params.extend([like, like, like, like, like])
     if status.strip():
         clauses.append("status = %s")
         params.append(status.strip())
@@ -490,9 +508,17 @@ def list_complaints_staff(
         ).fetchall()
         items = []
         for r in rows:
-            docs = _fetch_docs(conn, r[0], include_confidential=True)
+            docs = _fetch_docs(conn, r[0], include_confidential=can_view_private)
             act = _fetch_activity(conn, r[0], include_internal=True)
-            items.append(_serialize_private(r, docs=docs, activity=act, include_internal=True))
+            items.append(
+                _serialize_private(
+                    r,
+                    docs=docs,
+                    activity=act,
+                    include_internal=True,
+                    include_complainant_private=can_view_private,
+                )
+            )
     return {"items": items}
 
 
@@ -561,9 +587,16 @@ def update_complaint(
                     """,
                     (complaint_id, user["username"], "; ".join(note_parts)),
                 )
-            docs = _fetch_docs(conn, complaint_id, include_confidential=True)
+            can_view_private = bool(user and has_permission(user, "complaints.view_private"))
+            docs = _fetch_docs(conn, complaint_id, include_confidential=can_view_private)
             act = _fetch_activity(conn, complaint_id, include_internal=True)
-    return _serialize_private(row, docs=docs, activity=act, include_internal=True)
+    return _serialize_private(
+        row,
+        docs=docs,
+        activity=act,
+        include_internal=True,
+        include_complainant_private=can_view_private,
+    )
 
 
 @router.post("/{complaint_id}/nov")
@@ -621,9 +654,16 @@ def issue_notice_of_violation(
                     f"Notice of Violation issued by {official}; compliance deadline {deadline_str} (10-day public hearing request window).",
                 ),
             )
-            docs = _fetch_docs(conn, complaint_id, include_confidential=True)
+            can_view_private = bool(user and has_permission(user, "complaints.view_private"))
+            docs = _fetch_docs(conn, complaint_id, include_confidential=can_view_private)
             act = _fetch_activity(conn, complaint_id, include_internal=True)
-    return _serialize_private(row, docs=docs, activity=act, include_internal=True)
+    return _serialize_private(
+        row,
+        docs=docs,
+        activity=act,
+        include_internal=True,
+        include_complainant_private=can_view_private,
+    )
 
 
 @router.post("/{complaint_id}/documents")
@@ -699,11 +739,18 @@ async def upload_complaint_document(
             )
             conn.execute("UPDATE complaints SET updated_at = now() WHERE id = %s", (complaint_id,))
             row = conn.execute(f"SELECT {_SELECT_COLS} FROM complaints WHERE id = %s", (complaint_id,)).fetchone()
-            docs = _fetch_docs(conn, complaint_id, include_confidential=(is_staff or is_owner))
+            can_view_private = bool(user and has_permission(user, "complaints.view_private"))
+            docs = _fetch_docs(conn, complaint_id, include_confidential=(can_view_private or is_owner))
             act = _fetch_activity(conn, complaint_id, include_internal=is_staff)
 
     if is_staff or is_owner:
-        return _serialize_private(row, docs=docs, activity=act, include_internal=is_staff)
+        return _serialize_private(
+            row,
+            docs=docs,
+            activity=act,
+            include_internal=is_staff,
+            include_complainant_private=(can_view_private or is_owner),
+        )
     return _serialize_public(row, docs=docs, activity=act)
 
 
@@ -725,10 +772,10 @@ def download_complaint_document(doc_id: int, request: Request):
 
     object_key, filename, ctype, is_conf, owner_uid = row
     if is_conf:
-        is_staff = bool(user and has_permission(user, "complaints.manage"))
+        can_view_private = bool(user and has_permission(user, "complaints.view_private"))
         is_owner = bool(user and owner_uid and user["id"] == owner_uid)
-        if not (is_staff or is_owner):
-            raise HTTPException(status_code=403, detail="Confidential document")
+        if not (can_view_private or is_owner):
+            raise HTTPException(status_code=403, detail="Confidential document requires complaints.view_private")
 
     obj = _minio().get_object(_bucket(), object_key)
     try:
