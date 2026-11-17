@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ROLE_LABELS, api, formatDate } from './api.js';
 import { InlineEditable } from './InlineEditable.jsx';
 import { useToast } from './toast.jsx';
@@ -29,7 +29,22 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
   const [err, setErr] = useState('');
   const [pwBanner, setPwBanner] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
   const showToast = useToast();
+
+  const filteredUsers = useMemo(() => {
+    const q = userSearch.trim().toLowerCase();
+    return users.filter(u => {
+      if (roleFilter === '_staff_council') {
+        if (!['admin', 'admin_staff', 'non_admin_staff', 'council_member'].includes(u.role)) return false;
+      } else if (roleFilter && u.role !== roleFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return `${u.username || ''} ${u.email || ''}`.toLowerCase().includes(q);
+    });
+  }, [users, userSearch, roleFilter]);
 
   const loadUsers = useCallback(async () => {
     const list = await api('/api/users');
@@ -169,7 +184,32 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
       </div>
 
       <div className="card">
-        <h2>Users</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '.75rem', marginBottom: '.85rem' }}>
+          <h2 style={{ margin: 0 }}>Users ({filteredUsers.length} of {users.length})</h2>
+          <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
+            <input
+              placeholder="Search username or email…"
+              aria-label="Search users"
+              style={{ minWidth: '210px' }}
+              value={userSearch}
+              onChange={(e) => setUserSearch(e.target.value)}
+            />
+            <select
+              aria-label="Filter by user type"
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+            >
+              <option value="">All User Types</option>
+              <option value="_staff_council">Staff &amp; Council Only</option>
+              <option value="admin">Admin</option>
+              <option value="admin_staff">Administrative Staff</option>
+              <option value="non_admin_staff">Non-Administrative Staff</option>
+              <option value="council_member">Council Member</option>
+              <option value="applicant">Applicant / Citizen</option>
+              <option value="read_only">Read-Only</option>
+            </select>
+          </div>
+        </div>
         <table>
           <thead>
             <tr>
@@ -183,7 +223,9 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
             </tr>
           </thead>
           <tbody>
-            {users.map(u => {
+            {filteredUsers.length === 0 ? (
+              <tr><td colSpan={7} className="muted">No users match your search or filter.</td></tr>
+            ) : filteredUsers.map(u => {
               const isSelf = me && u.id === me.id;
               const explicit = Array.isArray(u.permissions) ? u.permissions : [];
               return (
