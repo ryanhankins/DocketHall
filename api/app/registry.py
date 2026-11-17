@@ -127,6 +127,12 @@ class ModuleToggleIn(BaseModel):
     enabled: bool
 
 
+@router.get("/modules/public")
+def list_public_modules():
+    """Return IDs of currently enabled modules for the unauthenticated public portal."""
+    return {"enabled": get_enabled_module_ids()}
+
+
 @router.get("/modules")
 def list_modules(request: Request):
     user = current_user(request)

@@ -1994,9 +1994,7 @@ def delete_council_submission(sub_id: int, user: dict = Depends(get_council_or_s
     return {"status": "deleted"}
 
 
-@router.get("/council")
-def list_council_finalized_agendas(_: dict = Depends(get_council_or_staff_user)):
-    """List finalized council agendas (agenda-only access for council members)."""
+def _query_finalized_agendas() -> list[dict]:
     sql = (
         "SELECT a.id, a.title, a.body, a.meeting_date, a.meeting_time, a.status, "
         "       a.finalized_at, a.created_at, a.updated_at, "
@@ -2026,6 +2024,18 @@ def list_council_finalized_agendas(_: dict = Depends(get_council_or_staff_user))
         }
         for r in rows
     ]
+
+
+@router.get("/public")
+def list_public_finalized_agendas():
+    """Publicly list finalized meeting agendas and minutes."""
+    return {"items": _query_finalized_agendas()}
+
+
+@router.get("/council")
+def list_council_finalized_agendas(_: dict = Depends(get_council_or_staff_user)):
+    """List finalized council agendas (agenda-only access for council members)."""
+    return _query_finalized_agendas()
 
 
 @router.get("/{agenda_id}")
@@ -2841,24 +2851,7 @@ def view_document_as_pdf(agenda_id: int, doc_id: int, _: dict = Depends(get_staf
     )
 
 
-@router.get("/{agenda_id}/packet.pdf")
-def generate_agenda_pdf(
-    agenda_id: int,
-    download: bool = False,
-    summary: bool = False,
-    user: dict = Depends(get_council_or_staff_user),
-):
-    with pool.connection() as conn:
-        agenda = _load_agenda(conn, agenda_id)
-        if not agenda:
-            raise HTTPException(status_code=404, detail="Agenda not found")
-        if not has_permission(user, "agendas.manage"):
-            if not _is_council_finalized(conn, agenda_id):
-                raise HTTPException(
-                    status_code=403, detail="Access restricted to finalized agendas"
-                )
-        prefs = _load_preferences(conn)
-
+def _build_packet_response(agenda: dict, prefs: dict, agenda_id: int, summary: bool, download: bool) -> Response:
     def fetch_doc(object_key: str) -> bytes:
         obj = _minio().get_object(_bucket(), object_key)
         try:
@@ -2885,20 +2878,7 @@ def generate_agenda_pdf(
     )
 
 
-@router.get("/{agenda_id}/minutes.pdf")
-def generate_minutes_pdf(
-    agenda_id: int,
-    download: bool = False,
-    user: dict = Depends(get_council_or_staff_user),
-):
-    with pool.connection() as conn:
-        agenda = _load_agenda(conn, agenda_id)
-        if not agenda:
-            raise HTTPException(status_code=404, detail="Agenda not found")
-        if not has_permission(user, "agendas.manage") and not _is_council_finalized(conn, agenda_id):
-            raise HTTPException(status_code=403, detail="Access restricted to finalized agendas")
-        prefs = _load_preferences(conn)
-
+def _build_minutes_response(agenda: dict, prefs: dict, agenda_id: int, download: bool) -> Response:
     def fetch_doc(object_key: str) -> bytes:
         obj = _minio().get_object(_bucket(), object_key)
         try:
@@ -2920,3 +2900,70 @@ def generate_minutes_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'{disp}; filename="{safe_title}_minutes.pdf"'},
     )
+
+
+@router.get("/public/{agenda_id}/packet.pdf")
+def generate_public_agenda_pdf(
+    agenda_id: int,
+    download: bool = False,
+    summary: bool = False,
+):
+    with pool.connection() as conn:
+        agenda = _load_agenda(conn, agenda_id)
+        if not agenda:
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        if not _is_council_finalized(conn, agenda_id):
+            raise HTTPException(status_code=403, detail="Access restricted to finalized agendas")
+        prefs = _load_preferences(conn)
+    return _build_packet_response(agenda, prefs, agenda_id, summary, download)
+
+
+@router.get("/public/{agenda_id}/minutes.pdf")
+def generate_public_minutes_pdf(
+    agenda_id: int,
+    download: bool = False,
+):
+    with pool.connection() as conn:
+        agenda = _load_agenda(conn, agenda_id)
+        if not agenda:
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        if not _is_council_finalized(conn, agenda_id):
+            raise HTTPException(status_code=403, detail="Access restricted to finalized agendas")
+        prefs = _load_preferences(conn)
+    return _build_minutes_response(agenda, prefs, agenda_id, download)
+
+
+@router.get("/{agenda_id}/packet.pdf")
+def generate_agenda_pdf(
+    agenda_id: int,
+    download: bool = False,
+    summary: bool = False,
+    user: dict = Depends(get_council_or_staff_user),
+):
+    with pool.connection() as conn:
+        agenda = _load_agenda(conn, agenda_id)
+        if not agenda:
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        if not has_permission(user, "agendas.manage"):
+            if not _is_council_finalized(conn, agenda_id):
+                raise HTTPException(
+                    status_code=403, detail="Access restricted to finalized agendas"
+                )
+        prefs = _load_preferences(conn)
+    return _build_packet_response(agenda, prefs, agenda_id, summary, download)
+
+
+@router.get("/{agenda_id}/minutes.pdf")
+def generate_minutes_pdf(
+    agenda_id: int,
+    download: bool = False,
+    user: dict = Depends(get_council_or_staff_user),
+):
+    with pool.connection() as conn:
+        agenda = _load_agenda(conn, agenda_id)
+        if not agenda:
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        if not has_permission(user, "agendas.manage") and not _is_council_finalized(conn, agenda_id):
+            raise HTTPException(status_code=403, detail="Access restricted to finalized agendas")
+        prefs = _load_preferences(conn)
+    return _build_minutes_response(agenda, prefs, agenda_id, download)
