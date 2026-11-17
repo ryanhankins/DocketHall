@@ -69,7 +69,7 @@ function PublicPermitsPortal() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#f5f7fa' }}>
-      <a href="#portal-main" style={{ position: 'absolute', left: '-9999px' }}>Skip To Main Content</a>
+      <a className="skip-link" href="#portal-main">Skip To Main Content</a>
       <header>
         <a
           href="/"

@@ -515,7 +515,9 @@ export default function RecordsPage({ me }) {
                         {rec.doc_number || '—'}
                       </td>
                       <td style={{ padding: '8px 6px' }}>
-                        <strong>{rec.title}</strong>
+                        <button type="button" className="link-btn" onClick={(e) => { e.stopPropagation(); openDetail(rec); }}>
+                          {rec.title}
+                        </button>
                         <ExpiryBadge flag={rec.expiry_flag} />
                         {rec.is_public && (
                           <span className="badge" style={{ marginLeft: 6 }}>

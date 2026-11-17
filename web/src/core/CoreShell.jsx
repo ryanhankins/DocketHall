@@ -240,6 +240,7 @@ export default function CoreShell() {
 
   return (
     <>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <header>
         <a
           href="/"
@@ -397,7 +398,7 @@ export default function CoreShell() {
           </nav>
         )}
 
-        <main>
+        <main id="main-content">
           {me?.is_default_password && (
             <div
               className="banner show"

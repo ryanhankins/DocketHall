@@ -788,7 +788,11 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
                   <tbody>
                     {items.map((c) => (
                       <tr key={c.id} onClick={() => setSelected(c)} style={{ cursor: 'pointer', background: selected?.id === c.id ? '#eff6ff' : 'transparent' }}>
-                        <td style={{ whiteSpace: 'nowrap', fontWeight: 500 }}>{c.complaint_number}</td>
+                        <td style={{ whiteSpace: 'nowrap', fontWeight: 500 }}>
+                          <button type="button" className="link-btn" onClick={(e) => { e.stopPropagation(); setSelected(c); }}>
+                            {c.complaint_number}
+                          </button>
+                        </td>
                         <td style={{ whiteSpace: 'nowrap' }}>{formatDate(c.created_at)}</td>
                         <td>{c.subject_property_address || c.subject_person_name || '—'}</td>
                         <td>{c.ordinance_section || '—'}</td>
@@ -918,6 +922,7 @@ function PublicHomePage() {
 
   return (
     <>
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <header>
         <a
           href="/#overview"
@@ -963,7 +968,7 @@ function PublicHomePage() {
         </div>
       </header>
 
-      <main style={{ maxWidth: 1180, margin: '0 auto', padding: '1.25rem' }}>
+      <main id="main-content" style={{ maxWidth: 1180, margin: '0 auto', padding: '1.25rem' }}>
         {me?.is_default_password && (
           <div
             className="banner show"

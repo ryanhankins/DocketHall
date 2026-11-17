@@ -119,7 +119,9 @@ export default function ComplaintLogPage() {
                     }}
                   >
                     <td style={{ padding: '8px 6px', whiteSpace: 'nowrap', fontWeight: 500 }}>
-                      {c.complaint_number}
+                      <button type="button" className="link-btn" onClick={(e) => { e.stopPropagation(); setSelected(c); }}>
+                        {c.complaint_number}
+                      </button>
                     </td>
                     <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>
                       {formatDate(c.created_at)}

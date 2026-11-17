@@ -17,6 +17,18 @@
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible, [tabindex]:not([tabindex="-1"]):focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
+}
+.skip-link {
+  position: absolute; left: -9999px; top: auto; width: 1px; height: 1px; overflow: hidden;
+}
+.skip-link:focus {
+  position: fixed; top: .5rem; left: .5rem; width: auto; height: auto; z-index: 200;
+  background: #1d4ed8; color: #fff; padding: .5rem .85rem; border-radius: 6px;
+  font-weight: 600; text-decoration: none;
+}
 body {
   margin: 0; min-height: 100vh; display: flex; flex-direction: column;
   font-family: system-ui, -apple-system, sans-serif; background: #f3f5f8; color: #1f2933;
@@ -33,7 +45,7 @@ nav {
 }
 nav h2 {
   margin: .75rem .6rem .4rem; font-size: .72rem; text-transform: uppercase;
-  letter-spacing: .06em; color: #7b8794;
+  letter-spacing: .06em; color: #4a5568;
 }
 nav h2:first-child { margin-top: 0; }
 nav button {
@@ -102,7 +114,7 @@ tr:last-child td { border-bottom: 0; }
 .muted { color: #616e7c; font-size: .9rem; }
 .editable { cursor: pointer; border-radius: 4px; transition: background .12s; }
 .editable:hover { background: #eef2ff; }
-.editable-empty { font-style: italic; color: #9aa5b1; }
+.editable-empty { font-style: italic; color: #52606d; }
 .tabs { display: flex; gap: .5rem; margin-bottom: 1.25rem; border-bottom: 1px solid #d9e2ec; padding-bottom: .65rem; }
 .tabs button.active { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
 .multi-filter { position: relative; }
