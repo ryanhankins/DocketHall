@@ -36,7 +36,38 @@ export default function CoreShell() {
   const [backupStatus, setBackupStatus] = useState({ overdue: false, reminder_days: 0, days_since_backup: 0, last_backup_at: null });
   const [backlogDueCount, setBacklogDueCount] = useState(0);
   const [hash, setHash] = useState(() => location.hash.replace(/^#/, ''));
-  const [openSubmenus, setOpenSubmenus] = useState({ 'agenda-management': true, preferences: false });
+  const [openSubmenus, setOpenSubmenus] = useState(() => {
+    try {
+      const saved = localStorage.getItem('civicdesk.openSubmenus');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
+    } catch { /* ignore storage errors */ }
+    return {
+      'agenda-management': true,
+      'permits-staff': true,
+      'complaints-staff': true,
+    };
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('civicdesk.openSubmenus', JSON.stringify(openSubmenus));
+    } catch { /* ignore storage errors */ }
+  }, [openSubmenus]);
+
+  const collapsibleGroupIds = useMemo(() => {
+    const ids = [];
+    for (const mod of modulesMeta) {
+      for (const grp of (mod.nav_groups || [])) {
+        if ((grp.items || []).length > 1) ids.push(grp.id);
+      }
+    }
+    return ids;
+  }, [modulesMeta]);
+
+  const allGroupsOpen = collapsibleGroupIds.length > 0 && collapsibleGroupIds.every(id => !!openSubmenus[id]);
 
   // Change password modal
   const [pwOpen, setPwOpen] = useState(false);
@@ -283,6 +314,34 @@ export default function CoreShell() {
       <div className="shell">
         {me && (
           <nav id="menu">
+            {collapsibleGroupIds.length >= 2 && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '.25rem' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextVal = !allGroupsOpen;
+                    setOpenSubmenus(prev => {
+                      const next = { ...prev };
+                      for (const id of collapsibleGroupIds) next[id] = nextVal;
+                      return next;
+                    });
+                  }}
+                  style={{
+                    width: 'auto',
+                    background: 'none',
+                    border: 'none',
+                    padding: '2px 4px',
+                    margin: 0,
+                    fontSize: '.78rem',
+                    fontWeight: 500,
+                    color: '#64748b',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {allGroupsOpen ? 'Collapse all' : 'Expand all'}
+                </button>
+              </div>
+            )}
             {modulesMeta.map(mod => {
               if (!mod.nav_groups?.length) return null;
               return (
