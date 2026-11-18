@@ -150,7 +150,14 @@ export default function CouncilPage({ me }) {
                     <a className="btn sm" href={`/api/agendas/${a.id}/packet.pdf?summary=1`} target="_blank" rel="noreferrer">Summary</a>
                     <a className="btn sm primary" href={`/api/agendas/${a.id}/packet.pdf`} target="_blank" rel="noreferrer">Full Packet</a>
                     <a className="btn sm" href={`/api/agendas/${a.id}/packet.pdf?download=1`} target="_blank" rel="noreferrer">Download</a>
-                    <a className="btn sm" href={`/api/agendas/${a.id}/minutes.pdf`} target="_blank" rel="noreferrer">Minutes</a>
+                    <a className="btn sm" href={`/api/agendas/${a.id}/minutes.pdf`} target="_blank" rel="noreferrer">
+                      {a.minutes_status === 'approved' ? 'Minutes' : 'Minutes (Draft)'}
+                    </a>
+                    {a.media_url && (
+                      <a className="btn sm" href={a.media_url} target="_blank" rel="noreferrer">
+                        {a.media_type === 'audio' ? 'Listen Audio' : 'Watch Video'}
+                      </a>
+                    )}
                   </div>
                 </td>
               </tr>

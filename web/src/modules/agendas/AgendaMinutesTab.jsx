@@ -97,11 +97,13 @@ function ItemMinutesCard({ agendaId, item, onSaved }) {
 export default function AgendaMinutesTab({ agenda, onAgendaUpdated }) {
   const [attendance, setAttendance] = useState(agenda.minutes_attendance || '');
   const [notes, setNotes] = useState(agenda.minutes_notes || '');
+  const [minutesStatus, setMinutesStatus] = useState(agenda.minutes_status || 'draft');
   const [msg, setMsg] = useState({ text: '', isError: false });
 
   useEffect(() => {
     setAttendance(agenda.minutes_attendance || '');
     setNotes(agenda.minutes_notes || '');
+    setMinutesStatus(agenda.minutes_status || 'draft');
     setMsg({ text: '', isError: false });
   }, [agenda]);
 
@@ -114,6 +116,7 @@ export default function AgendaMinutesTab({ agenda, onAgendaUpdated }) {
         body: JSON.stringify({
           minutes_attendance: attendance.trim(),
           minutes_notes: notes.trim(),
+          minutes_status: minutesStatus,
         }),
       });
       onAgendaUpdated?.(updated);
@@ -139,8 +142,20 @@ export default function AgendaMinutesTab({ agenda, onAgendaUpdated }) {
       </datalist>
 
       <div className="card">
-        <h2 style={{ marginBottom: '.6rem' }}>Meeting Attendance &amp; Summary</h2>
+        <div className="between" style={{ marginBottom: '.6rem' }}>
+          <h2 style={{ margin: 0 }}>Meeting Attendance &amp; Summary</h2>
+          <span className={`badge ${minutesStatus === 'approved' ? 'active' : 'draft'}`}>
+            {minutesStatus === 'approved' ? 'Approved Minutes' : 'Draft (PDF Watermarked)'}
+          </span>
+        </div>
         <form onSubmit={handleMetaSave}>
+          <div className="field" style={{ marginBottom: '.65rem', maxWidth: 360 }}>
+            <label htmlFor="minutes-status">Minutes Approval Status</label>
+            <select id="minutes-status" value={minutesStatus} onChange={(e) => setMinutesStatus(e.target.value)}>
+              <option value="draft">Draft (adds diagonal DRAFT watermark to PDF)</option>
+              <option value="approved">Approved (final public minutes, no watermark)</option>
+            </select>
+          </div>
           <div className="field" style={{ marginBottom: '.65rem' }}>
             <label htmlFor="minutes-attendance">Attendance / Roll Call</label>
             <textarea id="minutes-attendance" rows={2} placeholder="Present: Mayor, Councilmembers... Absent: ..." value={attendance} onChange={(e) => setAttendance(e.target.value)} />

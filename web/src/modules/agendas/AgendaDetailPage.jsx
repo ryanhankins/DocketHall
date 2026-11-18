@@ -41,6 +41,8 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
   const [editBody, setEditBody] = useState('');
   const [editDate, setEditDate] = useState('');
   const [editTime, setEditTime] = useState('');
+  const [editMediaUrl, setEditMediaUrl] = useState('');
+  const [editMediaType, setEditMediaType] = useState('');
   const [saveMsg, setSaveMsg] = useState({ text: '', isError: false });
   const [importOpen, setImportOpen] = useState(false);
   const showToast = useToast();
@@ -50,6 +52,8 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
     setEditBody(ag.body || '');
     setEditDate(ag.meeting_date || '');
     setEditTime(toTimeInputValue(ag.meeting_time || defTime));
+    setEditMediaUrl(ag.media_url || '');
+    setEditMediaType(ag.media_type || '');
   }, [defaultMeetingTime]);
 
   const loadAll = useCallback(async () => {
@@ -217,6 +221,8 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
                 body: editBody,
                 meeting_date: editDate,
                 meeting_time: editTime,
+                media_url: editMediaUrl,
+                media_type: editMediaUrl.trim() ? (editMediaType || 'video') : '',
               }),
             });
             applyAgendaState(updated);
@@ -239,6 +245,24 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
         <div className="field">
           <label htmlFor="detail-time-input">Meeting Time</label>
           <input id="detail-time-input" type="time" value={editTime} onChange={(e) => setEditTime(e.target.value)} />
+        </div>
+        <div className="field" style={{ minWidth: 120 }}>
+          <label htmlFor="detail-media-type">Media Type</label>
+          <select id="detail-media-type" value={editMediaType} onChange={(e) => setEditMediaType(e.target.value)}>
+            <option value="">None</option>
+            <option value="video">Video</option>
+            <option value="audio">Audio</option>
+          </select>
+        </div>
+        <div className="field" style={{ flex: 2, minWidth: 220 }}>
+          <label htmlFor="detail-media-url">Meeting Media URL (optional)</label>
+          <input
+            id="detail-media-url"
+            type="url"
+            placeholder="https://youtube.com/... or recording URL"
+            value={editMediaUrl}
+            onChange={(e) => setEditMediaUrl(e.target.value)}
+          />
         </div>
         <button type="submit" className="btn sm primary">Save Details</button>
         {saveMsg.text && <span className={saveMsg.isError ? 'error-msg' : 'ok-msg'} style={{ margin: 0 }}>{saveMsg.text}</span>}

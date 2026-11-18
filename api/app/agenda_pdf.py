@@ -518,6 +518,24 @@ def _stamp_page_number(page, page_num: int, total_pages: int) -> None:
     page.merge_page(overlay)
 
 
+def _stamp_draft_watermark(page) -> None:
+    """Overlay a diagonal semi-transparent red 'DRAFT' watermark onto a PDF page."""
+    w = float(page.mediabox.width)
+    h = float(page.mediabox.height)
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(w, h))
+    c.saveState()
+    c.translate(w / 2.0, h / 2.0)
+    c.rotate(42)
+    c.setFont("Helvetica-Bold", 78)
+    c.setFillColorRGB(0.86, 0.15, 0.15, alpha=0.18)
+    c.drawCentredString(0, -24, "DRAFT")
+    c.restoreState()
+    c.save()
+    overlay = PdfReader(io.BytesIO(buf.getvalue())).pages[0]
+    page.merge_page(overlay)
+
+
 def render_single_document_pdf(item: dict, doc: dict, data: bytes) -> bytes:
     """Render any supported supporting document as a standalone PDF."""
     dtype = doc["doc_type"]
@@ -721,6 +739,7 @@ def build_minutes_pdf(
     fetch_doc_bytes: Callable[[str], bytes],
     include_page_numbers: bool = True,
     preferences: dict | None = None,
+    watermark_draft: bool = False,
 ) -> bytes:
     """Build a formatted Meeting Minutes PDF from the agenda, attendance, votes, and notes."""
     prefs = preferences or {}
@@ -738,7 +757,8 @@ def build_minutes_pdf(
     item_h = ParagraphStyle("MinItem", parent=styles["Normal"], fontSize=11, leading=15, fontName="Helvetica-Bold", spaceBefore=8, spaceAfter=2)
     body_p = ParagraphStyle("MinBody", parent=styles["Normal"], fontSize=9.5, leading=13, leftIndent=14, textColor=colors.HexColor("#334155"), spaceAfter=3)
 
-    flow = [Paragraph("MEETING MINUTES", kicker)]
+    kicker_text = "DRAFT MEETING MINUTES (PENDING APPROVAL)" if watermark_draft else "MEETING MINUTES (APPROVED)"
+    flow = [Paragraph(kicker_text, kicker)]
     _append_agenda_header(flow, agenda, prefs, logo_bytes, styles)
 
     if agenda.get("minutes_attendance"):
@@ -781,7 +801,7 @@ def build_minutes_pdf(
                 flow.append(Paragraph("<i>No action or notes recorded.</i>", body_p))
 
     pdf_bytes = _render_flowables(flow)
-    if not include_page_numbers:
+    if not include_page_numbers and not watermark_draft:
         return pdf_bytes
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
@@ -789,7 +809,10 @@ def build_minutes_pdf(
         writer.add_page(page)
     total = len(writer.pages)
     for idx, page in enumerate(writer.pages, start=1):
-        _stamp_page_number(page, idx, total)
+        if include_page_numbers:
+            _stamp_page_number(page, idx, total)
+        if watermark_draft:
+            _stamp_draft_watermark(page)
     out = io.BytesIO()
     writer.write(out)
     return out.getvalue()

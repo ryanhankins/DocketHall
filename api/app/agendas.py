@@ -82,6 +82,9 @@ ALTER TABLE agendas ADD COLUMN IF NOT EXISTS meeting_time TEXT NOT NULL DEFAULT 
 ALTER TABLE agendas ADD COLUMN IF NOT EXISTS finalized_at TIMESTAMPTZ;
 ALTER TABLE agendas ADD COLUMN IF NOT EXISTS minutes_attendance TEXT NOT NULL DEFAULT '';
 ALTER TABLE agendas ADD COLUMN IF NOT EXISTS minutes_notes TEXT NOT NULL DEFAULT '';
+ALTER TABLE agendas ADD COLUMN IF NOT EXISTS media_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE agendas ADD COLUMN IF NOT EXISTS media_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE agendas ADD COLUMN IF NOT EXISTS minutes_status TEXT NOT NULL DEFAULT 'draft';
 CREATE TABLE IF NOT EXISTS agenda_items (
     id                  BIGSERIAL PRIMARY KEY,
     agenda_id           BIGINT REFERENCES agendas(id) ON DELETE CASCADE,
@@ -416,7 +419,8 @@ def _doc_type_label(filename: str, content_type: str = "") -> str:
 def _load_agenda(conn, agenda_id: int) -> dict | None:
     row = conn.execute(
         "SELECT id, title, body, meeting_date, meeting_time, status, finalized_at, "
-        "       created_at, updated_at, minutes_attendance, minutes_notes "
+        "       created_at, updated_at, minutes_attendance, minutes_notes, "
+        "       media_url, media_type, minutes_status "
         "FROM agendas WHERE id = %s",
         (agenda_id,),
     ).fetchone()
@@ -509,6 +513,9 @@ def _load_agenda(conn, agenda_id: int) -> dict | None:
         "updated_at": row[8].isoformat() if row[8] else None,
         "minutes_attendance": row[9],
         "minutes_notes": row[10],
+        "media_url": row[11],
+        "media_type": row[12],
+        "minutes_status": row[13],
         "items": items,
         "activity_log": [
             {
@@ -526,12 +533,31 @@ def _load_agenda(conn, agenda_id: int) -> dict | None:
 router = APIRouter(prefix="/api/agendas", tags=["agendas"])
 
 
+def _validate_media(media_url: str | None, media_type: str | None) -> tuple[str | None, str | None]:
+    url = media_url.strip() if media_url is not None else None
+    mtype = media_type.strip().lower() if media_type is not None else None
+    if mtype is not None and mtype not in ("", "video", "audio"):
+        raise HTTPException(status_code=400, detail="Media type must be video, audio, or blank")
+    if url is not None:
+        if len(url) > 500:
+            raise HTTPException(status_code=400, detail="Media URL cannot exceed 500 characters")
+        if url and not url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail="Media URL must start with http:// or https://")
+        if not url and mtype is None:
+            mtype = ""
+        elif url and (mtype is None or mtype == ""):
+            mtype = "video"
+    return url, mtype
+
+
 class AgendaIn(BaseModel):
     title: str
     body: str
     meeting_date: date
     meeting_time: str | None = None
     template_id: int | None = None
+    media_url: str | None = None
+    media_type: Literal["", "video", "audio"] | None = None
 
 
 class AgendaPatch(BaseModel):
@@ -542,6 +568,9 @@ class AgendaPatch(BaseModel):
     status: str | None = None
     minutes_attendance: str | None = None
     minutes_notes: str | None = None
+    media_url: str | None = None
+    media_type: Literal["", "video", "audio"] | None = None
+    minutes_status: Literal["draft", "approved"] | None = None
 
 
 class ItemIn(BaseModel):
@@ -1439,7 +1468,7 @@ def assign_backlog_item(
 def list_agendas(status: str | None = None, _: dict = Depends(get_staff_user)):
     sql = (
         "SELECT a.id, a.title, a.body, a.meeting_date, a.meeting_time, a.status, a.finalized_at, "
-        "       a.created_at, a.updated_at, "
+        "       a.created_at, a.updated_at, a.media_url, a.media_type, a.minutes_status, "
         "       COUNT(DISTINCT i.id) AS item_count, "
         "       COUNT(d.id) AS doc_count "
         "FROM agendas a "
@@ -1465,8 +1494,11 @@ def list_agendas(status: str | None = None, _: dict = Depends(get_staff_user)):
             "finalized_at": r[6].isoformat() if r[6] else None,
             "created_at": r[7].isoformat() if r[7] else None,
             "updated_at": r[8].isoformat() if r[8] else None,
-            "item_count": r[9],
-            "doc_count": r[10],
+            "media_url": r[9],
+            "media_type": r[10],
+            "minutes_status": r[11],
+            "item_count": r[12],
+            "doc_count": r[13],
         }
         for r in rows
     ]
@@ -2007,7 +2039,7 @@ def delete_council_submission(sub_id: int, user: dict = Depends(get_council_or_s
 def _query_finalized_agendas() -> list[dict]:
     sql = (
         "SELECT a.id, a.title, a.body, a.meeting_date, a.meeting_time, a.status, "
-        "       a.finalized_at, a.created_at, a.updated_at, "
+        "       a.finalized_at, a.created_at, a.updated_at, a.media_url, a.media_type, a.minutes_status, "
         "       COUNT(DISTINCT i.id) AS item_count, "
         "       COUNT(d.id) AS doc_count "
         "FROM agendas a "
@@ -2029,8 +2061,11 @@ def _query_finalized_agendas() -> list[dict]:
             "finalized_at": r[6].isoformat() if r[6] else None,
             "created_at": r[7].isoformat() if r[7] else None,
             "updated_at": r[8].isoformat() if r[8] else None,
-            "item_count": r[9],
-            "doc_count": r[10],
+            "media_url": r[9],
+            "media_type": r[10],
+            "minutes_status": r[11],
+            "item_count": r[12],
+            "doc_count": r[13],
         }
         for r in rows
     ]
@@ -2090,6 +2125,7 @@ def update_agenda(agenda_id: int, body: AgendaPatch, request: Request, user: dic
         )
         set_finalized = is_next_final and not is_prev_final
         clear_finalized = (next_status is not None) and (not is_next_final)
+        media_url, media_type = _validate_media(body.media_url, body.media_type)
         row = conn.execute(
             "UPDATE agendas SET "
             "title = COALESCE(%s, title), "
@@ -2100,6 +2136,9 @@ def update_agenda(agenda_id: int, body: AgendaPatch, request: Request, user: dic
             "finalized_at = CASE WHEN %s THEN now() WHEN %s THEN NULL ELSE finalized_at END, "
             "minutes_attendance = COALESCE(%s, minutes_attendance), "
             "minutes_notes = COALESCE(%s, minutes_notes), "
+            "media_url = COALESCE(%s, media_url), "
+            "media_type = COALESCE(%s, media_type), "
+            "minutes_status = COALESCE(%s, minutes_status), "
             "updated_at = now() "
             "WHERE id = %s RETURNING id",
             (
@@ -2112,6 +2151,9 @@ def update_agenda(agenda_id: int, body: AgendaPatch, request: Request, user: dic
                 clear_finalized,
                 body.minutes_attendance.strip() if body.minutes_attendance is not None else None,
                 body.minutes_notes.strip() if body.minutes_notes is not None else None,
+                media_url,
+                media_type,
+                body.minutes_status,
                 agenda_id,
             ),
         ).fetchone()
@@ -2911,6 +2953,7 @@ def _build_minutes_response(agenda: dict, prefs: dict, agenda_id: int, download:
         fetch_doc,
         include_page_numbers=prefs["include_page_numbers"],
         preferences=prefs,
+        watermark_draft=(agenda.get("minutes_status", "draft") != "approved"),
     )
     safe_title = _SAFE_NAME_RE.sub("_", agenda["title"]).strip("._") or f"agenda_{agenda_id}"
     disp = "attachment" if download else "inline"
