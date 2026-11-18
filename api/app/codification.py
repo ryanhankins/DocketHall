@@ -20,7 +20,7 @@ import re
 import uuid
 from xml.sax.saxutils import escape as _xml_escape
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 from pypdf import PdfReader
@@ -31,6 +31,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 from .agendas import _bucket, _minio, _remove_minio_objects
 from .auth import require_permission
 from .db import pool
+from .subscriptions import notify_topic_subscribers
 
 MAX_CODE_PDF_BYTES = int(os.environ.get("MAX_CODE_PDF_BYTES", str(50 * 1024 * 1024)))
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -429,7 +430,7 @@ def delete_chapter(chapter_id: int, _: dict = Depends(require_permission("codifi
 
 
 @router.post("/sections", status_code=201)
-def create_section(body: SectionIn, user: dict = Depends(require_permission("codification.manage"))):
+def create_section(body: SectionIn, request: Request, user: dict = Depends(require_permission("codification.manage"))):
     sec_num = body.section_number.strip()
     title = body.title.strip()
     if not sec_num or not title:
@@ -450,11 +451,19 @@ def create_section(body: SectionIn, user: dict = Depends(require_permission("cod
             "VALUES (%s, %s, %s, 'Section created', %s, %s)",
             (row[0], body.ordinance_ref.strip(), body.effective_date.strip(), body.body.strip(), user["username"]),
         )
+    if body.is_published:
+        notify_topic_subscribers(
+            "codification",
+            f"[CivicDesk] City Code Added: § {sec_num} — {title}",
+            f"Municipal Code Section {sec_num} ({title}) has been published.",
+            link_path="/#codification",
+            request=request,
+        )
     return {"id": row[0], "section_number": sec_num, "title": title}
 
 
 @router.patch("/sections/{section_id}")
-def update_section(section_id: int, body: SectionPatch, user: dict = Depends(require_permission("codification.manage"))):
+def update_section(section_id: int, body: SectionPatch, request: Request, user: dict = Depends(require_permission("codification.manage"))):
     with pool.connection() as conn:
         cur = conn.execute(
             "SELECT body, title, ordinance_ref, effective_date FROM code_sections WHERE id = %s", (section_id,)
@@ -502,6 +511,14 @@ def update_section(section_id: int, body: SectionPatch, user: dict = Depends(req
                     user["username"],
                 ),
             )
+    if row[11] and (body.body is not None or body.title is not None or body.ordinance_ref is not None or body.change_summary.strip()):
+        notify_topic_subscribers(
+            "codification",
+            f"[CivicDesk] City Code Updated: § {row[2]} — {row[3]}",
+            f"Municipal Code Section {row[2]} ({row[3]}) was updated.",
+            link_path="/#codification",
+            request=request,
+        )
     return {
         "id": row[0], "chapter_id": row[1], "section_number": row[2], "title": row[3],
         "summary": row[4], "body": row[5], "ordinance_ref": row[6], "effective_date": row[7],

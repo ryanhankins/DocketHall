@@ -38,11 +38,13 @@ export default function IntegrationsPage() {
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailMsg, setEmailMsg] = useState({ text: '', isError: false });
+  const [subData, setSubData] = useState({ topics: [], counts: {}, subscribers: [] });
 
   const loadConfig = useCallback(async () => {
-    const [data, em] = await Promise.all([
+    const [data, em, subs] = await Promise.all([
       api('/api/integrations/google-cloud'),
       api('/api/integrations/email'),
+      api('/api/subscriptions').catch(() => ({ topics: [], counts: {}, subscribers: [] })),
     ]);
     setCfg(data);
     setProjectId(data.project_id || '');
@@ -53,6 +55,7 @@ export default function IntegrationsPage() {
     setSmtpPort(String(em.smtp_port || 587));
     setSenderEmail(em.sender_email || '');
     setEmailEnabled(em.has_password ? Boolean(em.enabled) : true);
+    setSubData(subs || { topics: [], counts: {}, subscribers: [] });
   }, []);
 
   useEffect(() => {
@@ -434,6 +437,64 @@ export default function IntegrationsPage() {
             </div>
           )}
         </form>
+      </div>
+
+      <div className="card">
+        <div className="between" style={{ marginBottom: '.75rem' }}>
+          <div>
+            <h2 style={{ margin: 0 }}>Public Alert Subscribers</h2>
+            <p className="muted" style={{ margin: '4px 0 0' }}>
+              Residents subscribed on the Public Portal for automatic email alerts when agendas, City Code sections, or public records are published.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
+            {(subData.topics || []).map((t) => (
+              <span key={t.id} className="badge active">
+                {t.label}: {subData.counts?.[t.id] ?? 0}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {!(subData.subscribers || []).length ? (
+          <p className="muted" style={{ margin: 0 }}>No public subscribers yet.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr><th>Email</th><th>Topic</th><th>Status</th><th>Subscribed</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+              {subData.subscribers.map((s) => (
+                <tr key={s.id}>
+                  <td>{s.email}</td>
+                  <td>{s.topic_label}</td>
+                  <td>
+                    <span className={`badge ${s.is_active ? 'active' : 'disabled'}`}>
+                      {s.is_active ? 'Active' : 'Unsubscribed'}
+                    </span>
+                  </td>
+                  <td className="muted">{s.created_at ? formatDate(s.created_at) : '—'}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="btn sm danger"
+                      onClick={async () => {
+                        await api(`/api/subscriptions/${s.id}`, { method: 'DELETE' });
+                        setSubData((prev) => ({
+                          ...prev,
+                          subscribers: prev.subscribers.filter((x) => x.id !== s.id),
+                        }));
+                        showToast('Subscriber removed', 'ok');
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </section>
   );

@@ -21,13 +21,14 @@ import os
 import re
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 from .agendas import _bucket, _minio, _remove_minio_objects
 from .auth import require_permission
 from .db import pool
+from .subscriptions import notify_topic_subscribers
 
 MAX_REPO_FILE_BYTES = int(os.environ.get("MAX_REPO_FILE_BYTES", str(50 * 1024 * 1024)))
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -261,6 +262,7 @@ def list_records(
 @router.post("", status_code=201)
 def create_record(
     body: RecordCreateIn,
+    request: Request,
     user: dict = Depends(require_permission("records.manage")),
 ):
     if not body.title.strip():
@@ -294,7 +296,16 @@ def create_record(
             year = datetime.now(timezone.utc).year
             auto_num = f"REC-{year}-{doc_id:04d}"
             conn.execute("UPDATE repository_documents SET doc_number = %s WHERE id = %s", (auto_num, doc_id))
-        return _get_record_or_404(conn, doc_id)
+        rec = _get_record_or_404(conn, doc_id)
+    if rec["is_public"]:
+        notify_topic_subscribers(
+            "records",
+            f"[CivicDesk] New Public Record Published: {rec['title']}",
+            f"{rec['category']}: {rec['title']} ({rec['doc_number']}) has been published to Public Records.",
+            link_path="/#records",
+            request=request,
+        )
+    return rec
 
 
 @router.patch("/{doc_id}")

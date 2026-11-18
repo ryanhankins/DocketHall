@@ -869,6 +869,102 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
   );
 }
 
+function NotifyMeCard() {
+  const [topics, setTopics] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ text: '', isError: false });
+
+  useEffect(() => {
+    fetch('/api/subscriptions/topics')
+      .then((r) => (r.ok ? r.json() : { topics: [] }))
+      .then((d) => {
+        const list = Array.isArray(d.topics) ? d.topics : [];
+        setTopics(list);
+        setSelected(list.map((t) => t.id));
+      })
+      .catch(() => {});
+  }, []);
+
+  if (!topics.length) return null;
+
+  function toggleTopic(id) {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  async function handleSubscribe(e) {
+    e.preventDefault();
+    setMsg({ text: '', isError: false });
+    if (!selected.length) {
+      setMsg({ text: 'Please select at least one alert topic.', isError: true });
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await fetch('/api/subscriptions/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), topics: selected }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Subscription failed');
+      setMsg({ text: data.message || 'Subscribed to email alerts.', isError: false });
+      setEmail('');
+    } catch (err) {
+      setMsg({ text: err.message, isError: true });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <h2 style={{ margin: '0 0 .25rem', fontSize: '1.1rem' }}>Public Email Alerts</h2>
+          <p className="muted" style={{ margin: '0 0 .75rem', fontSize: '.9rem' }}>
+            Subscribe to receive automatic email alerts whenever new city agendas, code updates, or public records are published. Every email includes a one-click unsubscribe link.
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem 1.25rem', marginBottom: '.75rem' }}>
+            {topics.map((t) => (
+              <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '.4rem', fontSize: '.9rem', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  style={{ width: 'auto' }}
+                  checked={selected.includes(t.id)}
+                  onChange={() => toggleTopic(t.id)}
+                />
+                <span>{t.label}</span>
+              </label>
+            ))}
+          </div>
+          <form onSubmit={handleSubscribe} style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem', alignItems: 'center', maxWidth: 460 }}>
+            <input
+              type="email"
+              required
+              aria-label="Email address for public alerts"
+              placeholder="Enter your email address…"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              style={{ flex: 1, minWidth: 220 }}
+            />
+            <button type="submit" className="btn primary" disabled={busy}>
+              {busy ? 'Subscribing…' : 'Subscribe'}
+            </button>
+          </form>
+          {msg.text && (
+            <div className={msg.isError ? 'error-msg' : 'ok-msg'} style={{ marginTop: '.6rem' }} role="status">
+              {msg.text}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function PublicHomePage() {
   const params = useMemo(() => new URLSearchParams(location.search), []);
   const [branding, setBranding] = useState({ city_title: '', has_city_logo: false });
@@ -1065,6 +1161,8 @@ function PublicHomePage() {
                 </div>
               ))}
             </div>
+
+            <NotifyMeCard />
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>

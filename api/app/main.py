@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 
-from . import auth, backup, branding, integrations, registry, users
+from . import auth, backup, branding, integrations, registry, subscriptions, users
 from .db import open_pool, pool
 from .modules import register_builtin_modules
 
@@ -29,6 +29,7 @@ async def lifespan(app: FastAPI):
     open_pool()
     auth.bootstrap()
     integrations.bootstrap()
+    subscriptions.bootstrap()
     registry.bootstrap()
     for mod in registry.get_all_registered_modules():
         mod.bootstrap()
@@ -41,6 +42,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(branding.router)
 app.include_router(integrations.router)
+app.include_router(subscriptions.router)
 app.include_router(backup.router)
 app.include_router(registry.router)
 

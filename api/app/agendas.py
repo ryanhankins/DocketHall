@@ -36,6 +36,7 @@ from .agenda_pdf import build_agenda_packet_pdf, build_minutes_pdf, render_singl
 from .auth import current_user, has_permission
 from .db import _read_secret, pool
 from .integrations import send_notification_email
+from .subscriptions import notify_topic_subscribers
 
 STAFF_ROLES = {"admin_staff", "admin"}
 COUNCIL_ACCESS_ROLES = STAFF_ROLES | {"council_member", "non_admin_staff"}
@@ -2169,6 +2170,13 @@ def update_agenda(agenda_id: int, body: AgendaPatch, request: Request, user: dic
             f"[CivicDesk] Agenda Finalized: {loaded['title']}",
             f"Agenda '{loaded['title']}' ({loaded['body']}, {loaded['meeting_date']}) was finalized by {user['username']}.",
             link_path=f"/app#agendas/{agenda_id}",
+            request=request,
+        )
+        notify_topic_subscribers(
+            "agendas",
+            f"[CivicDesk] New Meeting Agenda Published: {loaded['title']}",
+            f"A finalized agenda for {loaded['body']} ({loaded['title']}, {loaded['meeting_date']}) has been published.",
+            link_path="/#agendas",
             request=request,
         )
     return loaded
