@@ -127,6 +127,7 @@ MODULE = CivicModule(
             "permission": "permits.manage",
             "items": [
                 {"section": "permits-review", "label": "Permit Review Queue", "permission": "permits.manage"},
+                {"section": "preferences-permits", "label": "Permit Preferences", "permission": "permits.manage"},
             ],
         },
         {

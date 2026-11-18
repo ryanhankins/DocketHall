@@ -123,6 +123,7 @@ MODULE = CivicModule(
             "items": [
                 {"section": "agendas", "label": "Manage Agendas", "permission": "agendas.manage"},
                 {"section": "backlog", "label": "Todos & Backlog", "permission": "agendas.manage", "badge": "backlog"},
+                {"section": "preferences-agenda", "label": "Agenda Preferences", "permission": "agendas.manage"},
             ],
         },
         {

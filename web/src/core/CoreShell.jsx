@@ -134,34 +134,16 @@ export default function CoreShell() {
   const canManageSettings = hasPermission(me, 'settings.manage') || hasPermission(me, 'agendas.manage');
   const isAdmin = me?.role === 'admin';
 
-  // Collect all module preference submenu items in the same order as the sidebar menu
-  const prefNavItems = useMemo(() => {
-    const items = [];
-    if (canManageSettings) {
-      items.push({ section: 'preferences-general', label: 'General Preferences' });
-    }
-    for (const meta of modulesMeta) {
-      const mod = frontendMods[meta.id];
-      if (!mod) continue;
-      for (const it of (mod.prefNavItems || [])) {
-        if (!it.permission || hasPermission(me, it.permission)) {
-          items.push(it);
-        }
-      }
-    }
-    if (canManageSettings) {
-      items.push({ section: 'preferences-backup', label: 'Backup & Restore' });
-    }
-    return items;
-  }, [canManageSettings, frontendMods, modulesMeta, me]);
-
   // Auto-open submenu when active route belongs to it
   useEffect(() => {
-    if (hash.startsWith('agendas') || hash === 'backlog') {
+    if (hash.startsWith('agendas') || hash === 'backlog' || hash === 'preferences-agenda' || hash === 'preferences') {
       setOpenSubmenus(prev => (prev['agenda-management'] ? prev : { ...prev, 'agenda-management': true }));
     }
-    if (hash.startsWith('preferences') || hash === 'permits-catalog-admin') {
-      setOpenSubmenus(prev => (prev.preferences ? prev : { ...prev, preferences: true }));
+    if (hash.startsWith('permits-review') || hash === 'preferences-permits' || hash === 'permits-catalog-admin') {
+      setOpenSubmenus(prev => (prev['permits-staff'] ? prev : { ...prev, 'permits-staff': true }));
+    }
+    if (hash.startsWith('complaints-manage') || hash === 'preferences-complaints') {
+      setOpenSubmenus(prev => (prev['complaints-staff'] ? prev : { ...prev, 'complaints-staff': true }));
     }
   }, [hash]);
 
@@ -301,33 +283,6 @@ export default function CoreShell() {
       <div className="shell">
         {me && (
           <nav id="menu">
-            {isAdmin && (
-              <div id="menu-admin">
-                <h2>Admin</h2>
-                <button
-                  type="button"
-                  className={activeSection === 'users' ? 'active' : ''}
-                  onClick={() => navigate('#users')}
-                >
-                  Manage Users
-                </button>
-                <button
-                  type="button"
-                  className={activeSection === 'modules' ? 'active' : ''}
-                  onClick={() => navigate('#modules')}
-                >
-                  Manage Modules
-                </button>
-                <button
-                  type="button"
-                  className={activeSection === 'integrations' ? 'active' : ''}
-                  onClick={() => navigate('#integrations')}
-                >
-                  Integrations
-                </button>
-              </div>
-            )}
-
             {modulesMeta.map(mod => {
               if (!mod.nav_groups?.length) return null;
               return (
@@ -386,34 +341,54 @@ export default function CoreShell() {
               );
             })}
 
-            {prefNavItems.length > 0 && (
-              <div>
-                <h2>System</h2>
-                <div className="nav-group">
+            {(isAdmin || canManageSettings) && (
+              <div id="menu-admin" style={{ borderTop: '1px solid #e2e8f0', paddingTop: '.65rem', marginTop: '.35rem' }}>
+                <h2>Administration</h2>
+                {isAdmin && (
                   <button
                     type="button"
-                    className="nav-parent"
-                    aria-expanded={!!openSubmenus.preferences}
-                    onClick={() => setOpenSubmenus(prev => ({ ...prev, preferences: !prev.preferences }))}
+                    className={activeSection === 'users' ? 'active' : ''}
+                    onClick={() => navigate('#users')}
                   >
-                    <span>Preferences</span>
-                    <span className="nav-arrow" aria-hidden="true">{openSubmenus.preferences ? '▾' : '▸'}</span>
+                    Manage Users
                   </button>
-                  {openSubmenus.preferences && (
-                    <div className="nav-submenu">
-                      {prefNavItems.map(it => (
-                        <button
-                          key={it.section}
-                          type="button"
-                          className={activeSection === it.section ? 'active' : ''}
-                          onClick={() => navigate(`#${it.section}`)}
-                        >
-                          {it.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+                )}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className={activeSection === 'modules' ? 'active' : ''}
+                    onClick={() => navigate('#modules')}
+                  >
+                    Manage Modules
+                  </button>
+                )}
+                {canManageSettings && (
+                  <button
+                    type="button"
+                    className={activeSection === 'preferences-general' ? 'active' : ''}
+                    onClick={() => navigate('#preferences-general')}
+                  >
+                    General &amp; Branding
+                  </button>
+                )}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className={activeSection === 'integrations' ? 'active' : ''}
+                    onClick={() => navigate('#integrations')}
+                  >
+                    Email &amp; Integrations
+                  </button>
+                )}
+                {canManageSettings && (
+                  <button
+                    type="button"
+                    className={activeSection === 'preferences-backup' ? 'active' : ''}
+                    onClick={() => navigate('#preferences-backup')}
+                  >
+                    Backup &amp; Restore
+                  </button>
+                )}
               </div>
             )}
           </nav>

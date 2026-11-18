@@ -72,6 +72,7 @@ MODULE = CivicModule(
             "permission": "complaints.manage",
             "items": [
                 {"section": "complaints-manage", "label": "Complaint Queue & Investigations", "permission": "complaints.manage"},
+                {"section": "preferences-complaints", "label": "Complaint Preferences", "permission": "complaints.manage"},
             ],
         },
         {
