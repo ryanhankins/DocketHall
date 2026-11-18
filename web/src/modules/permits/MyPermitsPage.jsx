@@ -26,6 +26,18 @@ export function permitStatusBadge(status) {
   return 'badge draft';
 }
 
+export function permitExpiryInfo(expiresAt) {
+  if (!expiresAt) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const exp = new Date(`${expiresAt}T00:00:00`);
+  if (Number.isNaN(exp.getTime())) return null;
+  const diffDays = Math.ceil((exp - today) / (1000 * 60 * 60 * 24));
+  if (diffDays < 0) return { label: `Expired (${expiresAt})`, cls: 'badge disabled' };
+  if (diffDays <= 30) return { label: `Expires in ${diffDays}d (${expiresAt})`, cls: 'badge draft' };
+  return { label: `Expires ${expiresAt}`, cls: 'muted' };
+}
+
 export default function MyPermitsPage({ onNavigate }) {
   const [permits, setPermits] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -124,7 +136,15 @@ export default function MyPermitsPage({ onNavigate }) {
                   <td>{p.property_address}</td>
                   <td>{p.permit_type_name}</td>
                   <td>{p.permit_use_name}</td>
-                  <td><span className={permitStatusBadge(p.status)}>{p.status.replace('_', ' ')}</span></td>
+                  <td>
+                    <span className={permitStatusBadge(p.status)}>{p.status.replace('_', ' ')}</span>
+                    {(() => {
+                      const exp = permitExpiryInfo(p.expires_at);
+                      return exp && exp.cls !== 'muted'
+                        ? <div style={{ marginTop: 4 }}><span className={exp.cls}>{exp.label}</span></div>
+                        : null;
+                    })()}
+                  </td>
                   <td>
                     <div className="actions">
                       <button type="button" className="btn sm primary" onClick={() => setSelectedId(p.id)}>Open</button>

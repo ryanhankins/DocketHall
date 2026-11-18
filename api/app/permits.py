@@ -14,7 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """City Permitting module: public catalog, applications, documents, review, and Permit PDFs."""
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+import csv
 import hashlib
 import io
 import os
@@ -33,7 +34,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from .agendas import _bucket, _minio, _remove_minio_objects
 from .auth import has_permission, require_permission
 from .db import pool
-from .integrations import send_notification_email
+from .integrations import send_direct_email, send_notification_email
 
 MAX_PERMIT_DOC_BYTES = int(os.environ.get("MAX_PERMIT_DOC_BYTES", str(50 * 1024 * 1024)))
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -103,8 +104,10 @@ CREATE TABLE IF NOT EXISTS permits (
     reviewed_by         TEXT NOT NULL DEFAULT '',
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    issued_at           TIMESTAMPTZ
+    issued_at           TIMESTAMPTZ,
+    expires_at          DATE
 );
+ALTER TABLE permits ADD COLUMN IF NOT EXISTS expires_at DATE;
 CREATE INDEX IF NOT EXISTS permits_user_idx ON permits(applicant_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS permits_status_idx ON permits(status, created_at DESC);
 CREATE TABLE IF NOT EXISTS permit_documents (
@@ -398,6 +401,7 @@ class PermitPatchIn(BaseModel):
     payment_status: str | None = None
     review_notes: str | None = None
     assigned_to: str | None = None
+    expires_at: str | None = None
 
 
 class ParcelIn(BaseModel):
@@ -628,6 +632,7 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
             "updated_at": r[28].isoformat() if r[28] else None,
             "issued_at": r[29].isoformat() if r[29] else None,
             "closed_at": r[30].isoformat() if r[30] else None,
+            "expires_at": r[31].isoformat() if r[31] else None,
             "documents": docs_by_permit.get(r[0], []),
             "workflow_steps": wf_by_permit.get(r[0], []),
             "inspections": insp_by_permit.get(r[0], []),
@@ -644,7 +649,7 @@ _PERMIT_COLS = (
     "property_address, building_name, suite_name, parcel_id, owner_name, "
     "contractor_name, contractor_license, project_description, estimated_value, "
     "accepted_terms, status, fee_amount, payment_status, review_notes, reviewed_by, "
-    "assigned_to, created_at, updated_at, issued_at, closed_at"
+    "assigned_to, created_at, updated_at, issued_at, closed_at, expires_at"
 )
 
 
@@ -829,6 +834,58 @@ def create_permit(
         request=request,
     )
     return result
+
+
+def _resolve_applicant_email(conn, permit: dict) -> str:
+    em = (permit.get("applicant_email") or "").strip()
+    if em and "@" in em:
+        return em
+    uid = permit.get("applicant_user_id")
+    if uid:
+        row = conn.execute("SELECT email FROM users WHERE id = %s", (uid,)).fetchone()
+        if row and row[0] and "@" in row[0]:
+            return row[0].strip()
+    return ""
+
+
+@router.get("/export.csv")
+def export_permits_csv(
+    status: str | None = None,
+    q: str = "",
+    _: dict = Depends(require_permission("permits.manage")),
+):
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"SELECT {_PERMIT_COLS} FROM permits ORDER BY created_at DESC, id DESC"
+        ).fetchall()
+        permits = _hydrate_permits(conn, rows, include_internal=False)
+
+    ql = q.strip().lower()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([
+        "Permit Number", "Status", "Permit Type", "Permit Use",
+        "Applicant Name", "Applicant Email", "Property Address", "Parcel ID",
+        "Fee Amount", "Payment Status", "Assigned To", "Issued At", "Expires At", "Created At",
+    ])
+    for p in permits:
+        if status and status != "all" and p["status"] != status:
+            continue
+        if ql:
+            hay = f"{p['permit_number']} {p['permit_type_name']} {p['permit_use_name']} {p['applicant_name']} {p['property_address']} {p['parcel_id']}".lower()
+            if ql not in hay:
+                continue
+        w.writerow([
+            p["permit_number"], p["status"], p["permit_type_name"], p["permit_use_name"],
+            p["applicant_name"], p["applicant_email"], p["property_address"], p["parcel_id"],
+            p["fee_amount"], p["payment_status"], p["assigned_to"],
+            p["issued_at"] or "", p["expires_at"] or "", p["created_at"] or "",
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="permits_export.csv"'},
+    )
 
 
 @router.get("/{permit_id}")
@@ -1043,9 +1100,23 @@ def update_permit(
 
     with pool.connection() as conn:
         cur = _get_permit_or_404(conn, permit_id)
+        applicant_email = _resolve_applicant_email(conn, cur)
         next_status = body.status if body.status is not None else cur["status"]
         issued_clause = ", issued_at = COALESCE(issued_at, now())" if next_status == "issued" else ""
         closed_clause = ", closed_at = COALESCE(closed_at, now())" if next_status == "closed" else ""
+        exp_clause = ""
+        exp_params: tuple = ()
+        if body.expires_at is not None:
+            exp_val = body.expires_at.strip()
+            if exp_val == "":
+                exp_clause = ", expires_at = NULL"
+            else:
+                try:
+                    date.fromisoformat(exp_val)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Expiration date must be YYYY-MM-DD")
+                exp_clause = ", expires_at = %s"
+                exp_params = (exp_val,)
         conn.execute(
             f"UPDATE permits SET "
             f"status = COALESCE(%s, status), "
@@ -1054,7 +1125,7 @@ def update_permit(
             f"review_notes = COALESCE(%s, review_notes), "
             f"assigned_to = COALESCE(%s, assigned_to), "
             f"reviewed_by = %s, "
-            f"updated_at = now(){issued_clause}{closed_clause} "
+            f"updated_at = now(){issued_clause}{closed_clause}{exp_clause} "
             f"WHERE id = %s",
             (
                 body.status,
@@ -1063,6 +1134,7 @@ def update_permit(
                 body.review_notes.strip() if body.review_notes is not None else None,
                 body.assigned_to.strip() if body.assigned_to is not None else None,
                 user["username"],
+                *exp_params,
                 permit_id,
             ),
         )
@@ -1096,6 +1168,14 @@ def update_permit(
             link_path=f"/app#permits-review/{permit_id}",
             request=request,
         )
+        if applicant_email:
+            send_direct_email(
+                [applicant_email],
+                f"[CivicDesk] Permit {cur['permit_number']} Status Updated: {body.status.replace('_', ' ').title()}",
+                f"Your permit application {cur['permit_number']} ({cur['property_address']}) status was updated to '{body.status.replace('_', ' ')}'.",
+                link_path="/app#my-permits",
+                request=request,
+            )
     return result
 
 
@@ -1181,6 +1261,7 @@ def delete_workflow_step(
 def add_inspection(
     permit_id: int,
     body: InspectionIn,
+    request: Request,
     user: dict = Depends(require_permission("permits.submit", "permits.manage")),
 ):
     if not body.inspection_type.strip():
@@ -1190,6 +1271,7 @@ def add_inspection(
     with pool.connection() as conn:
         permit = _get_permit_or_404(conn, permit_id)
         _check_permit_access(permit, user)
+        applicant_email = _resolve_applicant_email(conn, permit)
         comp_val = "now()" if result in ("passed", "failed", "partial") else "NULL"
         conn.execute(
             f"INSERT INTO permit_inspections (permit_id, inspection_type, scheduled_date, inspector, result, notes, completed_at) "
@@ -1208,7 +1290,18 @@ def add_inspection(
             "VALUES (%s, %s, %s, %s)",
             (permit_id, "Inspection Scheduled" if result == "scheduled" else f"Inspection {result}", user["username"], body.inspection_type.strip()),
         )
-        return _get_permit_or_404(conn, permit_id, include_internal=is_mgr)
+        updated = _get_permit_or_404(conn, permit_id, include_internal=is_mgr)
+    if is_mgr and applicant_email:
+        send_direct_email(
+            [applicant_email],
+            f"[CivicDesk] Inspection {result.title()} — Permit {permit['permit_number']}",
+            f"An inspection ({body.inspection_type.strip()}) for permit {permit['permit_number']} ({permit['property_address']}) is {result}"
+            + (f" for {body.scheduled_date.strip()}" if body.scheduled_date.strip() else "")
+            + ".",
+            link_path="/app#my-permits",
+            request=request,
+        )
+    return updated
 
 
 @router.patch("/{permit_id}/inspections/{insp_id}")
@@ -1216,11 +1309,14 @@ def update_inspection(
     permit_id: int,
     insp_id: int,
     body: InspectionPatch,
+    request: Request,
     user: dict = Depends(require_permission("permits.manage")),
 ):
     if body.result is not None and body.result not in INSPECTION_RESULTS:
         raise HTTPException(status_code=400, detail="Invalid inspection result")
     with pool.connection() as conn:
+        permit = _get_permit_or_404(conn, permit_id)
+        applicant_email = _resolve_applicant_email(conn, permit)
         comp_clause = ""
         if body.result in ("passed", "failed", "partial"):
             comp_clause = ", completed_at = COALESCE(completed_at, now())"
@@ -1249,7 +1345,16 @@ def update_inspection(
             "VALUES (%s, 'Inspection Updated', %s, %s)",
             (permit_id, user["username"], f"{row[0]} -> {row[1]}"),
         )
-        return _get_permit_or_404(conn, permit_id, include_internal=has_permission(user, "permits.manage"))
+        updated = _get_permit_or_404(conn, permit_id, include_internal=has_permission(user, "permits.manage"))
+    if applicant_email:
+        send_direct_email(
+            [applicant_email],
+            f"[CivicDesk] Inspection Updated ({row[1].title()}) — Permit {permit['permit_number']}",
+            f"Inspection '{row[0]}' for permit {permit['permit_number']} ({permit['property_address']}) is now marked '{row[1]}'.",
+            link_path="/app#my-permits",
+            request=request,
+        )
+    return updated
 
 
 @router.delete("/{permit_id}/inspections/{insp_id}")
@@ -1268,6 +1373,7 @@ def delete_inspection(
 def post_permit_message(
     permit_id: int,
     body: PermitMessageIn,
+    request: Request,
     user: dict = Depends(require_permission("permits.submit", "permits.manage")),
 ):
     text = body.body.strip()
@@ -1278,6 +1384,7 @@ def post_permit_message(
     with pool.connection() as conn:
         permit = _get_permit_or_404(conn, permit_id)
         _check_permit_access(permit, user)
+        applicant_email = _resolve_applicant_email(conn, permit)
         conn.execute(
             "INSERT INTO permit_messages (permit_id, sender_username, sender_role, is_internal, body) "
             "VALUES (%s, %s, %s, %s, %s)",
@@ -1288,7 +1395,16 @@ def post_permit_message(
             "VALUES (%s, %s, %s, %s)",
             (permit_id, "Internal Note Added" if internal else "Message Sent", user["username"], text[:120]),
         )
-        return _get_permit_or_404(conn, permit_id, include_internal=is_mgr)
+        updated = _get_permit_or_404(conn, permit_id, include_internal=is_mgr)
+    if is_mgr and not internal and applicant_email and user["id"] != permit.get("applicant_user_id"):
+        send_direct_email(
+            [applicant_email],
+            f"[CivicDesk] New Message on Permit {permit['permit_number']}",
+            f"{user['username']} sent a message regarding permit {permit['permit_number']} ({permit['property_address']}):\n\n{text}",
+            link_path="/app#my-permits",
+            request=request,
+        )
+    return updated
 
 
 @router.delete("/{permit_id}")

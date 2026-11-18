@@ -441,6 +441,49 @@ def send_notification_email(
     threading.Thread(target=_worker, daemon=True).start()
 
 
+def send_direct_email(
+    to_emails: list[str],
+    subject: str,
+    body: str,
+    *,
+    link_path: str = "",
+    request: Request | None = None,
+) -> None:
+    """Best-effort background email directly to explicit recipient addresses (e.g. permit applicant)."""
+    cleaned = [e.strip() for e in to_emails if e and "@" in e]
+    if not cleaned:
+        return
+    if link_path:
+        base = get_app_base_url(request)
+        path = link_path if link_path.startswith("/") else f"/{link_path}"
+        body = f"{body}\n\nOpen in CivicDesk (login required if not signed in): {base}{path}"
+    try:
+        with pool.connection() as conn:
+            row = conn.execute(
+                "SELECT enabled, api_key, project_id, config "
+                "FROM core_integrations WHERE provider = 'gmail_smtp'"
+            ).fetchone()
+            if not row or not row[0]:
+                return
+            app_pw = (row[1] or "").strip()
+            sender = (row[2] or "").strip()
+            cfg = row[3] if isinstance(row[3], dict) else {}
+            if not sender or not app_pw:
+                return
+            smtp_host = (cfg.get("smtp_host") or "smtp.gmail.com").strip()
+            smtp_port = int(cfg.get("smtp_port") or 587)
+    except Exception:
+        return
+
+    def _worker():
+        try:
+            _send_smtp_mail(smtp_host, smtp_port, sender, app_pw, cleaned, subject, body)
+        except Exception:
+            pass
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
 class EmailConfigIn(BaseModel):
     smtp_host: str | None = None
     smtp_port: int | None = None

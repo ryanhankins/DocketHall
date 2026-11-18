@@ -18,7 +18,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, formatDate } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
-import { permitStatusBadge } from './MyPermitsPage.jsx';
+import { permitExpiryInfo, permitStatusBadge } from './MyPermitsPage.jsx';
 import PermitDetailWorkspace from './PermitDetailWorkspace.jsx';
 
 export default function PermitsReviewPage({ onNavigate, initialId = null }) {
@@ -61,6 +61,23 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
       return true;
     });
   }, [permits, statusFilter, search]);
+
+  const feeTotals = useMemo(() => {
+    let total = 0;
+    let paid = 0;
+    let unpaid = 0;
+    for (const p of filtered) {
+      const n = Number.parseFloat(String(p.fee_amount || '').replace(/[^0-9.-]/g, ''));
+      if (!Number.isFinite(n)) continue;
+      total += n;
+      if (p.payment_status === 'paid') paid += n;
+      else if (p.payment_status === 'unpaid') unpaid += n;
+    }
+    const fmt = (v) => v.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+    return { total: fmt(total), paid: fmt(paid), unpaid: fmt(unpaid) };
+  }, [filtered]);
+
+  const exportUrl = `/api/permits/export.csv?status=${encodeURIComponent(statusFilter)}&q=${encodeURIComponent(search.trim())}`;
 
   const selectedPermit = useMemo(
     () => permits.find(p => p.id === selectedId) || null,
@@ -186,6 +203,10 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
               <option value="closed">Closed</option>
             </select>
           </div>
+          <a className="btn" href={exportUrl} download="permits_export.csv">Export CSV</a>
+        </div>
+        <div className="muted" style={{ fontSize: '.85rem', marginTop: '.6rem' }}>
+          Showing <strong>{filtered.length}</strong> permit(s) · Assessed Fees: <strong>{feeTotals.total}</strong> (Paid: {feeTotals.paid} · Unpaid: {feeTotals.unpaid})
         </div>
       </div>
 
@@ -222,7 +243,15 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
                     <div>{p.property_address}</div>
                     {p.parcel_id && <div className="muted" style={{ fontSize: '.82rem' }}>Parcel: {p.parcel_id}</div>}
                   </td>
-                  <td><span className={permitStatusBadge(p.status)}>{p.status.replace('_', ' ')}</span></td>
+                  <td>
+                    <span className={permitStatusBadge(p.status)}>{p.status.replace('_', ' ')}</span>
+                    {(() => {
+                      const exp = permitExpiryInfo(p.expires_at);
+                      return exp && exp.cls !== 'muted'
+                        ? <div style={{ marginTop: 4 }}><span className={exp.cls}>{exp.label}</span></div>
+                        : null;
+                    })()}
+                  </td>
                   <td className="muted">{formatDate(p.created_at)}</td>
                   <td>
                     <div className="actions">
