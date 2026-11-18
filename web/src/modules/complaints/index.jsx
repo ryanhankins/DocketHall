@@ -26,7 +26,7 @@ const ComplaintPrefsPage = lazy(() => import('./ComplaintPrefsPage.jsx'));
 const complaintsModule = {
   id: 'complaints',
   prefNavItems: [
-    { hash: 'preferences-complaints', label: 'Complaint Preferences', permission: 'complaints.manage' },
+    { section: 'preferences-complaints', label: 'Complaint Preferences', permission: 'complaints.manage' },
   ],
   routes: [
     {
