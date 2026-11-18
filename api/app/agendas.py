@@ -35,6 +35,7 @@ from pydantic import BaseModel
 from .agenda_pdf import build_agenda_packet_pdf, build_minutes_pdf, render_single_document_pdf
 from .auth import current_user, has_permission
 from .db import _read_secret, pool
+from .integrations import send_notification_email
 
 STAFF_ROLES = {"admin_staff", "admin"}
 COUNCIL_ACCESS_ROLES = STAFF_ROLES | {"council_member", "non_admin_staff"}
@@ -1684,6 +1685,11 @@ def create_council_submission(
                 body.target_note.strip(),
             ),
         ).fetchone()
+    send_notification_email(
+        "agendas_council_submission",
+        f"[CivicDesk] New Council Submission: {title}",
+        f"{user['username']} submitted a proposed agenda item: {title}.",
+    )
     return {
         "id": row[0],
         "submitted_username": user["username"],
@@ -2110,7 +2116,14 @@ def update_agenda(agenda_id: int, body: AgendaPatch, user: dict = Depends(get_st
         if next_status is not None and next_status != prev_status:
             action = f"moved to {next_status}" if next_status else f"removed from {prev_status}"
             _log_agenda_event(conn, agenda_id, action, user["username"])
-        return _load_agenda(conn, agenda_id)
+        loaded = _load_agenda(conn, agenda_id)
+    if set_finalized:
+        send_notification_email(
+            "agendas_finalized",
+            f"[CivicDesk] Agenda Finalized: {loaded['title']}",
+            f"Agenda '{loaded['title']}' ({loaded['body']}, {loaded['meeting_date']}) was finalized by {user['username']}.",
+        )
+    return loaded
 
 
 @router.post("/{agenda_id}/clone", status_code=201)

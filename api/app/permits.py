@@ -33,6 +33,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from .agendas import _bucket, _minio, _remove_minio_objects
 from .auth import has_permission, require_permission
 from .db import pool
+from .integrations import send_notification_email
 
 MAX_PERMIT_DOC_BYTES = int(os.environ.get("MAX_PERMIT_DOC_BYTES", str(50 * 1024 * 1024)))
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -818,7 +819,13 @@ def create_permit(
             "VALUES (%s, 'Submitted', %s, %s)",
             (permit_id, user["username"], f"{t_row[1]} — {u_row[1]}"),
         )
-        return _get_permit_or_404(conn, permit_id, include_internal=has_permission(user, "permits.manage"))
+        result = _get_permit_or_404(conn, permit_id, include_internal=has_permission(user, "permits.manage"))
+    send_notification_email(
+        "permits_submitted",
+        f"[CivicDesk] New Permit Application {final_num}",
+        f"Permit {final_num} ({t_row[1]} — {u_row[1]}) was submitted by {user['username']} for {body.property_address.strip()}.",
+    )
+    return result
 
 
 @router.get("/{permit_id}")
@@ -1075,7 +1082,15 @@ def update_permit(
                     (body.review_notes or "").strip(),
                 ),
             )
-        return _get_permit_or_404(conn, permit_id, include_internal=has_permission(user, "permits.manage"))
+        status_changed = body.status is not None and body.status != cur["status"]
+        result = _get_permit_or_404(conn, permit_id, include_internal=has_permission(user, "permits.manage"))
+    if status_changed:
+        send_notification_email(
+            "permits_updated",
+            f"[CivicDesk] Permit {cur['permit_number']} Status: {body.status}",
+            f"Permit {cur['permit_number']} ({cur['property_address']}) status changed from {cur['status']} to {body.status} by {user['username']}.",
+        )
+    return result
 
 
 # ------------------------------------------------------------------ workflow steps

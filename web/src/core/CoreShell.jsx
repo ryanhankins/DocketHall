@@ -22,6 +22,7 @@ import { useToast } from './toast.jsx';
 
 const UsersPage = React.lazy(() => import('./UsersPage.jsx'));
 const ModulesPage = React.lazy(() => import('./ModulesPage.jsx'));
+const IntegrationsPage = React.lazy(() => import('./IntegrationsPage.jsx'));
 const GeneralPrefsPage = React.lazy(() => import('./GeneralPrefsPage.jsx'));
 const BackupRestorePage = React.lazy(() => import('./BackupRestorePage.jsx'));
 
@@ -170,6 +171,9 @@ export default function CoreShell() {
     if (hash === 'modules' && isAdmin) {
       return { component: ModulesPage, props: { onModulesChanged: reloadModules }, activeSection: 'modules' };
     }
+    if (hash === 'integrations' && isAdmin) {
+      return { component: IntegrationsPage, props: {}, activeSection: 'integrations' };
+    }
     if (hash === 'preferences-general' && canManageSettings) {
       return {
         component: GeneralPrefsPage,
@@ -306,6 +310,13 @@ export default function CoreShell() {
                   onClick={() => navigate('#modules')}
                 >
                   Manage Modules
+                </button>
+                <button
+                  type="button"
+                  className={activeSection === 'integrations' ? 'active' : ''}
+                  onClick={() => navigate('#integrations')}
+                >
+                  Integrations
                 </button>
               </div>
             )}

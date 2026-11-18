@@ -21,11 +21,19 @@ const ComplaintsFilePage = lazy(() => import('./ComplaintsFilePage.jsx'));
 const MyComplaintsPage = lazy(() => import('./MyComplaintsPage.jsx'));
 const ComplaintLogPage = lazy(() => import('./ComplaintLogPage.jsx'));
 const ComplaintsManagePage = lazy(() => import('./ComplaintsManagePage.jsx'));
+const ComplaintPrefsPage = lazy(() => import('./ComplaintPrefsPage.jsx'));
 
 const complaintsModule = {
   id: 'complaints',
-  prefNavItems: [],
+  prefNavItems: [
+    { hash: 'preferences-complaints', label: 'Complaint Preferences', permission: 'complaints.manage' },
+  ],
   routes: [
+    {
+      match: (hash) => (hash === 'preferences-complaints' ? {} : null),
+      permission: 'complaints.manage',
+      component: ComplaintPrefsPage,
+    },
     {
       match: (hash) => (hash === 'complaints-file' ? {} : null),
       permission: 'complaints.submit',

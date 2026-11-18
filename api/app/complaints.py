@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from .agendas import _bucket, _minio
 from .auth import current_user, has_permission, require_permission
 from .db import pool
+from .integrations import send_notification_email
 
 router = APIRouter(prefix="/api/complaints", tags=["complaints"])
 
@@ -395,6 +396,13 @@ def _create_complaint_row(body: ComplaintCreateIn, user: dict | None, allow_staf
             )
             docs = _fetch_docs(conn, cid, include_confidential=True)
             act = _fetch_activity(conn, cid, include_internal=False)
+    send_notification_email(
+        "complaints_submitted",
+        f"[CivicDesk] New Complaint {cnum}",
+        f"Complaint {cnum} ({'anonymous' if is_anon else channel}) was filed"
+        + (f" regarding {body.subject_property_address.strip()}" if body.subject_property_address.strip() else "")
+        + ".\n\n(Complainant identity is kept confidential in CivicDesk per MN Stat. 13.44.)",
+    )
     return _serialize_private(row, docs=docs, activity=act, include_internal=False)
 
 
@@ -657,13 +665,19 @@ def issue_notice_of_violation(
             can_view_private = bool(user and has_permission(user, "complaints.view_private"))
             docs = _fetch_docs(conn, complaint_id, include_confidential=can_view_private)
             act = _fetch_activity(conn, complaint_id, include_internal=True)
-    return _serialize_private(
+    res = _serialize_private(
         row,
         docs=docs,
         activity=act,
         include_internal=True,
         include_complainant_private=can_view_private,
     )
+    send_notification_email(
+        "complaints_escalated",
+        f"[CivicDesk] Notice of Violation Issued: {res['complaint_number']}",
+        f"A Notice of Violation was issued for complaint {res['complaint_number']} by {official}. Compliance deadline: {deadline_str}.",
+    )
+    return res
 
 
 @router.post("/{complaint_id}/documents")

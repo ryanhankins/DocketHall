@@ -18,6 +18,20 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
+import ModuleNotificationsCard from '../../core/ModuleNotificationsCard.jsx';
+
+const PERMIT_NOTIFICATION_EVENTS = [
+  {
+    key: 'permits_submitted',
+    label: 'New Permit Application Submitted',
+    description: 'Sent when an applicant or staff member submits a new permit application.',
+  },
+  {
+    key: 'permits_updated',
+    label: 'Permit Status Changed',
+    description: 'Sent when staff updates a permit application status (e.g., approved, needs info, issued, denied).',
+  },
+];
 
 export default function PermitCatalogAdminPage() {
   const [settings, setSettings] = useState({
@@ -241,6 +255,12 @@ export default function PermitCatalogAdminPage() {
           </tbody>
         </table>
       </div>
+
+      <ModuleNotificationsCard
+        moduleId="permits"
+        title="Permit Email Notifications"
+        events={PERMIT_NOTIFICATION_EVENTS}
+      />
     </section>
   );
 }

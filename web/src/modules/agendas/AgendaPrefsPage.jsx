@@ -18,6 +18,20 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, formatTime12h, toTimeInputValue } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
+import ModuleNotificationsCard from '../../core/ModuleNotificationsCard.jsx';
+
+const AGENDA_NOTIFICATION_EVENTS = [
+  {
+    key: 'agendas_council_submission',
+    label: 'New Council Submission',
+    description: 'Sent when a councilmember submits a proposed agenda item.',
+  },
+  {
+    key: 'agendas_finalized',
+    label: 'Agenda Finalized',
+    description: 'Sent when an agenda is moved to a finalized status.',
+  },
+];
 
 export default function AgendaPrefsPage() {
   const [coverSheets, setCoverSheets] = useState(true);
@@ -358,6 +372,12 @@ export default function AgendaPrefsPage() {
           </table>
         )}
       </div>
+
+      <ModuleNotificationsCard
+        moduleId="agendas"
+        title="Agenda Email Notifications"
+        events={AGENDA_NOTIFICATION_EVENTS}
+      />
     </section>
   );
 }
