@@ -310,7 +310,12 @@ class NoticeOfViolationIn(BaseModel):
     compliance_deadline: str  # YYYY-MM-DD, <= 60 days from today per Section 618.040
 
 
-def _create_complaint_row(body: ComplaintCreateIn, user: dict | None, allow_staff_channel: bool) -> dict:
+def _create_complaint_row(
+    body: ComplaintCreateIn,
+    user: dict | None,
+    allow_staff_channel: bool,
+    request: Request | None = None,
+) -> dict:
     conduct = body.conduct_description.strip()
     if not conduct:
         raise HTTPException(status_code=400, detail="Conduct description is required")
@@ -402,6 +407,8 @@ def _create_complaint_row(body: ComplaintCreateIn, user: dict | None, allow_staf
         f"Complaint {cnum} ({'anonymous' if is_anon else channel}) was filed"
         + (f" regarding {body.subject_property_address.strip()}" if body.subject_property_address.strip() else "")
         + ".\n\n(Complainant identity is kept confidential in CivicDesk per MN Stat. 13.44.)",
+        link_path=f"/app#complaints-manage/{cid}",
+        request=request,
     )
     return _serialize_private(row, docs=docs, activity=act, include_internal=False)
 
@@ -410,17 +417,18 @@ def _create_complaint_row(body: ComplaintCreateIn, user: dict | None, allow_staf
 def file_public_complaint(body: ComplaintCreateIn, request: Request):
     """Public / anonymous complaint filing endpoint (no fee, MN Stat. 13.44 confidentiality)."""
     user = current_user(request)
-    return _create_complaint_row(body, user, allow_staff_channel=False)
+    return _create_complaint_row(body, user, allow_staff_channel=False, request=request)
 
 
 @router.post("")
 def file_complaint(
     body: ComplaintCreateIn,
+    request: Request,
     user: dict = Depends(require_permission("complaints.submit", "complaints.manage")),
 ):
     """Authenticated complaint filing (resident/applicant or staff logging an oral complaint)."""
     is_staff = has_permission(user, "complaints.manage")
-    return _create_complaint_row(body, user, allow_staff_channel=is_staff)
+    return _create_complaint_row(body, user, allow_staff_channel=is_staff, request=request)
 
 
 @router.get("/public-log")
@@ -611,6 +619,7 @@ def update_complaint(
 def issue_notice_of_violation(
     complaint_id: int,
     body: NoticeOfViolationIn,
+    request: Request,
     user: dict = Depends(require_permission("complaints.manage")),
 ):
     """Issue a Section 618.040 Notice of Violation (compliance deadline <= 60 days)."""
@@ -676,6 +685,8 @@ def issue_notice_of_violation(
         "complaints_escalated",
         f"[CivicDesk] Notice of Violation Issued: {res['complaint_number']}",
         f"A Notice of Violation was issued for complaint {res['complaint_number']} by {official}. Compliance deadline: {deadline_str}.",
+        link_path=f"/app#complaints-manage/{complaint_id}",
+        request=request,
     )
     return res
 

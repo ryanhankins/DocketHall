@@ -31,7 +31,7 @@ export async function api(path, opts = {}) {
     : { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   const r = await fetch(path, { credentials: 'same-origin', headers, ...opts });
   if (r.status === 401) {
-    location.replace('/');
+    location.replace(`/?next=${encodeURIComponent('/app' + location.hash)}`);
     throw new Error('Session expired');
   }
   const data = await r.json().catch(() => ({}));

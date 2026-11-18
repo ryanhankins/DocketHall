@@ -50,7 +50,11 @@ const complaintsModule = {
       component: ComplaintLogPage,
     },
     {
-      match: (hash) => (hash === 'complaints-manage' ? {} : null),
+      match: (hash) => {
+        if (hash === 'complaints-manage') return {};
+        const m = hash.match(/^complaints-manage\/(\d+)$/);
+        return m ? { initialId: Number(m[1]) } : null;
+      },
       permission: 'complaints.manage',
       component: ComplaintsManagePage,
     },

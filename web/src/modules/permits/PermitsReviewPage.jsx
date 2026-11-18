@@ -21,9 +21,9 @@ import { useToast } from '../../core/toast.jsx';
 import { permitStatusBadge } from './MyPermitsPage.jsx';
 import PermitDetailWorkspace from './PermitDetailWorkspace.jsx';
 
-export default function PermitsReviewPage({ onNavigate }) {
+export default function PermitsReviewPage({ onNavigate, initialId = null }) {
   const [permits, setPermits] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(initialId);
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [showParcels, setShowParcels] = useState(false);

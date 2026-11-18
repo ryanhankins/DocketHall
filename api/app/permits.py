@@ -22,7 +22,7 @@ import re
 import uuid
 from xml.sax.saxutils import escape as _xml_escape
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 from reportlab.lib import colors
@@ -751,6 +751,7 @@ def delete_parcel(parcel_pk: int, _: dict = Depends(require_permission("permits.
 @router.post("", status_code=201)
 def create_permit(
     body: PermitCreateIn,
+    request: Request,
     user: dict = Depends(require_permission("permits.submit", "permits.manage")),
 ):
     if not body.accepted_terms:
@@ -824,6 +825,8 @@ def create_permit(
         "permits_submitted",
         f"[CivicDesk] New Permit Application {final_num}",
         f"Permit {final_num} ({t_row[1]} — {u_row[1]}) was submitted by {user['username']} for {body.property_address.strip()}.",
+        link_path=f"/app#permits-review/{permit_id}",
+        request=request,
     )
     return result
 
@@ -1030,6 +1033,7 @@ def list_all_permits(_: dict = Depends(require_permission("permits.manage"))):
 def update_permit(
     permit_id: int,
     body: PermitPatchIn,
+    request: Request,
     user: dict = Depends(require_permission("permits.manage")),
 ):
     if body.status is not None and body.status not in PERMIT_STATUSES:
@@ -1089,6 +1093,8 @@ def update_permit(
             "permits_updated",
             f"[CivicDesk] Permit {cur['permit_number']} Status: {body.status}",
             f"Permit {cur['permit_number']} ({cur['property_address']}) status changed from {cur['status']} to {body.status} by {user['username']}.",
+            link_path=f"/app#permits-review/{permit_id}",
+            request=request,
         )
     return result
 

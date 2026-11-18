@@ -15,13 +15,15 @@
 
 """Optional external integrations (e.g. Google Cloud API key configuration & validation)."""
 import json
+import os
 import smtplib
 import threading
 import urllib.error
 import urllib.request
 from email.message import EmailMessage
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
@@ -374,8 +376,40 @@ def _resolve_event_recipients(conn, event_key: str) -> list[str]:
     return recipients
 
 
-def send_notification_email(event_key: str, subject: str, body: str) -> None:
+def get_app_base_url(request: Request | None = None) -> str:
+    """Resolve the public base URL for links in notification emails."""
+    env_url = os.environ.get("APP_BASE_URL", "").strip().rstrip("/")
+    if env_url:
+        return env_url
+    if request is not None:
+        origin = (request.headers.get("origin") or "").strip().rstrip("/")
+        if origin.startswith(("http://", "https://")):
+            return origin
+        referer = (request.headers.get("referer") or "").strip()
+        if referer.startswith(("http://", "https://")):
+            p = urlparse(referer)
+            if p.scheme and p.netloc:
+                return f"{p.scheme}://{p.netloc}"
+        proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "http").split(",")[0].strip()
+        host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "").split(",")[0].strip()
+        if host:
+            return f"{proto}://{host}"
+    return "http://localhost:8080"
+
+
+def send_notification_email(
+    event_key: str,
+    subject: str,
+    body: str,
+    *,
+    link_path: str = "",
+    request: Request | None = None,
+) -> None:
     """Best-effort background email notification routed per-module/event to selected users & emails."""
+    if link_path:
+        base = get_app_base_url(request)
+        path = link_path if link_path.startswith("/") else f"/{link_path}"
+        body = f"{body}\n\nOpen in CivicDesk (login required if not signed in): {base}{path}"
     try:
         with pool.connection() as conn:
             row = conn.execute(

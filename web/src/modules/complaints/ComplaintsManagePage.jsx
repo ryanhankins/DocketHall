@@ -25,7 +25,7 @@ import {
   StatusBadge,
 } from './constants.jsx';
 
-export default function ComplaintsManagePage({ me }) {
+export default function ComplaintsManagePage({ me, initialId = null }) {
   const showToast = useToast();
   const canViewPrivate = hasPermission(me, 'complaints.view_private');
   const [items, setItems] = useState([]);
@@ -85,6 +85,12 @@ export default function ComplaintsManagePage({ me }) {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    if (!initialId || items.length === 0) return;
+    const target = items.find((c) => c.id === initialId);
+    if (target) openCase(target);
+  }, [initialId, items]);
 
   function openCase(c) {
     setSelected(c);

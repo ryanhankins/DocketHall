@@ -133,13 +133,15 @@ export default function CoreShell() {
   const canManageSettings = hasPermission(me, 'settings.manage') || hasPermission(me, 'agendas.manage');
   const isAdmin = me?.role === 'admin';
 
-  // Collect all module preference submenu items
+  // Collect all module preference submenu items in the same order as the sidebar menu
   const prefNavItems = useMemo(() => {
     const items = [];
     if (canManageSettings) {
       items.push({ section: 'preferences-general', label: 'General Preferences' });
     }
-    for (const mod of Object.values(frontendMods)) {
+    for (const meta of modulesMeta) {
+      const mod = frontendMods[meta.id];
+      if (!mod) continue;
       for (const it of (mod.prefNavItems || [])) {
         if (!it.permission || hasPermission(me, it.permission)) {
           items.push(it);
@@ -150,7 +152,7 @@ export default function CoreShell() {
       items.push({ section: 'preferences-backup', label: 'Backup & Restore' });
     }
     return items;
-  }, [canManageSettings, frontendMods, me]);
+  }, [canManageSettings, frontendMods, modulesMeta, me]);
 
   // Auto-open submenu when active route belongs to it
   useEffect(() => {
@@ -203,9 +205,13 @@ export default function CoreShell() {
         if (params) {
           const activeSection = hash.startsWith('agendas/')
             ? 'agendas'
-            : (hash === 'preferences'
-                ? 'preferences-agenda'
-                : (hash === 'permits-catalog-admin' ? 'preferences-permits' : hash));
+            : (hash.startsWith('complaints-manage/')
+                ? 'complaints-manage'
+                : (hash.startsWith('permits-review/')
+                    ? 'permits-review'
+                    : (hash === 'preferences'
+                        ? 'preferences-agenda'
+                        : (hash === 'permits-catalog-admin' ? 'preferences-permits' : hash))));
           return {
             component: r.component,
             props: {

@@ -75,7 +75,8 @@ function AuthModal({ open, initialRegister, nextUrl, reason, onClose }) {
     if (!open && dlg.open) dlg.close();
   }, [open]);
 
-  const safeNext = nextUrl && nextUrl.startsWith('/app') ? nextUrl : '/app';
+  const rawNext = nextUrl && nextUrl.startsWith('/app') ? nextUrl : '/app';
+  const safeNext = rawNext.includes('#') ? rawNext : `${rawNext}${location.hash || ''}`;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -874,7 +875,8 @@ function PublicHomePage() {
       .then((user) => {
         setMe(user);
         if (user && params.has('next') && params.get('next').startsWith('/app')) {
-          location.replace(params.get('next'));
+          const raw = params.get('next');
+          location.replace(raw.includes('#') ? raw : `${raw}${location.hash || ''}`);
         }
       })
       .catch(() => setMe(null));
