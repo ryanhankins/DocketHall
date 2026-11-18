@@ -23,10 +23,10 @@ from xml.sax.saxutils import escape as _xml_escape
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
 
 from .agendas import _bucket, _minio, _remove_minio_objects
 from .auth import require_permission
@@ -304,6 +304,124 @@ def _load_tree(conn, published_only: bool, q: str = "") -> list[dict]:
 def get_public_code(q: str = ""):
     with pool.connection() as conn:
         return {"chapters": _load_tree(conn, published_only=True, q=q)}
+
+
+@router.get("/public/full.pdf")
+def get_full_code_pdf(download: bool = False):
+    """Compile all published City Code chapters and sections into a single PDF with Table of Contents."""
+    with pool.connection() as conn:
+        chapters = _load_tree(conn, published_only=True, q="")
+        b_row = conn.execute(
+            "SELECT city_title FROM agenda_preferences WHERE id = 1"
+        ).fetchone()
+        city_title = (b_row[0] or "").strip() if b_row else ""
+        sec_keys = {
+            r[0]: r[1]
+            for r in conn.execute(
+                "SELECT id, object_key FROM code_sections WHERE object_key <> ''"
+            ).fetchall()
+        }
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=54, rightMargin=54, topMargin=54, bottomMargin=54)
+    styles = getSampleStyleSheet()
+    heading_title = f"{city_title} — Municipal City Code" if city_title else "Municipal City Code"
+    story = [
+        Paragraph(f"<b>{_xml_escape(heading_title)}</b>", styles["Title"]),
+        Spacer(1, 6),
+        Paragraph("<b>Table of Contents</b>", styles["Heading2"]),
+        Spacer(1, 4),
+    ]
+    if not chapters:
+        story.append(Paragraph("No published code chapters are currently available.", styles["Normal"]))
+    else:
+        for ch in chapters:
+            story.append(
+                Paragraph(
+                    f"<b>{_xml_escape(ch['code_prefix'])} — {_xml_escape(ch['title'])}</b>",
+                    styles["Normal"],
+                )
+            )
+            for sec in ch.get("sections", []):
+                story.append(
+                    Paragraph(
+                        f"&nbsp;&nbsp;&nbsp;&nbsp;Sec. {_xml_escape(sec['section_number'])} — {_xml_escape(sec['title'])}",
+                        styles["Normal"],
+                    )
+                )
+            story.append(Spacer(1, 4))
+
+        attached_pdfs: list[tuple[str, str, str]] = []
+        for ch in chapters:
+            story.append(PageBreak())
+            story.append(
+                Paragraph(
+                    f"<b>{_xml_escape(ch['code_prefix'])} — {_xml_escape(ch['title'])}</b>",
+                    styles["Heading1"],
+                )
+            )
+            if ch.get("description"):
+                story.append(Paragraph(_xml_escape(ch["description"]), styles["Normal"]))
+            story.append(Spacer(1, 8))
+            for sec in ch.get("sections", []):
+                story.append(
+                    Paragraph(
+                        f"<b>Section {_xml_escape(sec['section_number'])} — {_xml_escape(sec['title'])}</b>",
+                        styles["Heading2"],
+                    )
+                )
+                if sec.get("ordinance_ref") or sec.get("effective_date"):
+                    story.append(
+                        Paragraph(
+                            f"<i>Ordinance: {_xml_escape(sec.get('ordinance_ref') or '—')} | Effective: {_xml_escape(sec.get('effective_date') or '—')}</i>",
+                            styles["Normal"],
+                        )
+                    )
+                if sec.get("summary"):
+                    story.append(Paragraph(f"<b>Summary:</b> {_xml_escape(sec['summary'])}", styles["Normal"]))
+                body_txt = (sec.get("body") or "").strip()
+                obj_key = sec_keys.get(sec["id"], "")
+                if body_txt:
+                    for para in body_txt.splitlines():
+                        if para.strip():
+                            story.append(Paragraph(_xml_escape(para.strip()), styles["Normal"]))
+                            story.append(Spacer(1, 4))
+                elif obj_key:
+                    story.append(Paragraph("<i>(Full text attached in appended PDF pages.)</i>", styles["Normal"]))
+                    attached_pdfs.append((sec["section_number"], sec["title"], obj_key))
+                else:
+                    story.append(Paragraph("<i>No body text recorded.</i>", styles["Normal"]))
+                story.append(Spacer(1, 10))
+
+    doc.build(story)
+    main_bytes = buf.getvalue()
+
+    if chapters and attached_pdfs:
+        writer = PdfWriter()
+        for page in PdfReader(io.BytesIO(main_bytes)).pages:
+            writer.add_page(page)
+        for _, _, obj_key in attached_pdfs:
+            try:
+                obj = _minio().get_object(_bucket(), obj_key)
+                try:
+                    raw = obj.read()
+                finally:
+                    obj.close()
+                    obj.release_conn()
+                for page in PdfReader(io.BytesIO(raw)).pages:
+                    writer.add_page(page)
+            except Exception:
+                pass
+        out = io.BytesIO()
+        writer.write(out)
+        main_bytes = out.getvalue()
+
+    disp = "attachment" if download else "inline"
+    return Response(
+        content=main_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'{disp}; filename="Municipal_City_Code.pdf"'},
+    )
 
 
 @router.get("/sections/{section_id}/pdf")

@@ -20,6 +20,7 @@ import { createRoot } from 'react-dom/client';
 import '../app.css';
 import { ROLE_LABELS, formatDate, formatSize, formatTime12h } from './core/api.js';
 import ServiceIcon from './core/ServiceIcon.jsx';
+import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
 import { COMPLAINT_STATUSES, ORDINANCE_PRESETS, StatusBadge } from './modules/complaints/constants.jsx';
 
 const TAB_DEFS = [
@@ -376,6 +377,14 @@ function CodePublicTab() {
   const [q, setQ] = useState('');
   const [openChapterIds, setOpenChapterIds] = useState({});
   const [activeSection, setActiveSection] = useState(null);
+  const [allSectionsMap, setAllSectionsMap] = useState(() => new Map());
+
+  useEffect(() => {
+    fetch('/api/codification/public')
+      .then((r) => (r.ok ? r.json() : { chapters: [] }))
+      .then((d) => setAllSectionsMap(buildSectionMap(d.chapters || [])))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -411,12 +420,17 @@ function CodePublicTab() {
               <p className="muted" style={{ margin: '4px 0 0' }}>Search chapters, read ordinance sections, or open official section PDFs.</p>
             </div>
           </div>
-          <input
-            style={{ maxWidth: 320 }}
-            placeholder="Search section #, title, or text…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
+          <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              style={{ maxWidth: 320 }}
+              placeholder="Search section #, title, or text…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+            />
+            <a className="btn sm" href="/api/codification/public/full.pdf?download=1" target="_blank" rel="noreferrer">
+              Full Code PDF
+            </a>
+          </div>
         </div>
       </div>
 
@@ -438,25 +452,35 @@ function CodePublicTab() {
                 </button>
                 {isOpen && (
                   <ul style={{ listStyle: 'none', padding: '4px 0 0 12px', margin: 0, display: 'grid', gap: 4 }}>
-                    {(ch.sections || []).map((sec) => (
-                      <li key={sec.id}>
-                        <button
-                          type="button"
-                          onClick={() => setActiveSection({ ...sec, chapter_prefix: ch.code_prefix, chapter_title: ch.title })}
-                          style={{
-                            background: activeSection?.id === sec.id ? '#eff6ff' : 'transparent',
-                            border: 0,
-                            borderRadius: 4,
-                            padding: '4px 6px',
-                            textAlign: 'left',
-                            width: '100%',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          <strong>Sec. {sec.section_number}</strong> — {sec.title}
-                        </button>
-                      </li>
-                    ))}
+                    {(ch.sections || []).map((sec) => {
+                      const snippet = getSearchSnippet(sec, q);
+                      return (
+                        <li key={sec.id}>
+                          <button
+                            type="button"
+                            onClick={() => setActiveSection({ ...sec, chapter_prefix: ch.code_prefix, chapter_title: ch.title })}
+                            style={{
+                              background: activeSection?.id === sec.id ? '#eff6ff' : 'transparent',
+                              border: 0,
+                              borderRadius: 4,
+                              padding: '4px 6px',
+                              textAlign: 'left',
+                              width: '100%',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <div>
+                              <strong>Sec. <HighlightText text={sec.section_number} query={q} /></strong> — <HighlightText text={sec.title} query={q} />
+                            </div>
+                            {snippet && (
+                              <div className="muted" style={{ fontSize: '.8rem', marginTop: 2 }}>
+                                <HighlightText text={snippet} query={q} />
+                              </div>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
@@ -483,7 +507,17 @@ function CodePublicTab() {
             )}
             {activeSection.summary && <p><strong>Summary:</strong> {activeSection.summary}</p>}
             <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', lineHeight: 1.55 }}>
-              {activeSection.body || 'Full text is available via the View PDF button above.'}
+              {activeSection.body ? (
+                <LinkedCodeBody
+                  text={activeSection.body}
+                  sectionMap={allSectionsMap}
+                  currentSectionId={activeSection.id}
+                  onSelectSection={setActiveSection}
+                  query={q}
+                />
+              ) : (
+                'Full text is available via the View PDF button above.'
+              )}
             </pre>
           </div>
         )}
