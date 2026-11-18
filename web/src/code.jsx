@@ -18,6 +18,7 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../app.css';
+import ServiceIcon from './core/ServiceIcon.jsx';
 
 function PublicCityCode() {
   const [branding, setBranding] = useState({ city_title: '', has_city_logo: false });
@@ -96,7 +97,10 @@ function PublicCityCode() {
         ) : (
           <>
             <div className="card">
-              <h1 style={{ marginTop: 0 }}>Municipal Code</h1>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', marginBottom: '.75rem' }}>
+                <ServiceIcon id="codification" size={22} badge />
+                <h1 style={{ margin: 0 }}>Municipal Code</h1>
+              </div>
               <div className="field">
                 <label htmlFor="public-code-search">Search Chapters &amp; Sections</label>
                 <input

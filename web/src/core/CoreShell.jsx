@@ -18,6 +18,7 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ROLE_LABELS, api, downloadBackupArchive, hasPermission, todayIso } from './api.js';
 import { loadEnabledFrontendModules } from './registry.js';
+import ServiceIcon from './ServiceIcon.jsx';
 import { useToast } from './toast.jsx';
 
 const UsersPage = React.lazy(() => import('./UsersPage.jsx'));
@@ -331,7 +332,10 @@ export default function CoreShell() {
               if (!mod.nav_groups?.length) return null;
               return (
                 <div key={mod.id}>
-                  <h2>{mod.name}</h2>
+                  <h2 style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
+                    <ServiceIcon id={mod.id} size={14} />
+                    <span>{mod.name}</span>
+                  </h2>
                   {mod.nav_groups.map(grp => {
                     if (grp.items.length === 1) {
                       const it = grp.items[0];

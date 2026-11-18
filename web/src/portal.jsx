@@ -18,6 +18,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../app.css';
+import ServiceIcon from './core/ServiceIcon.jsx';
 
 function PublicPermitsPortal() {
   const [branding, setBranding] = useState({ city_title: '', has_city_logo: false });
@@ -100,7 +101,10 @@ function PublicPermitsPortal() {
 
       <main id="portal-main" style={{ margin: '0 auto', width: '100%', maxWidth: '1040px' }}>
         <div className="card">
-          <h1 style={{ marginTop: 0 }}>Permits — General Instructions</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', marginBottom: '.75rem' }}>
+            <ServiceIcon id="permits" size={22} badge />
+            <h1 style={{ margin: 0 }}>Permits — General Instructions</h1>
+          </div>
           {s.general_instructions && <p style={{ lineHeight: 1.5 }}>{s.general_instructions}</p>}
 
           {s.required_documents_note && (

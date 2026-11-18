@@ -19,6 +19,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client';
 import '../app.css';
 import { ROLE_LABELS, formatDate, formatSize, formatTime12h } from './core/api.js';
+import ServiceIcon from './core/ServiceIcon.jsx';
 import { COMPLAINT_STATUSES, ORDINANCE_PRESETS, StatusBadge } from './modules/complaints/constants.jsx';
 
 const TAB_DEFS = [
@@ -199,9 +200,12 @@ function AgendasPublicTab() {
   return (
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: '1rem' }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Meeting Agendas &amp; Minutes</h2>
-          <p className="muted" style={{ margin: '4px 0 0' }}>Finalized meeting agendas, packets, and approved minutes.</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem' }}>
+          <ServiceIcon id="agendas" size={20} badge />
+          <div>
+            <h2 style={{ margin: 0 }}>Meeting Agendas &amp; Minutes</h2>
+            <p className="muted" style={{ margin: '4px 0 0' }}>Finalized meeting agendas, packets, and approved minutes.</p>
+          </div>
         </div>
         <input
           style={{ maxWidth: 280 }}
@@ -313,7 +317,10 @@ function PermitsPublicTab({ me, onRequireAuth }) {
       )}
 
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>Search Permits &amp; Apply Online</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', marginBottom: '1rem' }}>
+          <ServiceIcon id="permits" size={20} badge />
+          <h2 style={{ margin: 0 }}>Search Permits &amp; Apply Online</h2>
+        </div>
         <div className="row" style={{ marginBottom: '1rem', alignItems: 'flex-end' }}>
           <div className="field" style={{ flex: 2, minWidth: 220 }}>
             <label htmlFor="pub-permit-search">Search Permit Type or Use</label>
@@ -390,9 +397,12 @@ function CodePublicTab() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-          <div>
-            <h2 style={{ margin: 0 }}>Municipal City Code</h2>
-            <p className="muted" style={{ margin: '4px 0 0' }}>Search chapters, read ordinance sections, or open official section PDFs.</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem' }}>
+            <ServiceIcon id="codification" size={20} badge />
+            <div>
+              <h2 style={{ margin: 0 }}>Municipal City Code</h2>
+              <p className="muted" style={{ margin: '4px 0 0' }}>Search chapters, read ordinance sections, or open official section PDFs.</p>
+            </div>
           </div>
           <input
             style={{ maxWidth: 320 }}
@@ -503,9 +513,12 @@ function RecordsPublicTab() {
   return (
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: '1rem' }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Public Contracts, Resolutions &amp; Records</h2>
-          <p className="muted" style={{ margin: '4px 0 0' }}>Publicly published municipal contracts, resolutions, ordinances, and agreements.</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem' }}>
+          <ServiceIcon id="records" size={20} badge />
+          <div>
+            <h2 style={{ margin: 0 }}>Public Contracts, Resolutions &amp; Records</h2>
+            <p className="muted" style={{ margin: '4px 0 0' }}>Publicly published municipal contracts, resolutions, ordinances, and agreements.</p>
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <input placeholder="Search doc #, title, counterparty…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -663,11 +676,14 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Administrative Complaints (Section 618)</h2>
-          <p className="muted" style={{ margin: '4px 0 0' }}>
-            View the public Complaint Log Book or file a complaint at no cost without an account.
-          </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem' }}>
+          <ServiceIcon id="complaints" size={20} badge />
+          <div>
+            <h2 style={{ margin: 0 }}>Administrative Complaints (Section 618)</h2>
+            <p className="muted" style={{ margin: '4px 0 0' }}>
+              View the public Complaint Log Book or file a complaint at no cost without an account.
+            </p>
+          </div>
         </div>
         <div className="actions">
           <button type="button" className={`btn sm${subView === 'log' ? ' primary' : ''}`} onClick={() => setSubView('log')}>
@@ -1028,7 +1044,10 @@ function PublicHomePage() {
                   }}
                 >
                   <div>
-                    <h2 style={{ margin: '0 0 .35rem', fontSize: '1.1rem' }}>{t.label}</h2>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '.65rem', marginBottom: '.45rem' }}>
+                      <ServiceIcon id={t.id} size={20} badge />
+                      <h2 style={{ margin: 0, fontSize: '1.1rem' }}>{t.label}</h2>
+                    </div>
                     <p className="muted" style={{ margin: 0, fontSize: '.92rem', lineHeight: 1.45 }}>
                       {t.description}
                     </p>

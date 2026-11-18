@@ -17,6 +17,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from './api.js';
+import ServiceIcon from './ServiceIcon.jsx';
 import { useToast } from './toast.jsx';
 
 export default function ModulesPage({ onModulesChanged }) {
@@ -71,8 +72,13 @@ export default function ModulesPage({ onModulesChanged }) {
             {modules.map(m => (
               <tr key={m.id}>
                 <td>
-                  <strong>{m.name}</strong>
-                  <div className="muted" style={{ fontSize: '.8rem' }}>{m.id}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem' }}>
+                    <ServiceIcon id={m.id} size={18} badge />
+                    <div>
+                      <strong>{m.name}</strong>
+                      <div className="muted" style={{ fontSize: '.8rem' }}>{m.id}</div>
+                    </div>
+                  </div>
                 </td>
                 <td>{m.description}</td>
                 <td className="muted" style={{ fontSize: '.82rem' }}>
