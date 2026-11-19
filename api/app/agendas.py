@@ -240,6 +240,12 @@ ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS alert_link_label TEXT NO
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS footer_text TEXT NOT NULL DEFAULT '';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS city_website_url TEXT NOT NULL DEFAULT '';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS city_website_label TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_primary TEXT NOT NULL DEFAULT '#2563eb';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_secondary TEXT NOT NULL DEFAULT '#1d4ed8';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_tint TEXT NOT NULL DEFAULT '#e6f0ff';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_bg TEXT NOT NULL DEFAULT '#f3f5f8';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_surface TEXT NOT NULL DEFAULT '#ffffff';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_header_bg TEXT NOT NULL DEFAULT '#ffffff';
 """
 
 _minio_client: Minio | None = None
@@ -716,6 +722,12 @@ class GeneralPreferencesIn(BaseModel):
     footer_text: str = ""
     city_website_url: str = ""
     city_website_label: str = ""
+    theme_primary: str = "#2563eb"
+    theme_secondary: str = "#1d4ed8"
+    theme_tint: str = "#e6f0ff"
+    theme_bg: str = "#f3f5f8"
+    theme_surface: str = "#ffffff"
+    theme_header_bg: str = "#ffffff"
 
 
 class AgendaPreferencesIn(BaseModel):
@@ -732,6 +744,26 @@ class AgendaPreferencesIn(BaseModel):
     posting_notice_hours: int = 72
 
 
+DEFAULT_THEME_COLORS = {
+    "theme_primary": "#2563eb",
+    "theme_secondary": "#1d4ed8",
+    "theme_tint": "#e6f0ff",
+    "theme_bg": "#f3f5f8",
+    "theme_surface": "#ffffff",
+    "theme_header_bg": "#ffffff",
+}
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def _validate_hex_color(value: str, fallback: str, label: str) -> str:
+    clean = (value or "").strip()
+    if not clean:
+        return fallback
+    if not _HEX_COLOR_RE.match(clean):
+        raise HTTPException(status_code=400, detail=f"{label} must be a 6-digit hex color like #2d4a2d")
+    return clean.lower()
+
+
 def _load_preferences(conn) -> dict:
     row = conn.execute(
         "SELECT include_item_cover_sheets, include_page_numbers, "
@@ -739,7 +771,8 @@ def _load_preferences(conn) -> dict:
         "       footer_disclosures, bodies, city_logo_key, sections, categories, "
         "       city_title, posting_notice_hours, "
         "       alert_enabled, alert_level, alert_title, alert_message, alert_link_url, alert_link_label, "
-        "       footer_text, city_website_url, city_website_label "
+        "       footer_text, city_website_url, city_website_label, "
+        "       theme_primary, theme_secondary, theme_tint, theme_bg, theme_surface, theme_header_bg "
         "FROM agenda_preferences WHERE id = 1"
     ).fetchone()
     if not row:
@@ -765,6 +798,7 @@ def _load_preferences(conn) -> dict:
             "footer_text": "",
             "city_website_url": "",
             "city_website_label": "",
+            **DEFAULT_THEME_COLORS,
             "city_logo_key": "",
             "has_city_logo": False,
         }
@@ -799,6 +833,12 @@ def _load_preferences(conn) -> dict:
         "footer_text": row[19] or "",
         "city_website_url": row[20] or "",
         "city_website_label": row[21] or "",
+        "theme_primary": row[22] or DEFAULT_THEME_COLORS["theme_primary"],
+        "theme_secondary": row[23] or DEFAULT_THEME_COLORS["theme_secondary"],
+        "theme_tint": row[24] or DEFAULT_THEME_COLORS["theme_tint"],
+        "theme_bg": row[25] or DEFAULT_THEME_COLORS["theme_bg"],
+        "theme_surface": row[26] or DEFAULT_THEME_COLORS["theme_surface"],
+        "theme_header_bg": row[27] or DEFAULT_THEME_COLORS["theme_header_bg"],
         "city_logo_key": logo_key,
         "has_city_logo": bool(logo_key),
     }
@@ -826,6 +866,12 @@ def get_preferences_branding():
         "footer_text": prefs.get("footer_text", ""),
         "city_website_url": prefs.get("city_website_url", ""),
         "city_website_label": prefs.get("city_website_label", ""),
+        "theme_primary": prefs.get("theme_primary", DEFAULT_THEME_COLORS["theme_primary"]),
+        "theme_secondary": prefs.get("theme_secondary", DEFAULT_THEME_COLORS["theme_secondary"]),
+        "theme_tint": prefs.get("theme_tint", DEFAULT_THEME_COLORS["theme_tint"]),
+        "theme_bg": prefs.get("theme_bg", DEFAULT_THEME_COLORS["theme_bg"]),
+        "theme_surface": prefs.get("theme_surface", DEFAULT_THEME_COLORS["theme_surface"]),
+        "theme_header_bg": prefs.get("theme_header_bg", DEFAULT_THEME_COLORS["theme_header_bg"]),
     }
 
 
@@ -842,12 +888,19 @@ def _validate_optional_http_url(url: str, field_label: str) -> str:
 def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get_staff_user)):
     alert_url = _validate_optional_http_url(body.alert_link_url, "Alert link URL")
     city_url = _validate_optional_http_url(body.city_website_url, "Main city website URL")
+    theme_primary = _validate_hex_color(body.theme_primary, DEFAULT_THEME_COLORS["theme_primary"], "Primary color")
+    theme_secondary = _validate_hex_color(body.theme_secondary, DEFAULT_THEME_COLORS["theme_secondary"], "Secondary color")
+    theme_tint = _validate_hex_color(body.theme_tint, DEFAULT_THEME_COLORS["theme_tint"], "Highlight tint color")
+    theme_bg = _validate_hex_color(body.theme_bg, DEFAULT_THEME_COLORS["theme_bg"], "Page background color")
+    theme_surface = _validate_hex_color(body.theme_surface, DEFAULT_THEME_COLORS["theme_surface"], "Card & sidebar color")
+    theme_header_bg = _validate_hex_color(body.theme_header_bg, DEFAULT_THEME_COLORS["theme_header_bg"], "Header background color")
     with pool.connection() as conn:
         conn.execute(
             "INSERT INTO agenda_preferences "
             "(id, city_title, alert_enabled, alert_level, alert_title, alert_message, "
-            " alert_link_url, alert_link_label, footer_text, city_website_url, city_website_label, updated_at) "
-            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
+            " alert_link_url, alert_link_label, footer_text, city_website_url, city_website_label, "
+            " theme_primary, theme_secondary, theme_tint, theme_bg, theme_surface, theme_header_bg, updated_at) "
+            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
             "ON CONFLICT (id) DO UPDATE SET "
             "city_title = EXCLUDED.city_title, "
             "alert_enabled = EXCLUDED.alert_enabled, "
@@ -859,6 +912,12 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
             "footer_text = EXCLUDED.footer_text, "
             "city_website_url = EXCLUDED.city_website_url, "
             "city_website_label = EXCLUDED.city_website_label, "
+            "theme_primary = EXCLUDED.theme_primary, "
+            "theme_secondary = EXCLUDED.theme_secondary, "
+            "theme_tint = EXCLUDED.theme_tint, "
+            "theme_bg = EXCLUDED.theme_bg, "
+            "theme_surface = EXCLUDED.theme_surface, "
+            "theme_header_bg = EXCLUDED.theme_header_bg, "
             "updated_at = now()",
             (
                 body.city_title.strip(),
@@ -871,6 +930,12 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
                 body.footer_text.strip(),
                 city_url,
                 body.city_website_label.strip(),
+                theme_primary,
+                theme_secondary,
+                theme_tint,
+                theme_bg,
+                theme_surface,
+                theme_header_bg,
             ),
         )
         return _load_preferences(conn)

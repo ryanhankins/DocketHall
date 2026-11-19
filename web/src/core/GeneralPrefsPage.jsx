@@ -17,6 +17,16 @@
 
 import React, { useEffect, useState } from 'react';
 import { api } from './api.js';
+import { DEFAULT_THEME, THEME_PRESETS, applyTheme } from './theme.js';
+
+const COLOR_FIELDS = [
+  { key: 'theme_primary', label: 'Primary Accent (buttons, links, active tabs)' },
+  { key: 'theme_secondary', label: 'Secondary Accent (borders, focus rings)' },
+  { key: 'theme_tint', label: 'Soft Highlight (active sidebar item)' },
+  { key: 'theme_bg', label: 'Page Background' },
+  { key: 'theme_surface', label: 'Card & Sidebar Surface' },
+  { key: 'theme_header_bg', label: 'Header Background' },
+];
 
 export default function GeneralPrefsPage({ onBrandingChange }) {
   const [cityTitle, setCityTitle] = useState('');
@@ -29,6 +39,7 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
   const [footerText, setFooterText] = useState('');
   const [cityWebsiteUrl, setCityWebsiteUrl] = useState('');
   const [cityWebsiteLabel, setCityWebsiteLabel] = useState('');
+  const [themeColors, setThemeColors] = useState(() => ({ ...DEFAULT_THEME }));
   const [hasLogo, setHasLogo] = useState(false);
   const [logoVer, setLogoVer] = useState(() => Date.now());
   const [dragOver, setDragOver] = useState(false);
@@ -47,6 +58,14 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
         setFooterText(b.footer_text || '');
         setCityWebsiteUrl(b.city_website_url || '');
         setCityWebsiteLabel(b.city_website_label || '');
+        setThemeColors({
+          theme_primary: b.theme_primary || DEFAULT_THEME.theme_primary,
+          theme_secondary: b.theme_secondary || DEFAULT_THEME.theme_secondary,
+          theme_tint: b.theme_tint || DEFAULT_THEME.theme_tint,
+          theme_bg: b.theme_bg || DEFAULT_THEME.theme_bg,
+          theme_surface: b.theme_surface || DEFAULT_THEME.theme_surface,
+          theme_header_bg: b.theme_header_bg || DEFAULT_THEME.theme_header_bg,
+        });
         setHasLogo(!!b.has_city_logo);
       })
       .catch(() => {});
@@ -106,9 +125,20 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
           footer_text: footerText.trim(),
           city_website_url: cityWebsiteUrl.trim(),
           city_website_label: cityWebsiteLabel.trim(),
+          ...themeColors,
         }),
       });
       setCityTitle(saved.city_title || '');
+      const savedTheme = {
+        theme_primary: saved.theme_primary || DEFAULT_THEME.theme_primary,
+        theme_secondary: saved.theme_secondary || DEFAULT_THEME.theme_secondary,
+        theme_tint: saved.theme_tint || DEFAULT_THEME.theme_tint,
+        theme_bg: saved.theme_bg || DEFAULT_THEME.theme_bg,
+        theme_surface: saved.theme_surface || DEFAULT_THEME.theme_surface,
+        theme_header_bg: saved.theme_header_bg || DEFAULT_THEME.theme_header_bg,
+      };
+      setThemeColors(savedTheme);
+      applyTheme(savedTheme);
       setMsg({ text: 'General preferences saved.', isError: false });
       onBrandingChange?.({ cityTitle: saved.city_title || '', hasLogo, logoVer });
     } catch (err) {
@@ -276,6 +306,69 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
                 onChange={(e) => setCityWebsiteLabel(e.target.value)}
               />
             </div>
+          </div>
+
+          <h2 style={{ margin: '1.25rem 0 .4rem', fontSize: '1.05rem' }}>Color Theme</h2>
+          <p className="muted" style={{ margin: '0 0 .75rem', fontSize: '.88rem' }}>
+            Customize site-wide colors for both the Public Portal and the Staff Workspace.
+          </p>
+          <div className="actions" style={{ marginBottom: '.85rem' }}>
+            <span className="muted" style={{ fontSize: '.85rem' }}>Presets:</span>
+            {THEME_PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                className="btn sm"
+                onClick={() => {
+                  const next = { ...preset.colors };
+                  setThemeColors(next);
+                  applyTheme(next);
+                }}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: '.75rem',
+              marginBottom: '1.25rem',
+            }}
+          >
+            {COLOR_FIELDS.map(({ key, label }) => {
+              const val = themeColors[key] || DEFAULT_THEME[key];
+              const pickerVal = /^#[0-9a-f]{6}$/i.test(val) ? val : DEFAULT_THEME[key];
+              return (
+                <div key={key} className="field">
+                  <label htmlFor={`pref-${key}`}>{label}</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '.45rem' }}>
+                    <input
+                      type="color"
+                      aria-label={label}
+                      value={pickerVal}
+                      onChange={(e) => {
+                        const next = { ...themeColors, [key]: e.target.value };
+                        setThemeColors(next);
+                        applyTheme(next);
+                      }}
+                      style={{ width: 42, height: 34, padding: 2, cursor: 'pointer', flexShrink: 0 }}
+                    />
+                    <input
+                      id={`pref-${key}`}
+                      value={val}
+                      maxLength={7}
+                      onChange={(e) => {
+                        const next = { ...themeColors, [key]: e.target.value };
+                        setThemeColors(next);
+                        if (/^#[0-9a-f]{6}$/i.test(e.target.value)) applyTheme(next);
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           <button type="submit" className="btn primary">Save General Preferences</button>

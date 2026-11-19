@@ -20,6 +20,7 @@ import { createRoot } from 'react-dom/client';
 import '../app.css';
 import ServiceIcon from './core/ServiceIcon.jsx';
 import { PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { applyTheme } from './core/theme.js';
 import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
 
 function PublicCityCode() {
@@ -40,6 +41,7 @@ function PublicCityCode() {
     fetch('/api/branding').then(r => (r.ok ? r.json() : null)).then(b => {
       if (b) {
         setBranding(b);
+        applyTheme(b);
         document.title = b.city_title ? `${b.city_title} - City Code` : 'City Code - CivicDesk';
       }
     }).catch(() => {});

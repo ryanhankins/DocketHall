@@ -21,6 +21,7 @@ import '../app.css';
 import { ROLE_LABELS, formatDate, formatSize, formatTime12h } from './core/api.js';
 import ServiceIcon from './core/ServiceIcon.jsx';
 import { PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { applyTheme } from './core/theme.js';
 import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
 import { COMPLAINT_STATUSES, ORDINANCE_PRESETS, StatusBadge } from './modules/complaints/constants.jsx';
 
@@ -1326,6 +1327,7 @@ function PublicHomePage() {
       .then((r) => (r.ok ? r.json() : {}))
       .then((b) => {
         setBranding(b || {});
+        applyTheme(b || {});
         const title = (b?.city_title || '').trim();
         document.title = title ? `${title} - CivicDesk` : 'CivicDesk — Public Portal';
       })
@@ -1470,7 +1472,7 @@ function PublicHomePage() {
               {visibleTabs.map((t) => (
                 <div
                   key={t.id}
-                  className="card"
+                  className="card service-tile"
                   onClick={() => selectTab(t.id)}
                   role="button"
                   tabIndex={0}
@@ -1498,7 +1500,7 @@ function PublicHomePage() {
                       {t.description}
                     </p>
                   </div>
-                  <div style={{ fontSize: '.9rem', fontWeight: 600, color: '#2563eb' }}>
+                  <div style={{ fontSize: '.9rem', fontWeight: 600, color: 'var(--cd-primary)' }}>
                     {t.actionLabel}
                   </div>
                 </div>
@@ -1516,7 +1518,7 @@ function PublicHomePage() {
                   e.preventDefault();
                   selectTab('overview');
                 }}
-                style={{ fontSize: '.92rem', fontWeight: 500, color: '#2563eb', textDecoration: 'none' }}
+                style={{ fontSize: '.92rem', fontWeight: 500, color: 'var(--cd-primary)', textDecoration: 'none' }}
               >
                 ← All Public Services
               </a>

@@ -20,6 +20,7 @@ import { createRoot } from 'react-dom/client';
 import '../app.css';
 import ServiceIcon from './core/ServiceIcon.jsx';
 import { PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { applyTheme } from './core/theme.js';
 
 function PublicPermitsPortal() {
   const [branding, setBranding] = useState({ city_title: '', has_city_logo: false });
@@ -34,6 +35,7 @@ function PublicPermitsPortal() {
     fetch('/api/branding').then(r => (r.ok ? r.json() : null)).then(b => {
       if (b) {
         setBranding(b);
+        applyTheme(b);
         document.title = b.city_title ? `${b.city_title} - Permits Portal` : 'Permits Portal - CivicDesk';
       }
     }).catch(() => {});

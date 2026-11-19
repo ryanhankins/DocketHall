@@ -19,6 +19,7 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { ROLE_LABELS, api, downloadBackupArchive, hasPermission, todayIso } from './api.js';
 import { loadEnabledFrontendModules } from './registry.js';
 import ServiceIcon from './ServiceIcon.jsx';
+import { applyTheme } from './theme.js';
 import { useToast } from './toast.jsx';
 
 const UsersPage = React.lazy(() => import('./UsersPage.jsx'));
@@ -136,6 +137,7 @@ export default function CoreShell() {
         hasLogo: !!brand.has_city_logo,
         logoVer: Date.now(),
       });
+      applyTheme(brand);
 
       const loaded = await loadEnabledFrontendModules(mods.map(m => m.id));
       setFrontendMods(loaded);
