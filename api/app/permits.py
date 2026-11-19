@@ -38,6 +38,7 @@ from .audit import record_audit
 from .auth import has_permission, require_permission
 from .db import pool
 from .integrations import send_direct_email, send_notification_email
+from .tenancy import tenant_object_key
 
 MAX_PERMIT_DOC_BYTES = int(os.environ.get("MAX_PERMIT_DOC_BYTES", str(50 * 1024 * 1024)))
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -1016,7 +1017,7 @@ async def upload_permit_document(
 
     orig_name = (file.filename or "document").strip() or "document"
     safe_name = _SAFE_FILENAME_RE.sub("_", orig_name).strip("._") or "document"
-    obj_key = f"permits/{permit_id}/{uuid.uuid4().hex[:12]}_{safe_name}"
+    obj_key = tenant_object_key(f"permits/{permit_id}/{uuid.uuid4().hex[:12]}_{safe_name}")
     sha = hashlib.sha256(raw).hexdigest()
     ctype = file.content_type or "application/octet-stream"
     clean_title = title.strip() or orig_name

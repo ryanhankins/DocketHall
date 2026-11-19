@@ -38,6 +38,7 @@ from .auth import current_user, has_permission
 from .db import _read_secret, pool
 from .integrations import send_notification_email
 from .subscriptions import notify_topic_subscribers
+from .tenancy import tenant_object_key
 
 STAFF_ROLES = {"admin_staff", "admin"}
 COUNCIL_ACCESS_ROLES = STAFF_ROLES | {"council_member", "non_admin_staff"}
@@ -997,7 +998,7 @@ async def upload_preferences_logo(
         else:
             raise HTTPException(status_code=400, detail="Unsupported image format; use PNG or JPEG")
 
-        new_key = f"preferences/city_logo_{uuid.uuid4().hex[:12]}.{ext}"
+        new_key = tenant_object_key(f"preferences/city_logo_{uuid.uuid4().hex[:12]}.{ext}")
         _minio().put_object(
             _bucket(),
             new_key,
@@ -1494,7 +1495,7 @@ async def upload_backlog_document(
                 "SELECT COALESCE(MAX(position), 0) + 1 FROM agenda_documents WHERE agenda_item_id = %s",
                 (item_id,),
             ).fetchone()[0]
-            object_key = f"backlog/{item_id}/{digest[:12]}_{safe_name}"
+            object_key = tenant_object_key(f"backlog/{item_id}/{digest[:12]}_{safe_name}")
             _minio().put_object(
                 _bucket(),
                 object_key,
@@ -1988,7 +1989,7 @@ async def upload_council_submission_document(
                 raise HTTPException(status_code=400, detail="Cannot attach files to a declined submission")
 
             approval_status = "pending" if (sub[1] == "accepted" and not has_permission(user, "agendas.manage")) else "approved"
-            obj_key = f"submissions/{sub_id}/{uuid.uuid4().hex[:12]}_{safe_name}"
+            obj_key = tenant_object_key(f"submissions/{sub_id}/{uuid.uuid4().hex[:12]}_{safe_name}")
             _minio().put_object(
                 _bucket(), obj_key, io.BytesIO(data), length=len(data), content_type=content_type
             )
@@ -2845,7 +2846,7 @@ async def upload_document(
                 "SELECT COALESCE(MAX(position), 0) + 1 FROM agenda_documents WHERE agenda_item_id = %s",
                 (item_id,),
             ).fetchone()[0]
-            object_key = f"agendas/{agenda_id}/{item_id}/{digest[:12]}_{safe_name}"
+            object_key = tenant_object_key(f"agendas/{agenda_id}/{item_id}/{digest[:12]}_{safe_name}")
             _minio().put_object(
                 _bucket(),
                 object_key,
@@ -2905,7 +2906,7 @@ def create_text_document(
             "SELECT COALESCE(MAX(position), 0) + 1 FROM agenda_documents WHERE agenda_item_id = %s",
             (item_id,),
         ).fetchone()[0]
-        object_key = f"agendas/{agenda_id}/{item_id}/{digest[:12]}_{safe_name}"
+        object_key = tenant_object_key(f"agendas/{agenda_id}/{item_id}/{digest[:12]}_{safe_name}")
         _minio().put_object(
             _bucket(),
             object_key,

@@ -13,7 +13,8 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Postgres connection pool. Password is read from the Swarm secret file."""
+"""Postgres connection pool with schema-per-tenant search_path isolation."""
+from contextlib import contextmanager
 import os
 import time
 
@@ -39,7 +40,51 @@ def conninfo() -> str:
     )
 
 
-pool = ConnectionPool(conninfo(), min_size=1, max_size=10, open=False)
+_raw_pool = ConnectionPool(conninfo(), min_size=1, max_size=10, open=False)
+
+
+@contextmanager
+def raw_connection():
+    """Checkout a connection pinned to the public schema (used for tenant lookup)."""
+    with _raw_pool.connection() as conn:
+        conn.execute("SET search_path TO public")
+        if not conn.autocommit:
+            conn.commit()
+        yield conn
+
+
+class _TenantAwarePool:
+    """Drop-in wrapper around ConnectionPool that applies the active tenant schema."""
+
+    @contextmanager
+    def connection(self):
+        from .tenancy import get_current_tenant_schema
+
+        schema = get_current_tenant_schema()
+        with _raw_pool.connection() as conn:
+            conn.execute(f"SET search_path TO {schema}")
+            if not conn.autocommit:
+                conn.commit()
+            try:
+                yield conn
+            finally:
+                if schema != "public":
+                    try:
+                        if conn.autocommit or conn.info.transaction_status == psycopg.pq.TransactionStatus.IDLE:
+                            conn.execute("SET search_path TO public")
+                            if not conn.autocommit:
+                                conn.commit()
+                    except Exception:
+                        pass
+
+    def open(self, *args, **kwargs):
+        return _raw_pool.open(*args, **kwargs)
+
+    def close(self, *args, **kwargs):
+        return _raw_pool.close(*args, **kwargs)
+
+
+pool = _TenantAwarePool()
 
 
 def open_pool(timeout_s: int = 60) -> None:
@@ -47,7 +92,7 @@ def open_pool(timeout_s: int = 60) -> None:
     deadline = time.monotonic() + timeout_s
     while True:
         try:
-            pool.open(wait=True, timeout=5)
+            _raw_pool.open(wait=True, timeout=5)
             return
         except Exception:
             if time.monotonic() > deadline:

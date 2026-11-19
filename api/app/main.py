@@ -15,30 +15,61 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import JSONResponse
 
-from . import audit, auth, backup, branding, integrations, registry, subscriptions, users
+from . import audit, auth, backup, branding, integrations, registry, subscriptions, tenancy, users
 from .db import open_pool, pool
 from .modules import register_builtin_modules
 
 register_builtin_modules()
 
 
+def _bootstrap_tenant_schema(slug: str, schema: str) -> None:
+    with tenancy.tenant_context(slug, schema):
+        auth.bootstrap()
+        audit.bootstrap()
+        integrations.bootstrap()
+        subscriptions.bootstrap()
+        registry.bootstrap()
+        for mod in registry.get_all_registered_modules():
+            mod.bootstrap()
+
+
+tenancy.register_schema_bootstrapper(_bootstrap_tenant_schema)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     open_pool()
-    auth.bootstrap()
-    audit.bootstrap()
-    integrations.bootstrap()
-    subscriptions.bootstrap()
-    registry.bootstrap()
-    for mod in registry.get_all_registered_modules():
-        mod.bootstrap()
+    tenancy.bootstrap()
+    tenants = tenancy.list_active_tenants() if tenancy.is_multi_tenant() else [("default", "public")]
+    for slug, schema in tenants:
+        _bootstrap_tenant_schema(slug, schema)
     yield
     pool.close()
 
 
 app = FastAPI(title="CivicDesk API", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def tenant_middleware(request: Request, call_next):
+    path = request.url.path
+    if path == "/api/health" or path.startswith("/api/platform/"):
+        return await call_next(request)
+    resolved = tenancy.resolve_tenant_for_request(
+        request.headers.get("host", ""),
+        request.headers.get("x-tenant-slug", ""),
+    )
+    if resolved is None:
+        return JSONResponse(status_code=404, content={"detail": "Unknown tenant"})
+    slug, schema = resolved
+    with tenancy.tenant_context(slug, schema):
+        return await call_next(request)
+
+
+app.include_router(tenancy.router)
 app.include_router(auth.router)
 app.include_router(audit.router)
 app.include_router(users.router)

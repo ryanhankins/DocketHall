@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from .agendas import _bucket, _minio, _remove_minio_objects
 from .auth import require_permission
 from .db import pool
+from .tenancy import tenant_object_key
 from .subscriptions import notify_topic_subscribers
 
 MAX_REPO_FILE_BYTES = int(os.environ.get("MAX_REPO_FILE_BYTES", str(50 * 1024 * 1024)))
@@ -412,7 +413,7 @@ async def upload_record_file(
 
     orig_name = (file.filename or "document").strip() or "document"
     safe_name = _SAFE_FILENAME_RE.sub("_", orig_name).strip("._") or "document"
-    obj_key = f"records/{doc_id}/{uuid.uuid4().hex[:12]}_{safe_name}"
+    obj_key = tenant_object_key(f"records/{doc_id}/{uuid.uuid4().hex[:12]}_{safe_name}")
     sha = hashlib.sha256(raw).hexdigest()
     ctype = file.content_type or "application/octet-stream"
     _minio().put_object(_bucket(), obj_key, io.BytesIO(raw), length=len(raw), content_type=ctype)

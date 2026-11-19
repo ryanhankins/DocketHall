@@ -33,6 +33,7 @@ from starlette.background import BackgroundTask
 from .agendas import _bucket, _minio, get_staff_user
 from .db import pool
 from .registry import get_module_backup_tables
+from .tenancy import strip_tenant_prefix, tenant_object_key
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
 
@@ -430,7 +431,8 @@ async def import_archive(
             for arc_path in manifest.get("file_checksums") or {}:
                 if not arc_path.startswith("files/"):
                     continue
-                key = arc_path[len("files/"):]
+                raw_key = arc_path[len("files/"):]
+                key = tenant_object_key(strip_tenant_prefix(raw_key))
                 raw = zf.read(arc_path)
                 ctype = mimetypes.guess_type(key)[0] or "application/octet-stream"
                 minio_client.put_object(bucket, key, io.BytesIO(raw), length=len(raw), content_type=ctype)
@@ -467,6 +469,8 @@ async def import_archive(
                         v = row.get(c)
                         if not has_users and c in user_id_fk_cols and isinstance(v, int) and v not in existing_user_ids:
                             v = None
+                        if c in ("object_key", "city_logo_key") and isinstance(v, str) and v:
+                            v = tenant_object_key(strip_tenant_prefix(v))
                         if c == "email" and v is None:
                             v = ""
                         if c in jsonb_cols:

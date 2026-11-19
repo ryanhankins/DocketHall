@@ -49,6 +49,11 @@ services:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       # Local record storage (PDFs written 0444 + SHA-256 sidecar)
       LOCAL_RECORDS_DIR: /data/records
+      # Multi-tenancy (schema-per-tenant; disabled by default for single-tenant)
+      MULTI_TENANT: "${MULTI_TENANT:-false}"
+      TENANT_BASE_DOMAIN: "${TENANT_BASE_DOMAIN:-}"
+      ALLOW_TENANT_HEADER: "${ALLOW_TENANT_HEADER:-false}"
+      PLATFORM_ADMIN_TOKEN: "${PLATFORM_ADMIN_TOKEN:-}"
       # Auth cookie security (set COOKIE_SECURE=true when serving over HTTPS)
       COOKIE_SECURE: "${COOKIE_SECURE:-false}"
       APP_BASE_URL: "${APP_BASE_URL:-}"

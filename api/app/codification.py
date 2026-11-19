@@ -31,6 +31,7 @@ from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
 from .agendas import _bucket, _minio, _remove_minio_objects
 from .auth import require_permission
 from .db import pool
+from .tenancy import tenant_object_key
 from .subscriptions import notify_topic_subscribers
 
 MAX_CODE_PDF_BYTES = int(os.environ.get("MAX_CODE_PDF_BYTES", str(50 * 1024 * 1024)))
@@ -673,7 +674,7 @@ async def upload_section_pdf(
         raise HTTPException(status_code=400, detail="Uploaded file must be a valid PDF")
 
     orig_name = _SAFE_FILENAME_RE.sub("_", (file.filename or "section.pdf").strip()) or "section.pdf"
-    obj_key = f"codification/{section_id}/{uuid.uuid4().hex[:12]}_{orig_name}"
+    obj_key = tenant_object_key(f"codification/{section_id}/{uuid.uuid4().hex[:12]}_{orig_name}")
     _minio().put_object(_bucket(), obj_key, io.BytesIO(raw), length=len(raw), content_type="application/pdf")
 
     with pool.connection() as conn:

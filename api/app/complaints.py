@@ -32,6 +32,7 @@ from .agendas import _bucket, _minio
 from .audit import record_audit
 from .auth import current_user, has_permission, require_permission
 from .db import pool
+from .tenancy import tenant_object_key
 from .integrations import send_notification_email
 
 router = APIRouter(prefix="/api/complaints", tags=["complaints"])
@@ -821,7 +822,7 @@ async def upload_complaint_document(
 
     sha = hashlib.sha256(raw).hexdigest()
     safe_name = _SAFE_FILENAME_RE.sub("_", os.path.basename(file.filename or "attachment")).strip("._") or "attachment"
-    object_key = f"complaints/{complaint_id}/{secrets.token_hex(8)}_{safe_name}"
+    object_key = tenant_object_key(f"complaints/{complaint_id}/{secrets.token_hex(8)}_{safe_name}")
     ctype = file.content_type or "application/octet-stream"
 
     _minio().put_object(
