@@ -140,7 +140,12 @@ export default function CouncilPage({ me }) {
               <tr><td colSpan={6} className="muted">No finalized agendas yet.</td></tr>
             ) : agendas.map(a => (
               <tr key={a.id}>
-                <td>{a.title}</td>
+                <td>
+                  {a.title}
+                  {a.amended_at && (
+                    <> <span className="badge draft" title={`Amended ${new Date(a.amended_at).toLocaleString()}`}>Amended</span></>
+                  )}
+                </td>
                 <td>{a.body || '—'}</td>
                 <td>{a.meeting_date || '—'}</td>
                 <td>{a.meeting_time ? formatTime12h(a.meeting_time) : '—'}</td>

@@ -35,6 +35,7 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
     { name: 'Finalized Agendas', warn_on_leave: true },
   ]);
   const [defaultMeetingTime, setDefaultMeetingTime] = useState('');
+  const [postingNoticeHours, setPostingNoticeHours] = useState(72);
   const [backlogMatches, setBacklogMatches] = useState([]);
   const [popupDismissed, setPopupDismissed] = useState(false);
 
@@ -66,6 +67,7 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
     ]);
     const defTime = prefs.meeting_time || '';
     setDefaultMeetingTime(defTime);
+    setPostingNoticeHours(Number(prefs.posting_notice_hours ?? 72));
     setConfiguredBodies(Array.isArray(prefs.bodies) ? prefs.bodies : []);
     setConfiguredSections(Array.isArray(prefs.sections) ? prefs.sections : []);
     setConfiguredCategories(
@@ -131,6 +133,9 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
           {agenda.status && (
             <span className={categoryBadgeClass(agenda.status, configuredCategories)}>{agenda.status}</span>
           )}
+          {agenda.amended_at && (
+            <span className="badge draft" title={`Amended ${new Date(agenda.amended_at).toLocaleString()}`}>Amended</span>
+          )}
         </div>
         <div className="actions">
           <select
@@ -141,10 +146,24 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
             onChange={async (e) => {
               const targetCat = e.target.value;
               const fromCfg = configuredCategories.find(c => c.name === agenda.status);
+              const toCfg = configuredCategories.find(c => c.name === targetCat);
+              const isMovingToFinal = Boolean(toCfg?.warn_on_leave || targetCat.toLowerCase().startsWith('finalized'));
+              const wasFinal = Boolean(fromCfg?.warn_on_leave || (agenda.status || '').toLowerCase().startsWith('finalized'));
               if (fromCfg?.warn_on_leave) {
                 const destLabel = targetCat ? ` and moving it to "${targetCat}"` : '';
                 if (!confirm(`Warning: "${agenda.title}" is in "${agenda.status}". Removing it from "${agenda.status}"${destLabel} may affect published/distributed materials. Continue?`)) {
                   return;
+                }
+              }
+              if (isMovingToFinal && !wasFinal && postingNoticeHours > 0 && agenda.meeting_date) {
+                const timePart = toTimeInputValue(agenda.meeting_time || defaultMeetingTime) || '00:00';
+                const meetingDt = new Date(`${agenda.meeting_date}T${timePart}:00`);
+                const hoursLeft = (meetingDt.getTime() - Date.now()) / (1000 * 60 * 60);
+                if (!Number.isNaN(hoursLeft) && hoursLeft < postingNoticeHours) {
+                  const desc = hoursLeft < 0 ? 'already in the past' : `only ${Math.max(0, Math.round(hoursLeft))} hour(s) away`;
+                  if (!confirm(`Open-Meeting Posting Warning: This meeting is ${desc}, which is less than the configured ${postingNoticeHours}-hour posting notice window. Finalize anyway?`)) {
+                    return;
+                  }
                 }
               }
               const updated = await api(`/api/agendas/${agenda.id}`, {
@@ -188,9 +207,10 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
         </div>
       </div>
 
-      {(showFinalized || logs.length > 0) && (
+      {(showFinalized || agenda.amended_at || logs.length > 0) && (
         <div className="muted" style={{ fontSize: '.85rem', marginBottom: '.65rem' }}>
           {showFinalized && <span>Finalized: {new Date(agenda.finalized_at).toLocaleString()} </span>}
+          {agenda.amended_at && <span>· Amended: {new Date(agenda.amended_at).toLocaleString()} </span>}
           {logs.length > 0 && (
             <details style={{ display: 'inline-block', marginLeft: showFinalized ? '.4rem' : 0 }}>
               <summary style={{ cursor: 'pointer', color: '#1d4ed8' }}>Status Log ({logs.length})</summary>

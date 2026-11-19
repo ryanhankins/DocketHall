@@ -183,6 +183,8 @@ function AgendasPublicTab() {
   const [agendas, setAgendas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
+  const [bodyFilter, setBodyFilter] = useState('');
+  const [yearFilter, setYearFilter] = useState('');
 
   useEffect(() => {
     fetch('/api/agendas/public')
@@ -192,11 +194,32 @@ function AgendasPublicTab() {
       .finally(() => setLoading(false));
   }, []);
 
+  const bodyOptions = useMemo(() => {
+    const set = new Set();
+    for (const a of agendas) {
+      if (a.body) set.add(a.body);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [agendas]);
+
+  const yearOptions = useMemo(() => {
+    const set = new Set();
+    for (const a of agendas) {
+      const y = (a.meeting_date || '').slice(0, 4);
+      if (/^\d{4}$/.test(y)) set.add(y);
+    }
+    return [...set].sort((a, b) => b.localeCompare(a));
+  }, [agendas]);
+
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
-    if (!ql) return agendas;
-    return agendas.filter((a) => `${a.title} ${a.body || ''} ${a.meeting_date || ''}`.toLowerCase().includes(ql));
-  }, [agendas, q]);
+    return agendas.filter((a) => {
+      if (bodyFilter && a.body !== bodyFilter) return false;
+      if (yearFilter && !(a.meeting_date || '').startsWith(yearFilter)) return false;
+      if (ql && !`${a.title} ${a.body || ''} ${a.meeting_date || ''}`.toLowerCase().includes(ql)) return false;
+      return true;
+    });
+  }, [agendas, q, bodyFilter, yearFilter]);
 
   return (
     <div className="card">
@@ -208,12 +231,22 @@ function AgendasPublicTab() {
             <p className="muted" style={{ margin: '4px 0 0' }}>Finalized meeting agendas, packets, and approved minutes.</p>
           </div>
         </div>
-        <input
-          style={{ maxWidth: 280 }}
-          placeholder="Filter meetings or bodies…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
+        <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          <select aria-label="Filter by Board" value={bodyFilter} onChange={(e) => setBodyFilter(e.target.value)} style={{ width: 'auto' }}>
+            <option value="">All Boards</option>
+            {bodyOptions.map((b) => <option key={b} value={b}>{b}</option>)}
+          </select>
+          <select aria-label="Filter by Year" value={yearFilter} onChange={(e) => setYearFilter(e.target.value)} style={{ width: 'auto' }}>
+            <option value="">All Years</option>
+            {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+          <input
+            style={{ maxWidth: 240 }}
+            placeholder="Search meetings…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
       </div>
       {loading ? (
         <p className="muted">Loading agendas…</p>
@@ -227,7 +260,12 @@ function AgendasPublicTab() {
           <tbody>
             {filtered.map((a) => (
               <tr key={a.id}>
-                <td><strong>{a.title}</strong></td>
+                <td>
+                  <strong>{a.title}</strong>
+                  {a.amended_at && (
+                    <> <span className="badge draft" title={`Amended ${formatDate(a.amended_at)}`}>Amended</span></>
+                  )}
+                </td>
                 <td>{a.body || '—'}</td>
                 <td>{a.meeting_date || '—'}</td>
                 <td>{a.meeting_time ? formatTime12h(a.meeting_time) : '—'}</td>

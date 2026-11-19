@@ -48,6 +48,7 @@ export default function AgendaPrefsPage() {
   const [newSection, setNewSection] = useState('');
   const [newCatName, setNewCatName] = useState('');
   const [newCatWarn, setNewCatWarn] = useState(false);
+  const [postingNoticeHours, setPostingNoticeHours] = useState('72');
   const [templates, setTemplates] = useState([]);
   const [tplLoading, setTplLoading] = useState(true);
   const [msg, setMsg] = useState({ text: '', isError: false });
@@ -75,6 +76,7 @@ export default function AgendaPrefsPage() {
         setFooterDisclosures(prefs.footer_disclosures || '');
         setBodies(Array.isArray(prefs.bodies) ? prefs.bodies : []);
         setSections(Array.isArray(prefs.sections) ? prefs.sections : []);
+        setPostingNoticeHours(String(prefs.posting_notice_hours ?? 72));
         setCategories(
           Array.isArray(prefs.categories) && prefs.categories.length
             ? prefs.categories.map(c => ({ name: c.name, warn_on_leave: !!c.warn_on_leave }))
@@ -105,6 +107,7 @@ export default function AgendaPrefsPage() {
           bodies,
           sections,
           categories,
+          posting_notice_hours: Math.max(0, Number.parseInt(postingNoticeHours || '0', 10) || 0),
         }),
       });
       setBodies([...(saved.bodies || [])]);
@@ -157,6 +160,18 @@ export default function AgendaPrefsPage() {
           <div className="field" style={{ marginBottom: '1.1rem' }}>
             <label htmlFor="pref-footer-disclosures">Page Footer / Accessibility &amp; Legal Disclosures</label>
             <textarea id="pref-footer-disclosures" rows={3} placeholder="e.g. Auxiliary aids and services are available upon request 48 hours prior to the meeting." value={footerDisclosures} onChange={(e) => setFooterDisclosures(e.target.value)} />
+          </div>
+
+          <div className="field" style={{ maxWidth: 320, marginBottom: '1rem' }}>
+            <label htmlFor="pref-notice-hours">Open-Meeting Posting Notice Window (hours, 0 disables)</label>
+            <input
+              id="pref-notice-hours"
+              type="number"
+              min={0}
+              max={720}
+              value={postingNoticeHours}
+              onChange={(e) => setPostingNoticeHours(e.target.value)}
+            />
           </div>
 
           <h2 style={{ margin: '1rem 0 .4rem', fontSize: '1rem' }}>Governing Bodies</h2>

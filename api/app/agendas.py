@@ -86,6 +86,7 @@ ALTER TABLE agendas ADD COLUMN IF NOT EXISTS minutes_notes TEXT NOT NULL DEFAULT
 ALTER TABLE agendas ADD COLUMN IF NOT EXISTS media_url TEXT NOT NULL DEFAULT '';
 ALTER TABLE agendas ADD COLUMN IF NOT EXISTS media_type TEXT NOT NULL DEFAULT '';
 ALTER TABLE agendas ADD COLUMN IF NOT EXISTS minutes_status TEXT NOT NULL DEFAULT 'draft';
+ALTER TABLE agendas ADD COLUMN IF NOT EXISTS amended_at TIMESTAMPTZ;
 CREATE TABLE IF NOT EXISTS agenda_items (
     id                  BIGSERIAL PRIMARY KEY,
     agenda_id           BIGINT REFERENCES agendas(id) ON DELETE CASCADE,
@@ -229,6 +230,7 @@ ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS city_logo_key TEXT NOT N
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS city_title TEXT NOT NULL DEFAULT '';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS backup_reminder_days INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS last_backup_at TIMESTAMPTZ;
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS posting_notice_hours INTEGER NOT NULL DEFAULT 72;
 """
 
 _minio_client: Minio | None = None
@@ -347,6 +349,17 @@ def _is_council_finalized(conn, agenda_id: int) -> bool:
     return row is not None
 
 
+def _touch_agenda(conn, agenda_id: int, *, mark_amended: bool = True) -> None:
+    """Update updated_at and mark finalized agendas as amended when items/docs change."""
+    if mark_amended and _is_council_finalized(conn, agenda_id):
+        conn.execute(
+            "UPDATE agendas SET updated_at = now(), amended_at = now() WHERE id = %s",
+            (agenda_id,),
+        )
+    else:
+        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (agenda_id,))
+
+
 def _validate_doc(filename: str, data: bytes) -> tuple[str, str]:
     ext = os.path.splitext(filename.lower())[1]
     if ext not in ALLOWED_DOCS:
@@ -421,7 +434,7 @@ def _load_agenda(conn, agenda_id: int) -> dict | None:
     row = conn.execute(
         "SELECT id, title, body, meeting_date, meeting_time, status, finalized_at, "
         "       created_at, updated_at, minutes_attendance, minutes_notes, "
-        "       media_url, media_type, minutes_status "
+        "       media_url, media_type, minutes_status, amended_at "
         "FROM agendas WHERE id = %s",
         (agenda_id,),
     ).fetchone()
@@ -517,6 +530,7 @@ def _load_agenda(conn, agenda_id: int) -> dict | None:
         "media_url": row[11],
         "media_type": row[12],
         "minutes_status": row[13],
+        "amended_at": row[14].isoformat() if row[14] else None,
         "items": items,
         "activity_log": [
             {
@@ -697,6 +711,7 @@ class AgendaPreferencesIn(BaseModel):
     bodies: list[str] = list(DEFAULT_BODIES)
     sections: list[str] = list(DEFAULT_SECTIONS)
     categories: list[AgendaCategoryIn] = [AgendaCategoryIn(**c) for c in DEFAULT_CATEGORIES]
+    posting_notice_hours: int = 72
 
 
 def _load_preferences(conn) -> dict:
@@ -704,7 +719,7 @@ def _load_preferences(conn) -> dict:
         "SELECT include_item_cover_sheets, include_page_numbers, "
         "       city_name, meeting_location, meeting_time, other_notes, "
         "       footer_disclosures, bodies, city_logo_key, sections, categories, "
-        "       city_title "
+        "       city_title, posting_notice_hours "
         "FROM agenda_preferences WHERE id = 1"
     ).fetchone()
     if not row:
@@ -720,6 +735,7 @@ def _load_preferences(conn) -> dict:
             "bodies": list(DEFAULT_BODIES),
             "sections": list(DEFAULT_SECTIONS),
             "categories": [dict(c) for c in DEFAULT_CATEGORIES],
+            "posting_notice_hours": 72,
             "city_logo_key": "",
             "has_city_logo": False,
         }
@@ -744,6 +760,7 @@ def _load_preferences(conn) -> dict:
         "bodies": list(row[7]) if row[7] else list(DEFAULT_BODIES),
         "sections": list(row[9]) if row[9] is not None else list(DEFAULT_SECTIONS),
         "categories": cats,
+        "posting_notice_hours": int(row[12]) if row[12] is not None else 72,
         "city_logo_key": logo_key,
         "has_city_logo": bool(logo_key),
     }
@@ -928,6 +945,7 @@ def update_preferences(body: AgendaPreferencesIn, _: dict = Depends(get_staff_us
         json.dumps(clean_bodies),
         json.dumps(clean_sections),
         json.dumps(clean_categories),
+        max(0, int(body.posting_notice_hours)),
     )
     with pool.connection() as conn:
         in_use = conn.execute(
@@ -943,8 +961,8 @@ def update_preferences(body: AgendaPreferencesIn, _: dict = Depends(get_staff_us
             "INSERT INTO agenda_preferences "
             "(id, include_item_cover_sheets, include_page_numbers, "
             " city_name, meeting_location, meeting_time, other_notes, "
-            " footer_disclosures, bodies, sections, categories, updated_at) "
-            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, now()) "
+            " footer_disclosures, bodies, sections, categories, posting_notice_hours, updated_at) "
+            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, now()) "
             "ON CONFLICT (id) DO UPDATE SET "
             "include_item_cover_sheets = EXCLUDED.include_item_cover_sheets, "
             "include_page_numbers = EXCLUDED.include_page_numbers, "
@@ -956,6 +974,7 @@ def update_preferences(body: AgendaPreferencesIn, _: dict = Depends(get_staff_us
             "bodies = EXCLUDED.bodies, "
             "sections = EXCLUDED.sections, "
             "categories = EXCLUDED.categories, "
+            "posting_notice_hours = EXCLUDED.posting_notice_hours, "
             "updated_at = now()",
             vals,
         )
@@ -1461,7 +1480,7 @@ def assign_backlog_item(
                 (body.target_agenda_id, next_pos, item_id),
             )
             _log_agenda_event(conn, body.target_agenda_id, f'added "{item[0]}" from Todos & Backlog', user["username"])
-        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (body.target_agenda_id,))
+        _touch_agenda(conn, body.target_agenda_id)
         return _load_backlog(conn)
 
 
@@ -1469,7 +1488,7 @@ def assign_backlog_item(
 def list_agendas(status: str | None = None, _: dict = Depends(get_staff_user)):
     sql = (
         "SELECT a.id, a.title, a.body, a.meeting_date, a.meeting_time, a.status, a.finalized_at, "
-        "       a.created_at, a.updated_at, a.media_url, a.media_type, a.minutes_status, "
+        "       a.created_at, a.updated_at, a.media_url, a.media_type, a.minutes_status, a.amended_at, "
         "       COUNT(DISTINCT i.id) AS item_count, "
         "       COUNT(d.id) AS doc_count "
         "FROM agendas a "
@@ -1498,8 +1517,9 @@ def list_agendas(status: str | None = None, _: dict = Depends(get_staff_user)):
             "media_url": r[9],
             "media_type": r[10],
             "minutes_status": r[11],
-            "item_count": r[12],
-            "doc_count": r[13],
+            "amended_at": r[12].isoformat() if r[12] else None,
+            "item_count": r[13],
+            "doc_count": r[14],
         }
         for r in rows
     ]
@@ -1875,7 +1895,7 @@ def approve_council_submission_document(
             "WHERE id = %s",
             (user["id"], user["username"], doc_id),
         )
-        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (row[9],))
+        _touch_agenda(conn, row[9])
     return {"status": "approved", "agenda_doc_id": agenda_doc_id}
 
 
@@ -1977,7 +1997,7 @@ def accept_council_submission(
                 "WHERE id = %s",
                 (user["id"], user["username"], sd[0]),
             )
-        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (agenda_id,))
+        _touch_agenda(conn, agenda_id)
         conn.execute(
             "UPDATE council_submissions "
             "SET status = 'accepted', accepted_agenda_id = %s, accepted_item_id = %s, "
@@ -2040,7 +2060,7 @@ def delete_council_submission(sub_id: int, user: dict = Depends(get_council_or_s
 def _query_finalized_agendas() -> list[dict]:
     sql = (
         "SELECT a.id, a.title, a.body, a.meeting_date, a.meeting_time, a.status, "
-        "       a.finalized_at, a.created_at, a.updated_at, a.media_url, a.media_type, a.minutes_status, "
+        "       a.finalized_at, a.created_at, a.updated_at, a.media_url, a.media_type, a.minutes_status, a.amended_at, "
         "       COUNT(DISTINCT i.id) AS item_count, "
         "       COUNT(d.id) AS doc_count "
         "FROM agendas a "
@@ -2065,8 +2085,9 @@ def _query_finalized_agendas() -> list[dict]:
             "media_url": r[9],
             "media_type": r[10],
             "minutes_status": r[11],
-            "item_count": r[12],
-            "doc_count": r[13],
+            "amended_at": r[12].isoformat() if r[12] else None,
+            "item_count": r[13],
+            "doc_count": r[14],
         }
         for r in rows
     ]
@@ -2135,6 +2156,7 @@ def update_agenda(agenda_id: int, body: AgendaPatch, request: Request, user: dic
             "meeting_time = COALESCE(%s, meeting_time), "
             "status = COALESCE(%s, status), "
             "finalized_at = CASE WHEN %s THEN now() WHEN %s THEN NULL ELSE finalized_at END, "
+            "amended_at = CASE WHEN %s THEN NULL ELSE amended_at END, "
             "minutes_attendance = COALESCE(%s, minutes_attendance), "
             "minutes_notes = COALESCE(%s, minutes_notes), "
             "media_url = COALESCE(%s, media_url), "
@@ -2149,6 +2171,7 @@ def update_agenda(agenda_id: int, body: AgendaPatch, request: Request, user: dic
                 body.meeting_time.strip() if body.meeting_time is not None else None,
                 next_status,
                 set_finalized,
+                clear_finalized,
                 clear_finalized,
                 body.minutes_attendance.strip() if body.minutes_attendance is not None else None,
                 body.minutes_notes.strip() if body.minutes_notes is not None else None,
@@ -2301,7 +2324,7 @@ def add_item(agenda_id: int, body: ItemIn, _: dict = Depends(get_staff_user)):
                 body.revision_status,
             ),
         )
-        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (agenda_id,))
+        _touch_agenda(conn, agenda_id)
         return _load_agenda(conn, agenda_id)
 
 
@@ -2324,7 +2347,7 @@ def reorder_items(
             conn.execute(
                 "UPDATE agenda_items SET position = %s WHERE id = %s", (idx, iid)
             )
-        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (agenda_id,))
+        _touch_agenda(conn, agenda_id)
         return _load_agenda(conn, agenda_id)
 
 
@@ -2425,7 +2448,13 @@ def update_item(
                     (pos, neighbor[0]),
                 )
 
-        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (agenda_id,))
+        only_minutes = (
+            body.title is None and body.description is None and body.section is None
+            and body.presenter is None and body.recommended_motion is None
+            and body.fiscal_impact is None and body.revision_status is None
+            and body.position is None and body.direction is None
+        )
+        _touch_agenda(conn, agenda_id, mark_amended=not only_minutes)
         return _load_agenda(conn, agenda_id)
 
 
@@ -2477,7 +2506,7 @@ def delete_item(agenda_id: int, item_id: int, _: dict = Depends(get_staff_user))
         if not row:
             raise HTTPException(status_code=404, detail="Agenda item not found")
         _renumber_items(conn, agenda_id)
-        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (agenda_id,))
+        _touch_agenda(conn, agenda_id)
         agenda = _load_agenda(conn, agenda_id)
     _remove_minio_objects(keys)
     return agenda
@@ -2510,7 +2539,7 @@ def move_item(
         ).fetchone()[0]
         if body.copy:
             _copy_item_to_agenda(conn, item_id, body.target_agenda_id, next_pos)
-            conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (body.target_agenda_id,))
+            _touch_agenda(conn, body.target_agenda_id)
             _log_agenda_event(conn, agenda_id, f'copied item "{item[0]}" to {target[0]}', user["username"])
             _log_agenda_event(conn, body.target_agenda_id, f'received copy of item "{item[0]}"', user["username"])
         else:
@@ -2519,7 +2548,8 @@ def move_item(
                 (body.target_agenda_id, next_pos, item_id),
             )
             _renumber_items(conn, agenda_id)
-            conn.execute("UPDATE agendas SET updated_at = now() WHERE id IN (%s, %s)", (agenda_id, body.target_agenda_id))
+            _touch_agenda(conn, agenda_id)
+            _touch_agenda(conn, body.target_agenda_id)
             _log_agenda_event(conn, agenda_id, f'moved item "{item[0]}" to {target[0]}', user["username"])
             _log_agenda_event(conn, body.target_agenda_id, f'received item "{item[0]}"', user["username"])
         return _load_agenda(conn, agenda_id)
@@ -2552,7 +2582,7 @@ def move_item_to_backlog(
             (next_pos, target_body, target_date, item_id),
         )
         _renumber_items(conn, agenda_id)
-        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (agenda_id,))
+        _touch_agenda(conn, agenda_id)
         _log_agenda_event(conn, agenda_id, f'moved item "{it[0]}" to backlog', user["username"])
         return _load_agenda(conn, agenda_id)
 
@@ -2587,7 +2617,7 @@ def move_section(
         if body.copy:
             for offset, (iid,) in enumerate(rows):
                 _copy_item_to_agenda(conn, iid, body.target_agenda_id, next_pos + offset)
-            conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (body.target_agenda_id,))
+            _touch_agenda(conn, body.target_agenda_id)
             _log_agenda_event(
                 conn,
                 agenda_id,
@@ -2607,7 +2637,8 @@ def move_section(
                     (body.target_agenda_id, next_pos + offset, iid),
                 )
             _renumber_items(conn, agenda_id)
-            conn.execute("UPDATE agendas SET updated_at = now() WHERE id IN (%s, %s)", (agenda_id, body.target_agenda_id))
+            _touch_agenda(conn, agenda_id)
+            _touch_agenda(conn, body.target_agenda_id)
             _log_agenda_event(
                 conn,
                 agenda_id,
@@ -2674,7 +2705,7 @@ async def upload_document(
                     user["id"],
                 ),
             )
-            conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (agenda_id,))
+            _touch_agenda(conn, agenda_id)
             return _load_agenda(conn, agenda_id)
 
     return await run_in_threadpool(_store_document)
@@ -2734,7 +2765,7 @@ def create_text_document(
                 user["id"],
             ),
         )
-        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (agenda_id,))
+        _touch_agenda(conn, agenda_id)
         return _load_agenda(conn, agenda_id)
 
 
@@ -2821,7 +2852,7 @@ def update_document(
         elif dest_item_id != item_id:
             _renumber_docs(conn, dest_item_id)
 
-        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (agenda_id,))
+        _touch_agenda(conn, agenda_id)
         return _load_agenda(conn, agenda_id)
 
 
@@ -2839,7 +2870,7 @@ def delete_document(
         if not row:
             raise HTTPException(status_code=404, detail="Document not found")
         _renumber_docs(conn, item_id)
-        conn.execute("UPDATE agendas SET updated_at = now() WHERE id = %s", (agenda_id,))
+        _touch_agenda(conn, agenda_id)
         agenda = _load_agenda(conn, agenda_id)
     _remove_minio_objects([row[0]])
     return agenda
