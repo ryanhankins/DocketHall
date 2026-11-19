@@ -22,6 +22,7 @@ const AgendaDetailPage = React.lazy(() => import('./AgendaDetailPage.jsx'));
 const BacklogPage = React.lazy(() => import('./BacklogPage.jsx'));
 const AgendaPrefsPage = React.lazy(() => import('./AgendaPrefsPage.jsx'));
 const CouncilPage = React.lazy(() => import('./CouncilPage.jsx'));
+const FinalizedAgendasPage = React.lazy(() => import('./FinalizedAgendasPage.jsx'));
 
 const agendasModule = {
   id: 'agendas',
@@ -51,6 +52,11 @@ const agendasModule = {
       match: (hash) => (hash === 'preferences-agenda' || hash === 'preferences' ? {} : null),
       permission: 'agendas.manage',
       component: AgendaPrefsPage,
+    },
+    {
+      match: (hash) => (hash === 'finalized-agendas' ? {} : null),
+      permission: 'agendas.submit',
+      component: FinalizedAgendasPage,
     },
     {
       match: (hash) => (hash === 'council' ? {} : null),

@@ -16,11 +16,10 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ROLE_LABELS, api, formatSize, formatTime12h } from '../../core/api.js';
+import { api, formatSize } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
 
-export default function CouncilPage({ me }) {
-  const [agendas, setAgendas] = useState([]);
+export default function CouncilPage() {
   const [targets, setTargets] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [title, setTitle] = useState('');
@@ -39,12 +38,10 @@ export default function CouncilPage({ me }) {
   const showToast = useToast();
 
   const loadData = useCallback(async () => {
-    const [ags, tgts, subs] = await Promise.all([
-      api('/api/agendas/council'),
+    const [tgts, subs] = await Promise.all([
       api('/api/agendas/council/targets'),
       api('/api/agendas/council/submissions'),
     ]);
-    setAgendas(Array.isArray(ags) ? ags : []);
     setTargets(Array.isArray(tgts) ? tgts : []);
     setSubmissions(Array.isArray(subs) ? subs : []);
   }, []);
@@ -120,56 +117,9 @@ export default function CouncilPage({ me }) {
     }
   };
 
-  const headingLabel = ROLE_LABELS[me?.role] || 'Council Member';
-
   return (
     <section id="section-council">
-      <h1>{headingLabel}</h1>
-
-      <div className="card">
-        <h2>Finalized Agendas</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
-          View finalized meeting agendas and packets.
-        </p>
-        <table>
-          <thead>
-            <tr><th>Meeting</th><th>Body</th><th>Date</th><th>Time</th><th>Items</th><th>Packet</th></tr>
-          </thead>
-          <tbody>
-            {!agendas.length ? (
-              <tr><td colSpan={6} className="muted">No finalized agendas yet.</td></tr>
-            ) : agendas.map(a => (
-              <tr key={a.id}>
-                <td>
-                  {a.title}
-                  {a.amended_at && (
-                    <> <span className="badge draft" title={`Amended ${new Date(a.amended_at).toLocaleString()}`}>Amended</span></>
-                  )}
-                </td>
-                <td>{a.body || '—'}</td>
-                <td>{a.meeting_date || '—'}</td>
-                <td>{a.meeting_time ? formatTime12h(a.meeting_time) : '—'}</td>
-                <td>{a.item_count}</td>
-                <td>
-                  <div className="actions">
-                    <a className="btn sm" href={`/api/agendas/${a.id}/packet.pdf?summary=1`} target="_blank" rel="noreferrer">Summary</a>
-                    <a className="btn sm primary" href={`/api/agendas/${a.id}/packet.pdf`} target="_blank" rel="noreferrer">Full Packet</a>
-                    <a className="btn sm" href={`/api/agendas/${a.id}/packet.pdf?download=1`} target="_blank" rel="noreferrer">Download</a>
-                    <a className="btn sm" href={`/api/agendas/${a.id}/minutes.pdf`} target="_blank" rel="noreferrer">
-                      {a.minutes_status === 'approved' ? 'Minutes' : 'Minutes (Draft)'}
-                    </a>
-                    {a.media_url && (
-                      <a className="btn sm" href={a.media_url} target="_blank" rel="noreferrer">
-                        {a.media_type === 'audio' ? 'Listen Audio' : 'Watch Video'}
-                      </a>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <h1>Propose Agenda Item</h1>
 
       <div className="card">
         <h2>Submit an Agenda Item</h2>

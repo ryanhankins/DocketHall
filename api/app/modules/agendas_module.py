@@ -128,10 +128,11 @@ MODULE = CivicModule(
         },
         {
             "id": "agenda-council",
-            "label": "Propose Agenda Item",
+            "label": "Agendas",
             "section_title": "Member",
             "permission": "agendas.submit",
             "items": [
+                {"section": "finalized-agendas", "label": "Finalized Agendas", "permission": "agendas.submit"},
                 {"section": "council", "label": "Propose Agenda Item", "permission": "agendas.submit"},
             ],
         },
