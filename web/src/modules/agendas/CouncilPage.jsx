@@ -18,6 +18,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, formatSize } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
+import AgendaQuickGuideModal from './AgendaQuickGuideModal.jsx';
 
 export default function CouncilPage() {
   const [guideOpen, setGuideOpen] = useState(false);
