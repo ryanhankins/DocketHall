@@ -138,7 +138,7 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
             </div>
             <div className="field" style={{ flex: 2, minWidth: '180px' }}>
               <label>Address</label>
-              <input placeholder="207 Birchwood Ave" value={newParcel.address} onChange={(e) => setNewParcel(p => ({ ...p, address: e.target.value }))} />
+              <input placeholder="101 Main St" value={newParcel.address} onChange={(e) => setNewParcel(p => ({ ...p, address: e.target.value }))} />
             </div>
             <div className="field" style={{ flex: 1, minWidth: '130px' }}>
               <label>Owner Name</label>

@@ -28,7 +28,7 @@ services:
     image: ${CIVICDESK_REGISTRY:-}civicdesk-web:${CIVICDESK_TAG:-latest}
     ports:
       - target: 80
-        published: 8080
+        published: ${CIVICDESK_PORT:-8080}
         protocol: tcp
         mode: host        # host mode so Colima/Docker Desktop forwards it to the Mac
     networks: [civicdesk]
@@ -51,6 +51,14 @@ services:
       LOCAL_RECORDS_DIR: /data/records
       # Auth cookie security (set COOKIE_SECURE=true when serving over HTTPS)
       COOKIE_SECURE: "${COOKIE_SECURE:-false}"
+      APP_BASE_URL: "${APP_BASE_URL:-}"
+      SEED_CITY_PROFILE: "${SEED_CITY_PROFILE:-}"
+      DEFAULT_FEE_SCHEDULE_URL: "${DEFAULT_FEE_SCHEDULE_URL:-}"
+      DEFAULT_FEE_SCHEDULE_LABEL: "${DEFAULT_FEE_SCHEDULE_LABEL:-}"
+      SMTP_HOST: "${SMTP_HOST:-smtp.gmail.com}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_SENDER_EMAIL: "${SMTP_SENDER_EMAIL:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
       # MinIO (S3-compatible object storage)
       MINIO_ENDPOINT: minio:9000
       MINIO_SECURE: "false"
@@ -64,6 +72,12 @@ services:
     volumes:
       - records_data:/data/records
     networks: [civicdesk]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     deploy:
       # Keep at 1 replica while records live on a local named volume.
       replicas: 1
@@ -110,7 +124,7 @@ services:
     ports:
       # Web console only. The S3 API (9000) stays internal to the overlay network.
       - target: 9001
-        published: 9001
+        published: ${MINIO_CONSOLE_PORT:-9001}
         protocol: tcp
         mode: host        # host mode so Colima/Docker Desktop forwards it to the Mac
     volumes:
@@ -155,7 +169,10 @@ configs:
 secrets:
   postgres_password:
     external: true
+    name: ${CIVICDESK_SECRET_PREFIX:-}postgres_password
   minio_root_user:
     external: true
+    name: ${CIVICDESK_SECRET_PREFIX:-}minio_root_user
   minio_root_password:
     external: true
+    name: ${CIVICDESK_SECRET_PREFIX:-}minio_root_password

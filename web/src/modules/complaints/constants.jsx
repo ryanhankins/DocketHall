@@ -43,8 +43,8 @@ export const ORDINANCE_PRESETS = [
 export const ASSISTING_AGENCIES = [
   'City Staff',
   'Law Enforcement',
-  'White Bear Lake Planning & Zoning',
-  'Birchwood Planning Commission',
+  'Planning & Zoning',
+  'Planning Commission',
   'City Council',
 ];
 

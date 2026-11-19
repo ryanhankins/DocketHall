@@ -237,7 +237,7 @@ export default function ComplaintsFilePage({ me, onNavigate }) {
               className="input"
               value={subjectProperty}
               onChange={(e) => setSubjectProperty(e.target.value)}
-              placeholder="e.g. 123 Birchwood Ave"
+              placeholder="e.g. 123 Main St"
             />
           </label>
           <label>

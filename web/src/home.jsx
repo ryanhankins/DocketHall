@@ -848,7 +848,7 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
             <label>
               <div className="muted" style={{ fontSize: 12 }}>Property / Location Involved</div>
-              <input value={subjectProperty} onChange={(e) => setSubjectProperty(e.target.value)} placeholder="e.g. 123 Birchwood Ave" />
+              <input value={subjectProperty} onChange={(e) => setSubjectProperty(e.target.value)} placeholder="e.g. 123 Main St" />
             </label>
             <label>
               <div className="muted" style={{ fontSize: 12 }}>Person(s) Involved (if known)</div>

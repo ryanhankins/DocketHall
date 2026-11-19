@@ -262,7 +262,7 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
               <input
                 id="perm-prop-addr"
                 required={isReq('property_address')}
-                placeholder={isAnnualLicense ? 'e.g. Kay Beach Rack or 207 Birchwood Ave' : 'e.g. 207 Birchwood Ave'}
+                placeholder={isAnnualLicense ? 'e.g. Park Rack #4 or 101 Main St' : 'e.g. 101 Main St'}
                 value={propertyAddress}
                 onChange={(e) => setPropertyAddress(e.target.value)}
               />

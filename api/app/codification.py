@@ -179,6 +179,8 @@ def bootstrap() -> None:
     with pool.connection() as conn:
         conn.execute("SELECT pg_advisory_xact_lock(424245)")
         conn.execute(SCHEMA)
+        if os.environ.get("SEED_CITY_PROFILE", "").strip().lower() != "birchwood":
+            return
         for c_idx, (prefix, c_title, sections) in enumerate(_SEED_CODE):
             conn.execute(
                 "INSERT INTO code_chapters (code_prefix, title, sort_order) "

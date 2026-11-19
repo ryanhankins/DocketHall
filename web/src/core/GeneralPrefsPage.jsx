@@ -319,7 +319,7 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
               <input
                 id="pref-directory-url"
                 type="url"
-                placeholder="https://cityofbirchwood.com/city-hall/staff-directory/"
+                placeholder="https://www.cityofexample.gov/staff-directory/"
                 value={directoryUrl}
                 onChange={(e) => setDirectoryUrl(e.target.value)}
               />

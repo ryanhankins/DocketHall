@@ -55,6 +55,21 @@ def bootstrap() -> None:
         with conn.transaction():
             conn.execute("SELECT pg_advisory_xact_lock(424249)")
             conn.execute(SCHEMA)
+            smtp_email = os.environ.get("SMTP_SENDER_EMAIL", "").strip()
+            smtp_pass = os.environ.get("SMTP_PASSWORD", "").strip()
+            if smtp_email and smtp_pass:
+                smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com").strip() or "smtp.gmail.com"
+                try:
+                    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+                except ValueError:
+                    smtp_port = 587
+                conn.execute(
+                    "INSERT INTO core_integrations "
+                    "(provider, enabled, api_key, project_id, config, last_status, updated_by, updated_at) "
+                    "VALUES ('gmail_smtp', TRUE, %s, %s, %s, 'Seeded from environment', 'system', now()) "
+                    "ON CONFLICT (provider) DO NOTHING",
+                    (smtp_pass, smtp_email, Jsonb({"smtp_host": smtp_host, "smtp_port": smtp_port})),
+                )
 
 
 def _mask_key(key: str) -> str:

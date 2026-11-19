@@ -213,8 +213,8 @@ _DEFAULT_PORTAL_SETTINGS = {
         "2. Design Plans: Provide before and after design plans when appropriate.\n"
         "3. Land surveys or photos may be needed for some permit types."
     ),
-    "fee_schedule_url": "https://cityofbirchwood.com/wp-content/uploads/2024/08/2024-Fee-Schedule-UPDATED-WITH-CHANGES-081224-4.pdf",
-    "fee_schedule_label": "2024 Fee Schedule (PDF)",
+    "fee_schedule_url": os.environ.get("DEFAULT_FEE_SCHEDULE_URL", ""),
+    "fee_schedule_label": os.environ.get("DEFAULT_FEE_SCHEDULE_LABEL", ""),
     "payment_instructions": (
         "Payment may be made online via the City website payment portal or at City Hall once "
         "your application is reviewed and fees are assessed."

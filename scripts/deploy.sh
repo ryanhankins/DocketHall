@@ -24,6 +24,16 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 STACK_NAME="${STACK_NAME:-civicdesk}"
+if [ -z "${CIVICDESK_SECRET_PREFIX+x}" ]; then
+  if [ "$STACK_NAME" = "civicdesk" ]; then
+    CIVICDESK_SECRET_PREFIX=""
+  else
+    CIVICDESK_SECRET_PREFIX="${STACK_NAME}_"
+  fi
+fi
+export CIVICDESK_SECRET_PREFIX
+export CIVICDESK_PORT="${CIVICDESK_PORT:-8080}"
+export MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-9001}"
 export CIVICDESK_TAG="${CIVICDESK_TAG:-latest}"
 export CIVICDESK_REGISTRY="${CIVICDESK_REGISTRY:-}"
 
@@ -45,9 +55,9 @@ create_secret() {  # name value
 rand() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32; }
 
 echo "==> Secrets"
-create_secret postgres_password   "${POSTGRES_PASSWORD:-$(rand)}"
-create_secret minio_root_user     "${MINIO_ROOT_USER:-civicdesk}"
-create_secret minio_root_password "${MINIO_ROOT_PASSWORD:-$(rand)}"
+create_secret "${CIVICDESK_SECRET_PREFIX}postgres_password"   "${POSTGRES_PASSWORD:-$(rand)}"
+create_secret "${CIVICDESK_SECRET_PREFIX}minio_root_user"     "${MINIO_ROOT_USER:-civicdesk}"
+create_secret "${CIVICDESK_SECRET_PREFIX}minio_root_password" "${MINIO_ROOT_PASSWORD:-$(rand)}"
 
 # 3. Images
 echo "==> Building frontend bundle"
@@ -73,6 +83,6 @@ for svc in api web minio; do
 done
 
 echo
-echo "Dashboard:     http://localhost:8080"
-echo "MinIO console: http://localhost:9001  (user: docker secret minio_root_user)"
+echo "Dashboard:     http://localhost:${CIVICDESK_PORT}"
+echo "MinIO console: http://localhost:${MINIO_CONSOLE_PORT}  (user: docker secret ${CIVICDESK_SECRET_PREFIX}minio_root_user)"
 echo "Status:        docker stack services $STACK_NAME"
