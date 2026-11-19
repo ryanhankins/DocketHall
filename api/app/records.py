@@ -48,10 +48,12 @@ CREATE TABLE IF NOT EXISTS repository_documents (
     tags                TEXT NOT NULL DEFAULT '',
     notes               TEXT NOT NULL DEFAULT '',
     is_public           BOOLEAN NOT NULL DEFAULT FALSE,
+    auto_unpublish_on_expire BOOLEAN NOT NULL DEFAULT FALSE,
     created_by          TEXT NOT NULL DEFAULT '',
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE repository_documents ADD COLUMN IF NOT EXISTS auto_unpublish_on_expire BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS repo_docs_cat_idx ON repository_documents(category, status, id DESC);
 CREATE TABLE IF NOT EXISTS repository_files (
     id           BIGSERIAL PRIMARY KEY,
@@ -90,6 +92,7 @@ class RecordCreateIn(BaseModel):
     tags: str = ""
     notes: str = ""
     is_public: bool = False
+    auto_unpublish_on_expire: bool = False
 
 
 class RecordPatchIn(BaseModel):
@@ -104,11 +107,13 @@ class RecordPatchIn(BaseModel):
     tags: str | None = None
     notes: str | None = None
     is_public: bool | None = None
+    auto_unpublish_on_expire: bool | None = None
 
 
 _COLS = (
     "id, doc_number, category, title, counterparty, effective_date, expiration_date, "
-    "renewal_notice_days, status, tags, notes, is_public, created_by, created_at, updated_at"
+    "renewal_notice_days, status, tags, notes, is_public, created_by, created_at, updated_at, "
+    "auto_unpublish_on_expire"
 )
 
 
@@ -162,6 +167,7 @@ def _hydrate_records(conn, rows: list[tuple]) -> list[dict]:
             "tags": r[9],
             "notes": r[10],
             "is_public": bool(r[11]),
+            "auto_unpublish_on_expire": bool(r[15]),
             "created_by": r[12],
             "created_at": r[13].isoformat() if r[13] else None,
             "updated_at": r[14].isoformat() if r[14] else None,
@@ -178,17 +184,35 @@ def _get_record_or_404(conn, doc_id: int) -> dict:
     return _hydrate_records(conn, [row])[0]
 
 
+def _is_publicly_visible(rec: dict, today: date | None = None) -> bool:
+    if not rec.get("is_public"):
+        return False
+    if rec.get("auto_unpublish_on_expire") and rec.get("expiration_date"):
+        try:
+            exp_d = date.fromisoformat(rec["expiration_date"])
+            if exp_d < (today or date.today()):
+                return False
+        except ValueError:
+            pass
+    return True
+
+
 # ------------------------------------------------------------------ public endpoints
 @router.get("/public")
-def list_public_records(q: str = "", category: str = ""):
+def list_public_records(q: str = "", category: str = "", year: str = ""):
     with pool.connection() as conn:
         rows = conn.execute(
             f"SELECT {_COLS} FROM repository_documents WHERE is_public = TRUE ORDER BY effective_date DESC, id DESC"
         ).fetchall()
         items = _hydrate_records(conn, rows)
+    today = date.today()
+    items = [x for x in items if _is_publicly_visible(x, today)]
     ql = q.strip().lower()
     if category.strip():
         items = [x for x in items if x["category"] == category.strip()]
+    if year.strip():
+        yr = year.strip()
+        items = [x for x in items if (x.get("effective_date") or x.get("created_at") or "").startswith(yr)]
     if ql:
         items = [
             x for x in items
@@ -201,12 +225,14 @@ def list_public_records(q: str = "", category: str = ""):
 def download_public_file(file_id: int):
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT f.filename, f.content_type, f.object_key "
+            "SELECT f.filename, f.content_type, f.object_key, d.is_public, d.auto_unpublish_on_expire, d.expiration_date "
             "FROM repository_files f JOIN repository_documents d ON d.id = f.document_id "
             "WHERE f.id = %s AND d.is_public = TRUE",
             (file_id,),
         ).fetchone()
-        if not row:
+        if not row or not _is_publicly_visible(
+            {"is_public": bool(row[3]), "auto_unpublish_on_expire": bool(row[4]), "expiration_date": row[5] or ""},
+        ):
             raise HTTPException(status_code=404, detail="File not found")
     obj = _minio().get_object(_bucket(), row[2])
     try:
@@ -274,8 +300,8 @@ def create_record(
         row = conn.execute(
             "INSERT INTO repository_documents "
             "(doc_number, category, title, counterparty, effective_date, expiration_date, "
-            " renewal_notice_days, status, tags, notes, is_public, created_by) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            " renewal_notice_days, status, tags, notes, is_public, auto_unpublish_on_expire, created_by) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (
                 body.doc_number.strip(),
                 body.category.strip() or "Resolution",
@@ -288,6 +314,7 @@ def create_record(
                 body.tags.strip(),
                 body.notes.strip(),
                 body.is_public,
+                body.auto_unpublish_on_expire,
                 user["username"],
             ),
         ).fetchone()
@@ -330,6 +357,7 @@ def update_record(
             "tags = COALESCE(%s, tags), "
             "notes = COALESCE(%s, notes), "
             "is_public = COALESCE(%s, is_public), "
+            "auto_unpublish_on_expire = COALESCE(%s, auto_unpublish_on_expire), "
             "updated_at = now() "
             "WHERE id = %s RETURNING id",
             (
@@ -344,6 +372,7 @@ def update_record(
                 body.tags.strip() if body.tags is not None else None,
                 body.notes.strip() if body.notes is not None else None,
                 body.is_public,
+                body.auto_unpublish_on_expire,
                 doc_id,
             ),
         ).fetchone()

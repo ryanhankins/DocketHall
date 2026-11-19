@@ -43,6 +43,7 @@ const EMPTY_FORM = {
   tags: '',
   notes: '',
   is_public: false,
+  auto_unpublish_on_expire: false,
 };
 
 function ExpiryBadge({ flag }) {
@@ -135,6 +136,7 @@ export default function RecordsPage({ me }) {
       tags: rec.tags || '',
       notes: rec.notes || '',
       is_public: Boolean(rec.is_public),
+      auto_unpublish_on_expire: Boolean(rec.auto_unpublish_on_expire),
     });
   }
 
@@ -414,6 +416,14 @@ export default function RecordsPage({ me }) {
             />
             <span>Publish to public repository endpoint</span>
           </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={newForm.auto_unpublish_on_expire}
+              onChange={(e) => setNewForm({ ...newForm, auto_unpublish_on_expire: e.target.checked })}
+            />
+            <span>Auto-unpublish from Public Portal after Expiration Date</span>
+          </label>
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="submit" className="btn primary" disabled={savingNew}>
               {savingNew ? 'Saving...' : 'Save Record'}
@@ -676,6 +686,15 @@ export default function RecordsPage({ me }) {
                   onChange={(e) => setEditForm({ ...editForm, is_public: e.target.checked })}
                 />
                 <span>Publicly visible</span>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="checkbox"
+                  disabled={!canManage}
+                  checked={editForm.auto_unpublish_on_expire}
+                  onChange={(e) => setEditForm({ ...editForm, auto_unpublish_on_expire: e.target.checked })}
+                />
+                <span>Auto-unpublish from Public Portal after Expiration Date</span>
               </label>
 
               {canManage && (

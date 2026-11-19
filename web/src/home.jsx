@@ -576,6 +576,7 @@ function RecordsPublicTab() {
   const [items, setItems] = useState([]);
   const [q, setQ] = useState('');
   const [category, setCategory] = useState('');
+  const [year, setYear] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -597,6 +598,20 @@ function RecordsPublicTab() {
     };
   }, [q, category]);
 
+  const yearOptions = useMemo(() => {
+    const set = new Set();
+    for (const r of items) {
+      const y = (r.effective_date || r.created_at || '').slice(0, 4);
+      if (/^\d{4}$/.test(y)) set.add(y);
+    }
+    return [...set].sort((a, b) => b.localeCompare(a));
+  }, [items]);
+
+  const visibleItems = useMemo(() => {
+    if (!year) return items;
+    return items.filter((r) => (r.effective_date || r.created_at || '').startsWith(year));
+  }, [items, year]);
+
   return (
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: '1rem' }}>
@@ -609,18 +624,22 @@ function RecordsPublicTab() {
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <input placeholder="Search doc #, title, counterparty…" value={q} onChange={(e) => setQ(e.target.value)} />
-          <select value={category} onChange={(e) => setCategory(e.target.value)}>
+          <select aria-label="Filter by Category" value={category} onChange={(e) => setCategory(e.target.value)} style={{ width: 'auto' }}>
             <option value="">All Categories</option>
             {['Contract', 'Resolution', 'Ordinance', 'Agreement', 'Easement', 'Policy', 'Other'].map((c) => (
               <option key={c} value={c}>{c}</option>
             ))}
+          </select>
+          <select aria-label="Filter by Year" value={year} onChange={(e) => setYear(e.target.value)} style={{ width: 'auto' }}>
+            <option value="">All Years</option>
+            {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
       </div>
 
       {loading ? (
         <p className="muted">Loading public records…</p>
-      ) : !items.length ? (
+      ) : !visibleItems.length ? (
         <p className="muted">No public repository documents match your search.</p>
       ) : (
         <table>
@@ -628,7 +647,7 @@ function RecordsPublicTab() {
             <tr><th>Doc #</th><th>Title</th><th>Category</th><th>Counterparty</th><th>Effective</th><th>Files</th></tr>
           </thead>
           <tbody>
-            {items.map((r) => (
+            {visibleItems.map((r) => (
               <tr key={r.id}>
                 <td style={{ whiteSpace: 'nowrap' }}>{r.doc_number || '—'}</td>
                 <td>
