@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from . import audit, auth, backup, branding, integrations, registry, subscriptions, tenancy, users
+from . import audit, auth, backup, branding, docs, integrations, registry, subscriptions, tenancy, users
 from .db import open_pool, pool
 from .modules import register_builtin_modules
 
@@ -31,6 +31,7 @@ def _bootstrap_tenant_schema(slug: str, schema: str) -> None:
         audit.bootstrap()
         integrations.bootstrap()
         subscriptions.bootstrap()
+        docs.bootstrap()
         registry.bootstrap()
         for mod in registry.get_all_registered_modules():
             mod.bootstrap()
@@ -76,6 +77,7 @@ app.include_router(users.router)
 app.include_router(branding.router)
 app.include_router(integrations.router)
 app.include_router(subscriptions.router)
+app.include_router(docs.router)
 app.include_router(backup.router)
 app.include_router(registry.router)
 

@@ -28,6 +28,7 @@ const IntegrationsPage = React.lazy(() => import('./IntegrationsPage.jsx'));
 const AuditLogPage = React.lazy(() => import('./AuditLogPage.jsx'));
 const GeneralPrefsPage = React.lazy(() => import('./GeneralPrefsPage.jsx'));
 const BackupRestorePage = React.lazy(() => import('./BackupRestorePage.jsx'));
+const HelpDocsPage = React.lazy(() => import('./HelpDocsPage.jsx'));
 
 export default function CoreShell() {
   const [me, setMe] = useState(null);
@@ -221,6 +222,13 @@ export default function CoreShell() {
         activeSection: 'preferences-backup',
       };
     }
+    if (hash === 'help' || hash === 'docs') {
+      return {
+        component: HelpDocsPage,
+        props: { me },
+        activeSection: 'help',
+      };
+    }
     for (const mod of Object.values(frontendMods)) {
       for (const r of (mod.routes || [])) {
         if (r.permission && !hasPermission(me, r.permission)) continue;
@@ -297,6 +305,32 @@ export default function CoreShell() {
           <span id="whoami">
             {me ? `${me.username} (${ROLE_LABELS[me.role] || me.role})` : ''}
           </span>
+          {me && (
+            <button
+              type="button"
+              className={`btn sm${activeSection === 'help' ? ' primary' : ''}`}
+              onClick={() => navigate('help')}
+              title="Open CivicDesk User Guide & Documentation"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                <path d="M12 17h.01" />
+              </svg>
+              <span>Help</span>
+            </button>
+          )}
           <button
             type="button"
             className="btn sm"

@@ -73,6 +73,12 @@ _CORE_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         set(),
         True,
     ),
+    (
+        "core_help_docs",
+        ["id", "slug", "title", "category", "audience", "sort_order", "body", "is_published", "updated_by", "created_at", "updated_at"],
+        set(),
+        True,
+    ),
 ]
 
 
