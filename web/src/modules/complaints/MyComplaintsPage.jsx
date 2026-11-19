@@ -24,6 +24,8 @@ export default function MyComplaintsPage({ onNavigate }) {
   const showToast = useToast();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [replyById, setReplyById] = useState({});
+  const [sendingId, setSendingId] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -86,6 +88,50 @@ export default function MyComplaintsPage({ onNavigate }) {
                     <strong>Final Resolution:</strong> {c.final_resolution}
                   </div>
                 )}
+                <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 8, display: 'grid', gap: 6 }}>
+                  <strong style={{ fontSize: 12 }}>Messages ({(c.messages || []).length})</strong>
+                  {(c.messages || []).map((m) => (
+                    <div key={m.id} style={{ background: '#f8fafc', padding: '6px 8px', borderRadius: 6, fontSize: 13 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                        <strong>{m.sender_username || 'City Staff'}</strong>
+                        <span className="muted" style={{ fontSize: 11 }}>{formatDate(m.created_at)}</span>
+                      </div>
+                      <div style={{ whiteSpace: 'pre-wrap' }}>{m.body}</div>
+                    </div>
+                  ))}
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const txt = (replyById[c.id] || '').trim();
+                      if (!txt) return;
+                      setSendingId(c.id);
+                      try {
+                        const updated = await api(`/api/complaints/${c.id}/messages`, {
+                          method: 'POST',
+                          body: JSON.stringify({ body: txt, is_internal: false }),
+                        });
+                        setItems((prev) => prev.map((x) => (x.id === c.id ? updated : x)));
+                        setReplyById((prev) => ({ ...prev, [c.id]: '' }));
+                        showToast('Reply sent', 'ok');
+                      } catch (err) {
+                        showToast(err.message || 'Failed to send reply', 'error');
+                      } finally {
+                        setSendingId(null);
+                      }
+                    }}
+                    style={{ display: 'flex', gap: 6 }}
+                  >
+                    <input
+                      style={{ flex: 1 }}
+                      placeholder="Reply to city staff..."
+                      value={replyById[c.id] || ''}
+                      onChange={(e) => setReplyById((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                    />
+                    <button type="submit" className="btn sm primary" disabled={sendingId === c.id}>
+                      {sendingId === c.id ? 'Sending…' : 'Send'}
+                    </button>
+                  </form>
+                </div>
               </div>
             ))}
           </div>

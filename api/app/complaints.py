@@ -133,6 +133,16 @@ CREATE TABLE IF NOT EXISTS complaint_activity_log (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS complaint_activity_cid_idx ON complaint_activity_log(complaint_id);
+CREATE TABLE IF NOT EXISTS complaint_messages (
+    id              BIGSERIAL PRIMARY KEY,
+    complaint_id    BIGINT NOT NULL REFERENCES complaints(id) ON DELETE CASCADE,
+    sender_username TEXT NOT NULL DEFAULT '',
+    sender_role     TEXT NOT NULL DEFAULT '',
+    is_internal     BOOLEAN NOT NULL DEFAULT FALSE,
+    body            TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS complaint_messages_cid_idx ON complaint_messages(complaint_id, id);
 """
 
 
@@ -199,6 +209,30 @@ def _fetch_activity(conn, complaint_id: int, include_internal: bool) -> list[dic
     ]
 
 
+def _fetch_messages(conn, complaint_id: int, include_internal: bool, include_sender: bool = True) -> list[dict]:
+    sql = """
+        SELECT id, complaint_id, sender_username, sender_role, is_internal, body, created_at
+        FROM complaint_messages
+        WHERE complaint_id = %s
+    """
+    if not include_internal:
+        sql += " AND is_internal = FALSE"
+    sql += " ORDER BY id ASC"
+    rows = conn.execute(sql, (complaint_id,)).fetchall()
+    return [
+        {
+            "id": r[0],
+            "complaint_id": r[1],
+            "sender_username": r[2] if include_sender else ("City Staff" if r[3] != "applicant" else "Resident"),
+            "sender_role": r[3],
+            "is_internal": bool(r[4]),
+            "body": r[5],
+            "created_at": _iso(r[6]),
+        }
+        for r in rows
+    ]
+
+
 _SELECT_COLS = """
     id, complaint_number, intake_channel, is_anonymous, is_real_property_complaint,
     complainant_user_id, complainant_username, complainant_name, complainant_email,
@@ -213,7 +247,12 @@ _SELECT_COLS = """
 """
 
 
-def _serialize_public(row, docs: list[dict] | None = None, activity: list[dict] | None = None) -> dict:
+def _serialize_public(
+    row,
+    docs: list[dict] | None = None,
+    activity: list[dict] | None = None,
+    messages: list[dict] | None = None,
+) -> dict:
     """Public Complaint Log Book representation (Section 618.025 & MN Stat. 13.44).
     Complainant identity, contact info, and internal staff notes are strictly omitted.
     """
@@ -244,6 +283,7 @@ def _serialize_public(row, docs: list[dict] | None = None, activity: list[dict] 
         "updated_at": _iso(row[31]),
         "documents": docs if docs is not None else [],
         "activity": activity if activity is not None else [],
+        "messages": messages if messages is not None else [],
     }
 
 
@@ -251,13 +291,14 @@ def _serialize_private(
     row,
     docs: list[dict] | None = None,
     activity: list[dict] | None = None,
+    messages: list[dict] | None = None,
     include_internal: bool = True,
     include_complainant_private: bool = True,
 ) -> dict:
     """Representation for staff (with complainant private data gated on complaints.view_private)
     or the complainant viewing their own filing.
     """
-    base = _serialize_public(row, docs=docs, activity=activity)
+    base = _serialize_public(row, docs=docs, activity=activity, messages=messages)
     base.update(
         {
             "complainant_user_id": row[5] if include_complainant_private else None,
@@ -308,6 +349,11 @@ class NoticeOfViolationIn(BaseModel):
     violation_datetime: str = ""
     required_action: str
     compliance_deadline: str  # YYYY-MM-DD, <= 60 days from today per Section 618.040
+
+
+class ComplaintMessageIn(BaseModel):
+    body: str
+    is_internal: bool = False
 
 
 def _create_complaint_row(
@@ -471,6 +517,23 @@ def public_complaint_log(
     return {"items": items}
 
 
+@router.get("/public-lookup")
+def public_complaint_lookup(number: str = Query(..., min_length=3)):
+    """Public status lookup by COM-YYYY-XXXX tracking number (MN Stat. 13.44 compliant)."""
+    num = number.strip().upper()
+    with pool.connection() as conn:
+        row = conn.execute(
+            f"SELECT {_SELECT_COLS} FROM complaints WHERE UPPER(complaint_number) = %s",
+            (num,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Complaint '{num}' not found")
+        docs = _fetch_docs(conn, row[0], include_confidential=False)
+        act = _fetch_activity(conn, row[0], include_internal=False)
+        msgs = _fetch_messages(conn, row[0], include_internal=False, include_sender=False)
+    return _serialize_public(row, docs=docs, activity=act, messages=msgs)
+
+
 @router.get("/mine")
 def my_complaints(user: dict = Depends(require_permission("complaints.submit", "complaints.manage"))):
     """Complaints filed by the current logged-in user."""
@@ -483,7 +546,8 @@ def my_complaints(user: dict = Depends(require_permission("complaints.submit", "
         for r in rows:
             docs = _fetch_docs(conn, r[0], include_confidential=True)
             act = _fetch_activity(conn, r[0], include_internal=False)
-            items.append(_serialize_private(r, docs=docs, activity=act, include_internal=False))
+            msgs = _fetch_messages(conn, r[0], include_internal=False, include_sender=True)
+            items.append(_serialize_private(r, docs=docs, activity=act, messages=msgs, include_internal=False))
     return {"items": items}
 
 
@@ -526,16 +590,44 @@ def list_complaints_staff(
         for r in rows:
             docs = _fetch_docs(conn, r[0], include_confidential=can_view_private)
             act = _fetch_activity(conn, r[0], include_internal=True)
+            msgs = _fetch_messages(conn, r[0], include_internal=True, include_sender=True)
             items.append(
                 _serialize_private(
                     r,
                     docs=docs,
                     activity=act,
+                    messages=msgs,
                     include_internal=True,
                     include_complainant_private=can_view_private,
                 )
             )
-    return {"items": items}
+        all_rows = conn.execute(
+            "SELECT status, nov_compliance_deadline, created_at, resolved_at, updated_at FROM complaints"
+        ).fetchall()
+
+    today_str = date.today().isoformat()
+    total = len(all_rows)
+    open_count = sum(1 for ar in all_rows if ar[0] not in ("resolved", "dismissed"))
+    overdue_nov_count = sum(
+        1 for ar in all_rows
+        if ar[0] == "notice_of_violation" and (ar[1] or "").strip() and ar[1].strip() < today_str
+    )
+    res_days = []
+    for ar in all_rows:
+        if ar[0] in ("resolved", "dismissed") and ar[2]:
+            end_dt = ar[3] or ar[4]
+            if end_dt:
+                res_days.append(max(0.0, (end_dt - ar[2]).total_seconds() / 86400.0))
+    avg_resolution_days = round(sum(res_days) / len(res_days), 1) if res_days else None
+    return {
+        "items": items,
+        "stats": {
+            "total": total,
+            "open_count": open_count,
+            "overdue_nov_count": overdue_nov_count,
+            "avg_resolution_days": avg_resolution_days,
+        },
+    }
 
 
 @router.patch("/{complaint_id}")
@@ -819,6 +911,86 @@ def download_complaint_document(doc_id: int, request: Request):
             "Content-Disposition": f'{disp}; filename="{safe_fn}"',
             "X-Content-Type-Options": "nosniff",
         },
+    )
+
+
+@router.post("/{complaint_id}/messages", status_code=201)
+def post_complaint_message(
+    complaint_id: int,
+    body: ComplaintMessageIn,
+    request: Request,
+    user: dict = Depends(require_permission("complaints.submit", "complaints.manage")),
+):
+    """Post a two-way message on a complaint (or internal staff note)."""
+    text = body.body.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Message text is required")
+    is_mgr = has_permission(user, "complaints.manage")
+    internal = bool(body.is_internal and is_mgr)
+    can_view_private = has_permission(user, "complaints.view_private")
+
+    with pool.connection() as conn:
+        row = conn.execute(
+            f"SELECT {_SELECT_COLS} FROM complaints WHERE id = %s",
+            (complaint_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Complaint not found")
+        if not is_mgr and row[5] != user["id"]:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        recipient_email = (row[8] or "").strip()
+        if not recipient_email and row[5]:
+            u_row = conn.execute("SELECT email FROM users WHERE id = %s", (row[5],)).fetchone()
+            if u_row and u_row[0]:
+                recipient_email = u_row[0].strip()
+
+        conn.execute(
+            "INSERT INTO complaint_messages (complaint_id, sender_username, sender_role, is_internal, body) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (complaint_id, user["username"], user["role"], internal, text),
+        )
+        conn.execute(
+            "INSERT INTO complaint_activity_log (complaint_id, action, actor_username, is_internal, note) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (
+                complaint_id,
+                "internal_note" if internal else "message",
+                user["username"],
+                internal,
+                text[:120],
+            ),
+        )
+        docs = _fetch_docs(conn, complaint_id, include_confidential=(can_view_private or row[5] == user["id"]))
+        act = _fetch_activity(conn, complaint_id, include_internal=is_mgr)
+        msgs = _fetch_messages(conn, complaint_id, include_internal=is_mgr, include_sender=True)
+
+    if is_mgr and not internal and recipient_email and "@" in recipient_email and user["id"] != row[5]:
+        from .integrations import send_direct_email
+
+        send_direct_email(
+            [recipient_email],
+            f"[CivicDesk] Update on Complaint {row[1]}",
+            f"City staff posted an update regarding complaint {row[1]}:\n\n{text}",
+            link_path="/app#my-complaints" if row[5] else "/#complaints",
+            request=request,
+        )
+    elif not is_mgr:
+        send_notification_email(
+            "complaints_submitted",
+            f"[CivicDesk] Resident Reply on Complaint {row[1]}",
+            f"The complainant posted a reply on complaint {row[1]}:\n\n{text}",
+            link_path=f"/app#complaints-manage/{complaint_id}",
+            request=request,
+        )
+
+    return _serialize_private(
+        row,
+        docs=docs,
+        activity=act,
+        messages=msgs,
+        include_internal=is_mgr,
+        include_complainant_private=(can_view_private or row[5] == user["id"]),
     )
 
 

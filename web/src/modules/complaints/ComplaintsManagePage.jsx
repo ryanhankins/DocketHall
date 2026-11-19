@@ -60,6 +60,10 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
   const [uploading, setUploading] = useState(false);
   const [docConfidential, setDocConfidential] = useState(false);
   const [docCategory, setDocCategory] = useState('investigation_report');
+  const [stats, setStats] = useState({ total: 0, open_count: 0, overdue_nov_count: 0, avg_resolution_days: null });
+  const [msgText, setMsgText] = useState('');
+  const [msgInternal, setMsgInternal] = useState(false);
+  const [sendingMsg, setSendingMsg] = useState(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -71,6 +75,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
       const data = await api(`/api/complaints${qs ? `?${qs}` : ''}`);
       const list = data.items || [];
       setItems(list);
+      if (data.stats) setStats(data.stats);
       setSelected((prev) => {
         if (!prev) return null;
         return list.find((r) => r.id === prev.id) || null;
@@ -228,6 +233,29 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
         >
           {showOralForm ? 'Close Intake Form' : '+ Log Oral / Staff Complaint'}
         </button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+        <div className="card" style={{ margin: 0, padding: '.75rem 1rem' }}>
+          <div className="muted" style={{ fontSize: 12 }}>Total Complaints</div>
+          <div style={{ fontSize: '1.35rem', fontWeight: 700 }}>{stats.total}</div>
+        </div>
+        <div className="card" style={{ margin: 0, padding: '.75rem 1rem' }}>
+          <div className="muted" style={{ fontSize: 12 }}>Open Cases</div>
+          <div style={{ fontSize: '1.35rem', fontWeight: 700, color: '#2563eb' }}>{stats.open_count}</div>
+        </div>
+        <div className="card" style={{ margin: 0, padding: '.75rem 1rem', borderColor: stats.overdue_nov_count > 0 ? '#fca5a5' : undefined }}>
+          <div className="muted" style={{ fontSize: 12 }}>Overdue NOV Deadlines</div>
+          <div style={{ fontSize: '1.35rem', fontWeight: 700, color: stats.overdue_nov_count > 0 ? '#dc2626' : undefined }}>
+            {stats.overdue_nov_count}
+          </div>
+        </div>
+        <div className="card" style={{ margin: 0, padding: '.75rem 1rem' }}>
+          <div className="muted" style={{ fontSize: 12 }}>Avg. Resolution</div>
+          <div style={{ fontSize: '1.35rem', fontWeight: 700 }}>
+            {stats.avg_resolution_days != null ? `${stats.avg_resolution_days}d` : '—'}
+          </div>
+        </div>
       </div>
 
       {showOralForm && (
@@ -611,6 +639,72 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                   )}
                 </div>
               ))}
+            </div>
+
+            <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 10, display: 'grid', gap: 8 }}>
+              <strong style={{ fontSize: 13 }}>Messages &amp; Resident Updates ({(selected.messages || []).length})</strong>
+              {(selected.messages || []).map((m) => (
+                <div
+                  key={m.id}
+                  style={{
+                    background: m.is_internal ? '#fef3c7' : '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 6,
+                    padding: '6px 10px',
+                    fontSize: 13,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <strong>{m.sender_username} {m.is_internal ? '(Internal Note)' : ''}</strong>
+                    <span className="muted" style={{ fontSize: 11 }}>{formatDate(m.created_at)}</span>
+                  </div>
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{m.body}</div>
+                </div>
+              ))}
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!msgText.trim()) return;
+                  setSendingMsg(true);
+                  try {
+                    const updated = await api(`/api/complaints/${selected.id}/messages`, {
+                      method: 'POST',
+                      body: JSON.stringify({ body: msgText.trim(), is_internal: msgInternal }),
+                    });
+                    setSelected(updated);
+                    setMsgText('');
+                    setMsgInternal(false);
+                    showToast(msgInternal ? 'Internal note added' : 'Message sent', 'ok');
+                    await loadAll();
+                  } catch (err) {
+                    showToast(err.message || 'Failed to send message', 'error');
+                  } finally {
+                    setSendingMsg(false);
+                  }
+                }}
+                style={{ display: 'grid', gap: 6 }}
+              >
+                <textarea
+                  rows={2}
+                  placeholder="Write an update for the complainant or an internal staff note..."
+                  value={msgText}
+                  onChange={(e) => setMsgText(e.target.value)}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                    <input
+                      type="checkbox"
+                      style={{ width: 'auto' }}
+                      checked={msgInternal}
+                      onChange={(e) => setMsgInternal(e.target.checked)}
+                    />
+                    <span>Internal note (hidden from resident &amp; public)</span>
+                  </label>
+                  <button type="submit" className="btn sm primary" disabled={sendingMsg}>
+                    {sendingMsg ? 'Sending...' : 'Send Message'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

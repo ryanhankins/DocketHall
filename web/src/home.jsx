@@ -890,6 +890,26 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
         </form>
       ) : (
         <div className="card">
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const num = (e.currentTarget.elements.trackNum?.value || '').trim();
+              if (!num) return;
+              try {
+                const r = await fetch(`/api/complaints/public-lookup?number=${encodeURIComponent(num)}`);
+                const d = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(d.detail || 'Complaint not found');
+                setSelected(d);
+              } catch (err) {
+                alert(err.message || 'Complaint not found');
+              }
+            }}
+            style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: '.85rem', paddingBottom: '.75rem', borderBottom: '1px solid #e5e7eb' }}
+          >
+            <strong style={{ fontSize: '.9rem' }}>Track by Number:</strong>
+            <input name="trackNum" placeholder="e.g. COM-2026-0001" style={{ maxWidth: 200 }} />
+            <button type="submit" className="btn sm">Look Up</button>
+          </form>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: '1rem' }}>
             <input style={{ flex: '1 1 240px' }} placeholder="Search complaint #, property, ordinance, resolution…" value={q} onChange={(e) => setQ(e.target.value)} />
             <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
@@ -945,6 +965,22 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
                 {selected.final_resolution && (
                   <div style={{ background: '#f0fdf4', padding: 8, borderRadius: 6 }}>
                     <strong>Final Resolution:</strong> {selected.final_resolution}
+                  </div>
+                )}
+                {(selected.messages || []).length > 0 && (
+                  <div>
+                    <strong>Updates:</strong>
+                    <div style={{ display: 'grid', gap: 6, marginTop: 4 }}>
+                      {selected.messages.map((m) => (
+                        <div key={m.id} style={{ background: '#f8fafc', padding: 8, borderRadius: 6, fontSize: 13 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                            <strong>{m.sender_username || 'City Staff'}</strong>
+                            <span className="muted" style={{ fontSize: 11 }}>{formatDate(m.created_at)}</span>
+                          </div>
+                          <div>{m.body}</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
                 {(selected.documents || []).length > 0 && (
