@@ -30,8 +30,8 @@ PERMITS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
     ),
     (
         "permit_types",
-        ["id", "name", "description", "sort_order", "is_active"],
-        set(),
+        ["id", "name", "description", "kind", "expiration_rule", "required_fields", "sort_order", "is_active"],
+        {"required_fields"},
         True,
     ),
     (
@@ -53,7 +53,8 @@ PERMITS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
             "contractor_name", "contractor_license",
             "project_description", "estimated_value", "accepted_terms",
             "status", "fee_amount", "payment_status", "review_notes", "reviewed_by",
-            "assigned_to", "created_at", "updated_at", "issued_at", "closed_at",
+            "assigned_to", "permit_kind", "expires_at", "renewed_from_id",
+            "created_at", "updated_at", "issued_at", "closed_at",
         ],
         set(),
         True,

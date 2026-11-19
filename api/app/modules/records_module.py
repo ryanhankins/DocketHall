@@ -23,7 +23,7 @@ RECORDS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         [
             "id", "doc_number", "category", "title", "counterparty",
             "effective_date", "expiration_date", "renewal_notice_days",
-            "status", "tags", "notes", "is_public", "created_by",
+            "auto_unpublish_on_expire", "status", "tags", "notes", "is_public", "created_by",
             "created_at", "updated_at",
         ],
         set(),

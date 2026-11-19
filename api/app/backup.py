@@ -44,7 +44,7 @@ _SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _CORE_TABLES: list[tuple[str, list[str], set[str], bool]] = [
     (
         "users",
-        ["id", "username", "email", "password_hash", "role", "permissions", "is_active", "created_at", "last_login_at"],
+        ["id", "username", "email", "password_hash", "role", "permissions", "is_active", "is_default_password", "created_at", "last_login_at"],
         {"permissions"},
         True,
     ),
@@ -53,6 +53,24 @@ _CORE_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         ["module_id", "enabled", "updated_at"],
         set(),
         False,
+    ),
+    (
+        "core_integrations",
+        ["provider", "enabled", "api_key", "project_id", "config", "validated_at", "last_status", "updated_by", "updated_at"],
+        {"config"},
+        False,
+    ),
+    (
+        "public_subscriptions",
+        ["id", "email", "topic", "token", "is_active", "created_at"],
+        set(),
+        True,
+    ),
+    (
+        "core_audit_log",
+        ["id", "actor_username", "action", "target_type", "target_id", "summary", "created_at"],
+        set(),
+        True,
     ),
 ]
 

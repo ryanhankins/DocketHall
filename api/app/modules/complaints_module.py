@@ -50,6 +50,12 @@ COMPLAINTS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         set(),
         True,
     ),
+    (
+        "complaint_messages",
+        ["id", "complaint_id", "sender_username", "sender_role", "is_internal", "body", "created_at"],
+        set(),
+        True,
+    ),
 ]
 
 MODULE = CivicModule(
