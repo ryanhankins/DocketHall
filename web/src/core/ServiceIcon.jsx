@@ -23,6 +23,7 @@ const SERVICE_STYLES = {
   codification: { color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe' },
   records: { color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
   complaints: { color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
+  calendar: { color: '#0284c7', bg: '#f0f9ff', border: '#bae6fd' },
 };
 
 function renderGlyph(id, size) {
@@ -79,6 +80,15 @@ function renderGlyph(id, size) {
         <svg {...props}>
           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
           <path d="M12 8v4M12 16h.01" />
+        </svg>
+      );
+    case 'calendar':
+      // Calendar with clock/booking dot
+      return (
+        <svg {...props}>
+          <rect x="3" y="4" width="18" height="18" rx="2" />
+          <path d="M16 2v4M8 2v4M3 10h18" />
+          <circle cx="12" cy="15" r="2" />
         </svg>
       );
     default:

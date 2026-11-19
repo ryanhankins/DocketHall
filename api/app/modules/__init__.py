@@ -15,6 +15,7 @@
 
 """Available CivicDesk feature modules."""
 from .agendas_module import MODULE as AGENDAS_MODULE
+from .calendar_module import MODULE as CALENDAR_MODULE
 from .codification_module import MODULE as CODIFICATION_MODULE
 from .complaints_module import MODULE as COMPLAINTS_MODULE
 from .permits_module import MODULE as PERMITS_MODULE
@@ -28,3 +29,4 @@ def register_builtin_modules() -> None:
     register_module(CODIFICATION_MODULE)
     register_module(RECORDS_MODULE)
     register_module(COMPLAINTS_MODULE)
+    register_module(CALENDAR_MODULE)

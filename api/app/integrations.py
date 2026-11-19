@@ -283,7 +283,7 @@ def delete_google_cloud_config(_: dict = Depends(require_admin)):
 
 
 # ------------------------------------------------------------------ Outgoing SMTP & Per-Module Notification Routing
-_VALID_NOTIFICATION_MODULES = {"agendas", "permits", "complaints"}
+_VALID_NOTIFICATION_MODULES = {"agendas", "permits", "complaints", "calendar"}
 
 
 def _load_email_state(conn) -> dict:
@@ -612,7 +612,7 @@ def delete_email_config(_: dict = Depends(require_admin)):
 
 @router.get("/notification-users")
 def list_notification_users(
-    _: dict = Depends(require_permission("settings.manage", "agendas.manage", "permits.manage", "complaints.manage")),
+    _: dict = Depends(require_permission("settings.manage", "agendas.manage", "permits.manage", "complaints.manage", "calendar.manage")),
 ):
     """Return active users that have an email address configured for notification routing."""
     with pool.connection() as conn:
@@ -636,7 +636,7 @@ def _require_module_pref_access(module_id: str, user: dict) -> None:
 @router.get("/notifications/{module_id}")
 def get_module_notifications(
     module_id: str,
-    user: dict = Depends(require_permission("settings.manage", "agendas.manage", "permits.manage", "complaints.manage")),
+    user: dict = Depends(require_permission("settings.manage", "agendas.manage", "permits.manage", "complaints.manage", "calendar.manage")),
 ):
     _require_module_pref_access(module_id, user)
     prefix = f"{module_id}_"
@@ -660,7 +660,7 @@ def get_module_notifications(
 def update_module_notifications(
     module_id: str,
     body: ModuleNotificationsIn,
-    user: dict = Depends(require_permission("settings.manage", "agendas.manage", "permits.manage", "complaints.manage")),
+    user: dict = Depends(require_permission("settings.manage", "agendas.manage", "permits.manage", "complaints.manage", "calendar.manage")),
 ):
     _require_module_pref_access(module_id, user)
     prefix = f"{module_id}_"

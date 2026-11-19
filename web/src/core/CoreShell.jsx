@@ -176,6 +176,9 @@ export default function CoreShell() {
     if (hash.startsWith('complaints-manage') || hash === 'preferences-complaints') {
       setOpenSubmenus(prev => (prev['complaints-staff'] ? prev : { ...prev, 'complaints-staff': true }));
     }
+    if (hash === 'calendar-manage' || hash === 'preferences-calendar') {
+      setOpenSubmenus(prev => (prev['calendar-staff'] ? prev : { ...prev, 'calendar-staff': true }));
+    }
   }, [hash]);
 
   // Resolve active route

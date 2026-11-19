@@ -55,6 +55,12 @@ const TAB_DEFS = [
     description: 'View the public Complaint Log Book or file a complaint at no cost (no account required).',
     actionLabel: 'Open Complaints →',
   },
+  {
+    id: 'calendar',
+    label: 'City Calendar & Hall Rentals',
+    description: 'View upcoming meetings, city events, and reserve Village Hall or other public facilities.',
+    actionLabel: 'View Calendar & Reserve →',
+  },
 ];
 
 function AuthModal({ open, initialRegister, nextUrl, reason, onClose }) {
@@ -942,6 +948,266 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
   );
 }
 
+function CalendarPublicTab() {
+  const [month, setMonth] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [data, setData] = useState({ facilities: [], items: [], booked_slots: [] });
+  const [loading, setLoading] = useState(true);
+  const [facId, setFacId] = useState('');
+  const [evDate, setEvDate] = useState('');
+  const [evTitle, setEvTitle] = useState('');
+  const [reqName, setReqName] = useState('');
+  const [reqEmail, setReqEmail] = useState('');
+  const [reqPhone, setReqPhone] = useState('');
+  const [reqNotes, setReqNotes] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ text: '', isError: false });
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/calendar/public?month=${encodeURIComponent(month)}`)
+      .then((r) => (r.ok ? r.json() : { facilities: [], items: [], booked_slots: [] }))
+      .then((d) => {
+        setData(d);
+        const facs = d.facilities || [];
+        if (facs.length) {
+          setFacId((prev) => (prev && facs.some((f) => String(f.id) === String(prev)) ? prev : String(facs[0].id)));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [month]);
+
+  function shiftMonth(delta) {
+    const [y, m] = month.split('-').map(Number);
+    const dt = new Date(y, m - 1 + delta, 1);
+    setMonth(`${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`);
+  }
+
+  const [yr, mo] = month.split('-').map(Number);
+  const firstDow = new Date(yr, mo - 1, 1).getDay();
+  const daysInMonth = new Date(yr, mo, 0).getDate();
+  const monthLabel = new Date(yr, mo - 1, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
+  const itemsByDay = useMemo(() => {
+    const m = {};
+    for (const it of data.items || []) {
+      if (!m[it.event_date]) m[it.event_date] = [];
+      m[it.event_date].push(it);
+    }
+    return m;
+  }, [data.items]);
+
+  const selectedFac = (data.facilities || []).find((f) => String(f.id) === String(facId)) || null;
+  const dateBooked = Boolean(
+    evDate &&
+      facId &&
+      (data.booked_slots || []).some((b) => String(b.facility_id) === String(facId) && b.event_date === evDate),
+  );
+
+  async function handleReserve(e) {
+    e.preventDefault();
+    setMsg({ text: '', isError: false });
+    setBusy(true);
+    try {
+      const r = await fetch('/api/calendar/reservations/public', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          facility_id: Number(facId),
+          event_date: evDate,
+          event_title: evTitle.trim(),
+          requester_name: reqName.trim(),
+          requester_email: reqEmail.trim(),
+          requester_phone: reqPhone.trim(),
+          notes: reqNotes.trim(),
+        }),
+      });
+      const res = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(res.detail || 'Reservation request failed');
+      setMsg({
+        text: `Request ${res.reservation_number} submitted for ${res.facility_name} on ${res.event_date}. Staff will confirm shortly.`,
+        isError: false,
+      });
+      setEvTitle('');
+      setReqNotes('');
+    } catch (err) {
+      setMsg({ text: err.message, isError: true });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <div className="card">
+        <div className="between" style={{ marginBottom: '1rem', flexWrap: 'wrap', gap: '.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem' }}>
+            <ServiceIcon id="calendar" size={20} badge />
+            <div>
+              <h2 style={{ margin: 0 }}>City Calendar &amp; Hall Rentals</h2>
+              <p className="muted" style={{ margin: '4px 0 0' }}>
+                Public meetings, community events, and facility availability.
+              </p>
+            </div>
+          </div>
+          <div className="actions">
+            <button type="button" className="btn sm" onClick={() => shiftMonth(-1)}>&larr; Prev</button>
+            <strong style={{ minWidth: 140, textAlign: 'center' }}>{monthLabel}</strong>
+            <button type="button" className="btn sm" onClick={() => shiftMonth(1)}>Next &rarr;</button>
+          </div>
+        </div>
+
+        {loading ? (
+          <p className="muted">Loading calendar…</p>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
+            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+              <div key={d} style={{ fontSize: '.78rem', fontWeight: 700, color: '#64748b', textAlign: 'center', paddingBottom: 4 }}>
+                {d}
+              </div>
+            ))}
+            {Array.from({ length: firstDow }).map((_, i) => (
+              <div key={`pad-${i}`} style={{ minHeight: 74, background: '#f8fafc', borderRadius: 4 }} />
+            ))}
+            {Array.from({ length: daysInMonth }).map((_, idx) => {
+              const dayNum = idx + 1;
+              const iso = `${month}-${String(dayNum).padStart(2, '0')}`;
+              const dayItems = itemsByDay[iso] || [];
+              return (
+                <div
+                  key={iso}
+                  onClick={() => setEvDate(iso)}
+                  style={{
+                    minHeight: 74,
+                    border: evDate === iso ? '2px solid #2563eb' : '1px solid #e2e8f0',
+                    borderRadius: 4,
+                    padding: 4,
+                    background: '#fff',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 3,
+                  }}
+                >
+                  <div style={{ fontSize: '.78rem', fontWeight: 700, color: '#334155' }}>{dayNum}</div>
+                  {dayItems.map((it) => (
+                    <div
+                      key={it.uid}
+                      title={`${it.category}: ${it.title}${it.start_time ? ` (${it.start_time})` : ''}`}
+                      style={{
+                        fontSize: '.72rem',
+                        lineHeight: 1.25,
+                        padding: '2px 4px',
+                        borderRadius: 3,
+                        background:
+                          it.kind === 'meeting'
+                            ? '#eff6ff'
+                            : it.kind === 'reservation'
+                              ? '#fef2f2'
+                              : '#ecfdf5',
+                        color:
+                          it.kind === 'meeting'
+                            ? '#1d4ed8'
+                            : it.kind === 'reservation'
+                              ? '#991b1b'
+                              : '#065f46',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {it.title}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {(data.facilities || []).length > 0 && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Reserve a City Facility</h3>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Click a date on the calendar above or choose a date below to request a reservation.
+          </p>
+          <form onSubmit={handleReserve} style={{ display: 'grid', gap: '.75rem', maxWidth: 680 }}>
+            <div className="row">
+              <div className="field" style={{ flex: 2, minWidth: 220 }}>
+                <label htmlFor="res-facility">Facility *</label>
+                <select id="res-facility" value={facId} onChange={(e) => setFacId(e.target.value)}>
+                  {data.facilities.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name} ({f.daily_fee}/day)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                <label htmlFor="res-date">Event Date *</label>
+                <input id="res-date" type="date" required value={evDate} onChange={(e) => setEvDate(e.target.value)} />
+              </div>
+            </div>
+            {selectedFac && (selectedFac.description || selectedFac.rules || selectedFac.capacity) && (
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '.6rem .75rem', fontSize: '.86rem' }}>
+                <div>
+                  <strong>{selectedFac.name}</strong> — {selectedFac.daily_fee} per day
+                  {selectedFac.capacity ? ` · Capacity: ${selectedFac.capacity}` : ''}
+                </div>
+                {selectedFac.description && <div className="muted">{selectedFac.description}</div>}
+                {selectedFac.rules && <div className="muted" style={{ marginTop: 2 }}>Rules: {selectedFac.rules}</div>}
+              </div>
+            )}
+            {dateBooked && (
+              <div className="error-msg" role="alert">
+                {selectedFac?.name || 'This facility'} is already reserved on {evDate}. Please choose another date.
+              </div>
+            )}
+            <div className="row">
+              <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                <label htmlFor="res-name">Your Name *</label>
+                <input id="res-name" required value={reqName} onChange={(e) => setReqName(e.target.value)} />
+              </div>
+              <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                <label htmlFor="res-email">Email</label>
+                <input id="res-email" type="email" value={reqEmail} onChange={(e) => setReqEmail(e.target.value)} />
+              </div>
+              <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                <label htmlFor="res-phone">Phone</label>
+                <input id="res-phone" value={reqPhone} onChange={(e) => setReqPhone(e.target.value)} />
+              </div>
+            </div>
+            <div className="row">
+              <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                <label htmlFor="res-title">Event Type / Title (optional)</label>
+                <input id="res-title" placeholder="e.g. Family Reunion, Birthday Party" value={evTitle} onChange={(e) => setEvTitle(e.target.value)} />
+              </div>
+              <div className="field" style={{ flex: 1, minWidth: 220 }}>
+                <label htmlFor="res-notes">Notes (optional)</label>
+                <input id="res-notes" value={reqNotes} onChange={(e) => setReqNotes(e.target.value)} />
+              </div>
+            </div>
+            <div className="actions">
+              <button type="submit" className="btn primary" disabled={busy || dateBooked}>
+                {busy ? 'Submitting…' : 'Submit Reservation Request'}
+              </button>
+            </div>
+            {msg.text && (
+              <div className={msg.isError ? 'error-msg' : 'ok-msg'} role="status">
+                {msg.text}
+              </div>
+            )}
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function NotifyMeCard() {
   const [topics, setTopics] = useState([]);
   const [selected, setSelected] = useState([]);
@@ -1257,6 +1523,7 @@ function PublicHomePage() {
             {activeTab === 'codification' && <CodePublicTab />}
             {activeTab === 'records' && <RecordsPublicTab />}
             {activeTab === 'complaints' && <ComplaintsPublicTab me={me} onRequireAuth={openAuth} />}
+            {activeTab === 'calendar' && <CalendarPublicTab />}
           </div>
         )}
       </main>
