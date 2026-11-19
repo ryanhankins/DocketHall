@@ -19,6 +19,7 @@ import React, { useEffect, useState } from 'react';
 import { api, formatDate, formatSize } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
 import { permitExpiryInfo, permitStatusBadge } from './MyPermitsPage.jsx';
+import CustomFieldsRenderer from './CustomFieldsRenderer.jsx';
 
 export default function PermitDetailWorkspace({ permit, isManager = false, onUpdated, onBack }) {
   const [tab, setTab] = useState('overview');
@@ -42,7 +43,13 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
     contractor_license: permit.contractor_license || '',
     estimated_value: permit.estimated_value || '',
     project_description: permit.project_description || '',
+    project_name: permit.project_name || '',
   });
+  const [customData, setCustomData] = useState(permit.custom_data || {});
+  const [customFieldDefs, setCustomFieldDefs] = useState([]);
+  const [linkCandidates, setLinkCandidates] = useState([]);
+  const [linkTargetId, setLinkTargetId] = useState('');
+  const [linkRel, setLinkRel] = useState('enabled_by');
 
   // Workflow form
   const [wfName, setWfName] = useState('');
@@ -84,9 +91,25 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
       contractor_license: permit.contractor_license || '',
       estimated_value: permit.estimated_value || '',
       project_description: permit.project_description || '',
+      project_name: permit.project_name || '',
     });
+    setCustomData(permit.custom_data || {});
     setEditingDetails(false);
   }, [permit]);
+
+  useEffect(() => {
+    api('/api/permits/public/catalog')
+      .then((cat) => {
+        const t = (cat.types || []).find((x) => x.id === permit.permit_type_id);
+        setCustomFieldDefs(Array.isArray(t?.custom_fields) ? t.custom_fields : []);
+      })
+      .catch(() => {});
+    api('/api/permits/link-candidates')
+      .then((rows) => {
+        setLinkCandidates((Array.isArray(rows) ? rows : []).filter((r) => r.id !== permit.id));
+      })
+      .catch(() => {});
+  }, [permit.id, permit.permit_type_id]);
 
   const workflow = permit.workflow_steps || [];
   const inspections = permit.inspections || [];
@@ -103,9 +126,49 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
           <span className={permitStatusBadge(permit.status)}>{permit.status.replace('_', ' ')}</span>
         </div>
         <div className="actions">
+          <button
+            type="button"
+            className="btn sm"
+            onClick={() => {
+              try {
+                sessionStorage.setItem('civicdesk_permit_prefill', JSON.stringify({
+                  project_name: permit.project_name || `${permit.property_address || permit.permit_number} Project`,
+                  property_address: permit.property_address || '',
+                  parcel_id: permit.parcel_id || '',
+                  owner_name: permit.owner_name || '',
+                  applicant_name: permit.applicant_name || '',
+                  applicant_email: permit.applicant_email || '',
+                  applicant_phone: permit.applicant_phone || '',
+                  prerequisite_permit_id: permit.id,
+                }));
+              } catch {}
+              window.location.hash = '#permits-apply';
+            }}
+          >
+            + Create Follow-Up Permit
+          </button>
           <a className="btn sm primary" href={`/api/permits/${permit.id}/pdf`} target="_blank" rel="noreferrer">Permit PDF</a>
         </div>
       </div>
+
+      {(permit.unmet_prerequisites || []).length > 0 && (
+        <div
+          role="alert"
+          style={{
+            background: '#fffbeb',
+            border: '1px solid #f59e0b',
+            color: '#92400e',
+            borderRadius: 8,
+            padding: '.65rem .85rem',
+            marginBottom: '.75rem',
+            fontSize: '.88rem',
+          }}
+        >
+          <strong>Prerequisite Permit Pending:</strong>{' '}
+          {permit.unmet_prerequisites.map((p) => `${p.permit_number} (${p.permit_type_name} — ${p.status})`).join(', ')}.
+          {' '}This permit depends on prerequisite approval before final issuance.
+        </div>
+      )}
 
       <div className="tabs">
         {[
@@ -219,6 +282,10 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                     </>
                   )}
                   <div className="field">
+                    <label>Project Name</label>
+                    <input value={details.project_name} onChange={(e) => setDetails(d => ({ ...d, project_name: e.target.value }))} />
+                  </div>
+                  <div className="field">
                     <label>{permit.permit_kind === 'annual_license' ? 'Vessel / Item Details' : 'Project Description'}</label>
                     <textarea rows={3} value={details.project_description} onChange={(e) => setDetails(d => ({ ...d, project_description: e.target.value }))} />
                   </div>
@@ -229,6 +296,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
               ) : (
                 <>
                   <div style={{ fontSize: '.9rem', lineHeight: 1.55 }}>
+                    {permit.project_name && <div><strong>Project:</strong> {permit.project_name}</div>}
                     <div><strong>Applicant:</strong> {permit.applicant_name} ({permit.applicant_username || '—'})</div>
                     <div><strong>Contact:</strong> {permit.applicant_email || '—'} · {permit.applicant_phone || '—'}</div>
                     <div><strong>{permit.permit_kind === 'annual_license' ? 'Location:' : 'Location:'}</strong> {permit.property_address || '—'}</div>
@@ -355,6 +423,162 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                 </div>
               )}
             </div>
+          </div>
+
+          {(customFieldDefs.length > 0 || Object.keys(customData || {}).length > 0) && (
+            <div style={{ marginTop: '1.25rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>
+              <div className="between" style={{ marginBottom: '.65rem' }}>
+                <h3 style={{ margin: 0, fontSize: '1rem' }}>Supplemental Application Form</h3>
+                {isManager && (
+                  <button
+                    type="button"
+                    className="btn sm primary"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      try {
+                        const updated = await api(`/api/permits/${permit.id}`, {
+                          method: 'PATCH',
+                          body: JSON.stringify({ custom_data: customData }),
+                        });
+                        onUpdated?.(updated);
+                        showToast('Application form responses saved', 'ok');
+                      } catch (err) {
+                        showToast(err.message, 'error');
+                      } finally {
+                        setBusy(false);
+                      }
+                    }}
+                  >
+                    Save Form Responses
+                  </button>
+                )}
+              </div>
+              <CustomFieldsRenderer
+                fields={
+                  customFieldDefs.length > 0
+                    ? customFieldDefs
+                    : Object.keys(customData).map((k) => ({
+                        key: k,
+                        label: k.replace(/_/g, ' '),
+                        type: typeof customData[k] === 'object' && customData[k] !== null && 'answer' in customData[k] ? 'yes_no_explain' : 'text',
+                      }))
+                }
+                value={customData}
+                onChange={setCustomData}
+                readOnly={!isManager}
+              />
+            </div>
+          )}
+
+          <div style={{ marginTop: '1.25rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>
+            <h3 style={{ margin: '0 0 .5rem', fontSize: '1rem' }}>Linked &amp; Prerequisite Permits</h3>
+            {(permit.linked_permits || []).length === 0 ? (
+              <p className="muted" style={{ margin: '0 0 .65rem', fontSize: '.88rem' }}>
+                No linked permits yet. Link a prerequisite (e.g., Variance) or a follow-up permit for this project.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '.4rem', marginBottom: '.75rem' }}>
+                {(permit.linked_permits || []).map((lp) => {
+                  const dirLabel = lp.direction === 'prerequisite'
+                    ? 'Prerequisite (Must Approve First)'
+                    : lp.direction === 'enables'
+                      ? 'Enables Follow-Up Permit'
+                      : 'Related Project Permit';
+                  return (
+                    <div
+                      key={lp.link_id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: '.5rem',
+                        padding: '.45rem .65rem',
+                        background: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 6,
+                        fontSize: '.86rem',
+                      }}
+                    >
+                      <div>
+                        <span className="badge draft" style={{ marginRight: '.4rem' }}>{dirLabel}</span>
+                        <strong>{lp.permit_number}</strong> — {lp.permit_type_name} ({lp.permit_use_name}){' '}
+                        <span className={permitStatusBadge(lp.status)}>{lp.status.replace('_', ' ')}</span>
+                        {lp.project_name && <span className="muted"> · {lp.project_name}</span>}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn sm danger"
+                        disabled={busy}
+                        onClick={async () => {
+                          setBusy(true);
+                          try {
+                            const updated = await api(`/api/permits/${permit.id}/links/${lp.link_id}`, { method: 'DELETE' });
+                            onUpdated?.(updated);
+                            showToast('Link removed', 'ok');
+                          } catch (err) {
+                            showToast(err.message, 'error');
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                      >
+                        Unlink
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <form
+              className="row"
+              style={{ alignItems: 'flex-end', gap: '.5rem' }}
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!linkTargetId) return;
+                setBusy(true);
+                try {
+                  const updated = await api(`/api/permits/${permit.id}/links`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      related_permit_id: Number(linkTargetId),
+                      relationship: linkRel,
+                    }),
+                  });
+                  setLinkTargetId('');
+                  onUpdated?.(updated);
+                  showToast('Permits linked', 'ok');
+                } catch (err) {
+                  showToast(err.message, 'error');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                <label>Relationship</label>
+                <select value={linkRel} onChange={(e) => setLinkRel(e.target.value)}>
+                  <option value="enabled_by">Requires Prerequisite Permit (e.g. Variance)</option>
+                  <option value="enables">Enables Follow-Up Permit (e.g. Building Permit)</option>
+                  <option value="related">Related Project Permit</option>
+                </select>
+              </div>
+              <div className="field" style={{ flex: 2, minWidth: 220 }}>
+                <label>Select Permit</label>
+                <select value={linkTargetId} onChange={(e) => setLinkTargetId(e.target.value)}>
+                  <option value="">Choose a permit...</option>
+                  {linkCandidates.map((c) => (
+                    <option key={c.id} value={String(c.id)}>
+                      {c.permit_number} — {c.permit_type_name} ({c.status}){c.property_address ? ` @ ${c.property_address}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button type="submit" className="btn sm primary" disabled={busy || !linkTargetId}>
+                + Link Permit
+              </button>
+            </form>
           </div>
         </div>
       )}

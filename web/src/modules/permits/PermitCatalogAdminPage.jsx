@@ -47,6 +47,117 @@ const PERMIT_NOTIFICATION_EVENTS = [
   },
 ];
 
+const VARIANCE_TEMPLATE_FIELDS = [
+  { key: 'legal_description', section: 'E. Legal Description', label: 'Legal Description of Property', type: 'textarea', required: false, help_text: 'Lot, Block, Subdivision, or metes & bounds from deed/survey.' },
+  { key: 'city_code_sections', section: 'G. Applicable City Code Sections', label: 'City Code Section(s) from which variance is requested', type: 'text', required: true, help_text: 'List the specific zoning or city code section numbers.' },
+  { key: 'variance_request_details', section: 'H. Variance Request', label: 'State how you wish to vary from the City Code', type: 'textarea', required: true, help_text: 'Describe exact dimensions, setbacks, height, or impervious surface relief requested.' },
+  { key: 'practical_difficulties_unique', section: 'J. Variance Criteria', label: '1. Are there practical difficulties or particular hardships due to unique circumstances of the property?', type: 'yes_no_explain', required: true, help_text: '' },
+  { key: 'strict_interpretation_hardship', section: 'J. Variance Criteria', label: '2. Would strict interpretation of the Zoning Ordinance deprive the property of reasonable use?', type: 'yes_no_explain', required: true, help_text: '' },
+  { key: 'not_self_created', section: 'J. Variance Criteria', label: '3. Are the unique circumstances NOT created by the landowner?', type: 'yes_no_explain', required: true, help_text: '' },
+  { key: 'no_special_privilege', section: 'J. Variance Criteria', label: '4. Will granting the variance avoid conferring a special privilege denied to neighboring properties?', type: 'yes_no_explain', required: true, help_text: '' },
+  { key: 'essential_character_preserved', section: 'J. Variance Criteria', label: '5. Is the variance in harmony with the Zoning Ordinance and will it preserve the essential character of the locality?', type: 'yes_no_explain', required: true, help_text: '' },
+  { key: 'other_gov_permits', section: 'K. Other Governmental Permits', label: 'Are other governmental permits required (DNR, Watershed District, County, State)?', type: 'yes_no_explain', required: false, help_text: '' },
+  { key: 'exceeds_25_impervious', section: 'L. Impervious Surface', label: 'Does the proposed project exceed 25% total impervious surface on the lot?', type: 'yes_no_explain', required: false, help_text: '' },
+  { key: 'impervious_surface_table', section: 'L. Impervious Surface', label: 'Impervious Surface Breakdown (sq ft)', type: 'impervious_table', required: false, help_text: '', rows: ['Home Footprint', 'Garage', 'Deck / Porch / Patio', 'Driveway / Parking', 'Sidewalks / Walkways', 'Shed / Accessory Structures', 'Pool / Spa', 'Retaining Walls / Other', 'Total Impervious Surface (sq ft)', 'Lot Area / % Impervious'] },
+];
+
+function CustomFieldsEditor({ permitType, onSave }) {
+  const fields = Array.isArray(permitType.custom_fields) ? permitType.custom_fields : [];
+  const [section, setSection] = useState('');
+  const [label, setLabel] = useState('');
+  const [ftype, setFtype] = useState('text');
+  const [req, setReq] = useState(false);
+
+  const addField = async () => {
+    if (!label.trim()) return;
+    const next = [
+      ...fields,
+      {
+        key: label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40) || `field_${fields.length + 1}`,
+        section: section.trim() || 'Additional Questions',
+        label: label.trim(),
+        type: ftype,
+        required: req,
+        help_text: '',
+      },
+    ];
+    await onSave(next);
+    setLabel('');
+    setReq(false);
+  };
+
+  return (
+    <details style={{ marginTop: 2 }}>
+      <summary style={{ cursor: 'pointer', fontSize: '.78rem', color: '#7c3aed' }}>
+        Custom Form Fields ({fields.length})
+      </summary>
+      <div style={{ padding: '.5rem', background: '#f8fafc', borderRadius: 6, marginTop: 4, minWidth: 290, maxWidth: 420 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '.4rem' }}>
+          <span className="muted" style={{ fontSize: '.75rem' }}>Structured questions shown on application</span>
+          <button
+            type="button"
+            className="btn sm"
+            style={{ fontSize: '.72rem', padding: '2px 6px' }}
+            onClick={() => onSave(VARIANCE_TEMPLATE_FIELDS)}
+          >
+            Load Variance Template
+          </button>
+        </div>
+        {fields.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '.25rem', marginBottom: '.5rem' }}>
+            {fields.map((f, idx) => (
+              <div key={`${f.key}-${idx}`} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.35rem', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 4, padding: '3px 6px', fontSize: '.75rem' }}>
+                <div>
+                  {f.section && <span className="muted">[{f.section}] </span>}
+                  <strong>{f.label}</strong>{' '}
+                  <span className="muted">({f.type}{f.required ? ', req' : ''})</span>
+                </div>
+                <button
+                  type="button"
+                  className="btn sm danger"
+                  style={{ fontSize: '.7rem', padding: '1px 5px' }}
+                  onClick={() => onSave(fields.filter((_, i) => i !== idx))}
+                >
+                  &times;
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.3rem' }}>
+          <input
+            placeholder="Section (e.g. G. City Code)"
+            value={section}
+            onChange={(e) => setSection(e.target.value)}
+            style={{ fontSize: '.75rem', padding: '3px 6px' }}
+          />
+          <select value={ftype} onChange={(e) => setFtype(e.target.value)} style={{ fontSize: '.75rem', padding: '3px 6px' }}>
+            <option value="text">Short Text</option>
+            <option value="textarea">Long Text</option>
+            <option value="yes_no_explain">Yes / No + Explain</option>
+            <option value="impervious_table">Impervious Surface Table</option>
+            <option value="number">Number</option>
+            <option value="date">Date</option>
+          </select>
+          <input
+            placeholder="Question / Field Label"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            style={{ fontSize: '.75rem', padding: '3px 6px', gridColumn: '1 / -1' }}
+          />
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.25rem', fontSize: '.75rem' }}>
+            <input type="checkbox" style={{ width: 'auto' }} checked={req} onChange={(e) => setReq(e.target.checked)} />
+            Required
+          </label>
+          <button type="button" className="btn sm primary" style={{ fontSize: '.74rem', padding: '2px 8px' }} onClick={addField}>
+            + Add Field
+          </button>
+        </div>
+      </div>
+    </details>
+  );
+}
+
 export default function PermitCatalogAdminPage() {
   const [settings, setSettings] = useState({
     general_instructions: '',
@@ -312,6 +423,16 @@ export default function PermitCatalogAdminPage() {
                       })}
                     </div>
                   </details>
+                  <CustomFieldsEditor
+                    permitType={t}
+                    onSave={async (next) => {
+                      await api(`/api/permits/admin/types/${t.id}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ custom_fields: next }),
+                      });
+                      await loadCatalog();
+                    }}
+                  />
                 </div>
               );
               if (!tUses.length) {

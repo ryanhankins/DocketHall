@@ -18,6 +18,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api, formatSize } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
+import CustomFieldsRenderer from './CustomFieldsRenderer.jsx';
 
 export default function PermitApplyPage({ initialTypeId = null, initialUseId = null, onNavigate }) {
   const [catalog, setCatalog] = useState({ settings: {}, types: [], uses: [] });
@@ -35,6 +36,10 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
   const [contractorLicense, setContractorLicense] = useState('');
   const [projectDesc, setProjectDesc] = useState('');
   const [estValue, setEstValue] = useState('');
+  const [projectName, setProjectName] = useState('');
+  const [customData, setCustomData] = useState({});
+  const [prerequisitePermitId, setPrerequisitePermitId] = useState('');
+  const [linkCandidates, setLinkCandidates] = useState([]);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   const [docCategory, setDocCategory] = useState('Certificate of Insurance');
@@ -62,6 +67,24 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
         }
       })
       .catch(e => showToast(e.message, 'error'));
+    api('/api/permits/link-candidates')
+      .then((rows) => setLinkCandidates(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
+    try {
+      const raw = sessionStorage.getItem('civicdesk_permit_prefill');
+      if (raw) {
+        sessionStorage.removeItem('civicdesk_permit_prefill');
+        const pf = JSON.parse(raw);
+        if (pf.project_name) setProjectName(pf.project_name);
+        if (pf.property_address) setPropertyAddress(pf.property_address);
+        if (pf.parcel_id) setParcelId(pf.parcel_id);
+        if (pf.owner_name) setOwnerName(pf.owner_name);
+        if (pf.applicant_name) setApplicantName(pf.applicant_name);
+        if (pf.applicant_email) setApplicantEmail(pf.applicant_email);
+        if (pf.applicant_phone) setApplicantPhone(pf.applicant_phone);
+        if (pf.prerequisite_permit_id) setPrerequisitePermitId(String(pf.prerequisite_permit_id));
+      }
+    } catch {}
   }, [initialTypeId, initialUseId, showToast]);
 
   const selectedType = useMemo(
@@ -113,6 +136,9 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
           contractor_license: contractorLicense.trim(),
           project_description: projectDesc.trim(),
           estimated_value: estValue.trim(),
+          project_name: projectName.trim(),
+          custom_data: customData,
+          prerequisite_permit_id: prerequisitePermitId ? Number(prerequisitePermitId) : null,
           accepted_terms: acceptedTerms,
         }),
       });
@@ -307,6 +333,33 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
             </>
           )}
 
+          <div className="row" style={{ marginBottom: '.85rem' }}>
+            <div className="field" style={{ flex: 1 }}>
+              <label htmlFor="perm-project-name">Project Name (optional, groups related permits)</label>
+              <input
+                id="perm-project-name"
+                placeholder="e.g. 2026 Smith Lakeside Garage & Variance"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+              />
+            </div>
+            <div className="field" style={{ flex: 1 }}>
+              <label htmlFor="perm-prereq">Prerequisite / Enabling Permit (optional)</label>
+              <select
+                id="perm-prereq"
+                value={prerequisitePermitId}
+                onChange={(e) => setPrerequisitePermitId(e.target.value)}
+              >
+                <option value="">None (standalone permit)</option>
+                {linkCandidates.map((c) => (
+                  <option key={c.id} value={String(c.id)}>
+                    {c.permit_number} — {c.permit_type_name} ({c.status}){c.project_name ? ` [${c.project_name}]` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           <div className="field" style={{ marginBottom: '.85rem' }}>
             <label htmlFor="perm-desc">
               {isAnnualLicense ? 'Vessel / Item Details (make, color, length, notes)' : 'Project Description / Scope of Work'}{isReq('project_description') ? ' *' : ''}
@@ -320,6 +373,16 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
               onChange={(e) => setProjectDesc(e.target.value)}
             />
           </div>
+
+          {(selectedType?.custom_fields || []).length > 0 && (
+            <div style={{ marginBottom: '1rem' }}>
+              <CustomFieldsRenderer
+                fields={selectedType.custom_fields}
+                value={customData}
+                onChange={setCustomData}
+              />
+            </div>
+          )}
 
           <div className="field" style={{ marginBottom: '.9rem' }}>
             <label>Upload Supporting Documents (COI, Design Plans, Survey)</label>

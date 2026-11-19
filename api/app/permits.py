@@ -21,7 +21,7 @@ import io
 import json
 import os
 import re
-from typing import Literal
+from typing import Any, Literal
 import uuid
 from xml.sax.saxutils import escape as _xml_escape
 
@@ -66,11 +66,13 @@ CREATE TABLE IF NOT EXISTS permit_types (
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,
     kind            TEXT NOT NULL DEFAULT 'construction',
     expiration_rule TEXT NOT NULL DEFAULT 'none',
-    required_fields JSONB NOT NULL DEFAULT '["property_address"]'::jsonb
+    required_fields JSONB NOT NULL DEFAULT '["property_address"]'::jsonb,
+    custom_fields   JSONB NOT NULL DEFAULT '[]'::jsonb
 );
 ALTER TABLE permit_types ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'construction';
 ALTER TABLE permit_types ADD COLUMN IF NOT EXISTS expiration_rule TEXT NOT NULL DEFAULT 'none';
 ALTER TABLE permit_types ADD COLUMN IF NOT EXISTS required_fields JSONB NOT NULL DEFAULT '["property_address"]'::jsonb;
+ALTER TABLE permit_types ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '[]'::jsonb;
 CREATE TABLE IF NOT EXISTS permit_uses (
     id              BIGSERIAL PRIMARY KEY,
     permit_type_id  BIGINT NOT NULL REFERENCES permit_types(id) ON DELETE CASCADE,
@@ -117,11 +119,15 @@ CREATE TABLE IF NOT EXISTS permits (
     issued_at           TIMESTAMPTZ,
     expires_at          DATE,
     permit_kind         TEXT NOT NULL DEFAULT 'construction',
-    renewed_from_id     BIGINT REFERENCES permits(id) ON DELETE SET NULL
+    renewed_from_id     BIGINT REFERENCES permits(id) ON DELETE SET NULL,
+    project_name        TEXT NOT NULL DEFAULT '',
+    custom_data         JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 ALTER TABLE permits ADD COLUMN IF NOT EXISTS expires_at DATE;
 ALTER TABLE permits ADD COLUMN IF NOT EXISTS permit_kind TEXT NOT NULL DEFAULT 'construction';
 ALTER TABLE permits ADD COLUMN IF NOT EXISTS renewed_from_id BIGINT REFERENCES permits(id) ON DELETE SET NULL;
+ALTER TABLE permits ADD COLUMN IF NOT EXISTS project_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE permits ADD COLUMN IF NOT EXISTS custom_data JSONB NOT NULL DEFAULT '{}'::jsonb;
 CREATE INDEX IF NOT EXISTS permits_user_idx ON permits(applicant_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS permits_status_idx ON permits(status, created_at DESC);
 CREATE TABLE IF NOT EXISTS permit_documents (
@@ -147,6 +153,17 @@ CREATE TABLE IF NOT EXISTS permit_activity_log (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS permit_activity_permit_idx ON permit_activity_log(permit_id, id);
+CREATE TABLE IF NOT EXISTS permit_links (
+    id               BIGSERIAL PRIMARY KEY,
+    source_permit_id BIGINT NOT NULL REFERENCES permits(id) ON DELETE CASCADE,
+    target_permit_id BIGINT NOT NULL REFERENCES permits(id) ON DELETE CASCADE,
+    link_type        TEXT NOT NULL DEFAULT 'related',
+    notes            TEXT NOT NULL DEFAULT '',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (source_permit_id, target_permit_id, link_type)
+);
+CREATE INDEX IF NOT EXISTS permit_links_source_idx ON permit_links(source_permit_id);
+CREATE INDEX IF NOT EXISTS permit_links_target_idx ON permit_links(target_permit_id);
 ALTER TABLE permits ADD COLUMN IF NOT EXISTS building_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE permits ADD COLUMN IF NOT EXISTS suite_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE permits ADD COLUMN IF NOT EXISTS owner_name TEXT NOT NULL DEFAULT '';
@@ -344,6 +361,14 @@ def bootstrap() -> None:
             "ON CONFLICT (permit_type_id, name) DO NOTHING",
             (sc_id,),
         )
+        # Seed Birchwood's Variance Application custom fields only when SEED_CITY_PROFILE=birchwood
+        if os.environ.get("SEED_CITY_PROFILE", "").strip().lower() == "birchwood":
+            conn.execute(
+                "UPDATE permit_types SET custom_fields = %s::jsonb "
+                "WHERE name = 'Variance Application' AND (custom_fields IS NULL OR custom_fields = '[]'::jsonb)",
+                (json.dumps(VARIANCE_CUSTOM_FIELDS),),
+            )
+
         # Clean up initial pre-expansion sample uses if no permits reference them
         conn.execute(
             "DELETE FROM permit_uses u WHERE u.name = ANY(%s) "
@@ -386,6 +411,200 @@ _REQUIRED_FIELD_LABELS = {
 }
 
 
+VARIANCE_CUSTOM_FIELDS: list[dict[str, Any]] = [
+    {
+        "key": "legal_description",
+        "section": "E. Legal Description",
+        "label": "Legal Description of Property",
+        "type": "textarea",
+        "required": False,
+        "help_text": "Lot, Block, Subdivision, or metes & bounds from deed/survey.",
+    },
+    {
+        "key": "city_code_sections",
+        "section": "G. Applicable City Code Sections",
+        "label": "City Code Section(s) from which variance is requested",
+        "type": "text",
+        "required": True,
+        "help_text": "List the specific zoning or city code section numbers (e.g., Section 302.040 Setbacks).",
+    },
+    {
+        "key": "variance_request_details",
+        "section": "H. Variance Request",
+        "label": "State how you wish to vary from the City Code",
+        "type": "textarea",
+        "required": True,
+        "help_text": "Describe exact dimensions, setbacks, height, or impervious surface relief requested.",
+    },
+    {
+        "key": "practical_difficulties_unique",
+        "section": "J. Variance Criteria",
+        "label": "1. Are there practical difficulties or particular hardships due to unique circumstances of the property?",
+        "type": "yes_no_explain",
+        "required": True,
+        "help_text": "Explain why the lot shape, topography, wetlands, or existing conditions make compliance difficult.",
+    },
+    {
+        "key": "strict_interpretation_hardship",
+        "section": "J. Variance Criteria",
+        "label": "2. Would strict interpretation of the Zoning Ordinance deprive the property of reasonable use?",
+        "type": "yes_no_explain",
+        "required": True,
+        "help_text": "Explain how the variance puts the property to use in a reasonable manner permitted by the ordinance.",
+    },
+    {
+        "key": "not_self_created",
+        "section": "J. Variance Criteria",
+        "label": "3. Are the unique circumstances NOT created by the landowner?",
+        "type": "yes_no_explain",
+        "required": True,
+        "help_text": "Confirm the plight is due to circumstances unique to the property and not created by the owner.",
+    },
+    {
+        "key": "no_special_privilege",
+        "section": "J. Variance Criteria",
+        "label": "4. Will granting the variance avoid conferring a special privilege denied to neighboring properties?",
+        "type": "yes_no_explain",
+        "required": True,
+        "help_text": "Economic considerations alone do not constitute practical difficulties.",
+    },
+    {
+        "key": "essential_character_preserved",
+        "section": "J. Variance Criteria",
+        "label": "5. Is the variance in harmony with the Zoning Ordinance and will it preserve the essential character of the locality?",
+        "type": "yes_no_explain",
+        "required": True,
+        "help_text": "Address neighborhood character, views, drainage, and public health/safety.",
+    },
+    {
+        "key": "other_gov_permits",
+        "section": "K. Other Governmental Permits",
+        "label": "Are other governmental permits required (DNR, Watershed District, County, State)?",
+        "type": "yes_no_explain",
+        "required": False,
+        "help_text": "If Yes, list the agency and permit status or attach copies.",
+    },
+    {
+        "key": "exceeds_25_impervious",
+        "section": "L. Impervious Surface",
+        "label": "Does the proposed project exceed 25% total impervious surface on the lot?",
+        "type": "yes_no_explain",
+        "required": False,
+        "help_text": "Explain mitigation or stormwater plan if exceeding 25%.",
+    },
+    {
+        "key": "impervious_surface_table",
+        "section": "L. Impervious Surface",
+        "label": "Impervious Surface Breakdown (sq ft)",
+        "type": "impervious_table",
+        "required": False,
+        "help_text": "Enter Existing, Proposed, and Change (sq ft) for each applicable surface.",
+        "rows": [
+            "Home Footprint",
+            "Garage",
+            "Deck / Porch / Patio",
+            "Driveway / Parking",
+            "Sidewalks / Walkways",
+            "Shed / Accessory Structures",
+            "Pool / Spa",
+            "Retaining Walls / Other",
+            "Total Impervious Surface (sq ft)",
+            "Lot Area / % Impervious",
+        ],
+    },
+]
+
+_VALID_CUSTOM_FIELD_TYPES = {"text", "textarea", "number", "date", "yes_no_explain", "impervious_table"}
+
+
+def _clean_custom_fields(fields: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    if fields is None:
+        return None
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for idx, raw in enumerate(fields):
+        if not isinstance(raw, dict):
+            continue
+        label = str(raw.get("label") or "").strip()
+        if not label:
+            continue
+        raw_key = str(raw.get("key") or "").strip().lower()
+        key = "".join(c if (c.isalnum() or c == "_") else "_" for c in raw_key).strip("_")
+        if not key:
+            key = "".join(c if (c.isalnum() or c == "_") else "_" for c in label.lower()).strip("_")[:40] or f"field_{idx + 1}"
+        if key in seen:
+            key = f"{key}_{idx + 1}"
+        seen.add(key)
+        ftype = str(raw.get("type") or "text").strip()
+        if ftype not in _VALID_CUSTOM_FIELD_TYPES:
+            ftype = "text"
+        item: dict[str, Any] = {
+            "key": key,
+            "section": str(raw.get("section") or "").strip(),
+            "label": label,
+            "type": ftype,
+            "required": bool(raw.get("required", False)),
+            "help_text": str(raw.get("help_text") or "").strip(),
+        }
+        if ftype == "impervious_table":
+            raw_rows = raw.get("rows")
+            if isinstance(raw_rows, list):
+                rows = [str(r).strip() for r in raw_rows if str(r).strip()]
+            else:
+                rows = []
+            item["rows"] = rows or [
+                "Home Footprint",
+                "Garage",
+                "Deck / Porch / Patio",
+                "Driveway / Parking",
+                "Total Impervious Surface (sq ft)",
+            ]
+        out.append(item)
+    return out
+
+
+def _clean_custom_data(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): v for k, v in data.items() if str(k).strip()}
+
+
+def _validate_custom_data(custom_fields: list[dict[str, Any]], custom_data: dict[str, Any], type_name: str) -> None:
+    for f in custom_fields:
+        if not f.get("required"):
+            continue
+        key = f["key"]
+        label = f.get("label") or key
+        ftype = f.get("type") or "text"
+        val = custom_data.get(key)
+        if ftype == "yes_no_explain":
+            ans = str(val.get("answer") or "").strip().lower() if isinstance(val, dict) else ""
+            exp = str(val.get("explanation") or "").strip() if isinstance(val, dict) else ""
+            if ans not in ("yes", "no") or not exp:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"'{label}' requires a Yes/No selection and explanation for {type_name}",
+                )
+        elif ftype == "impervious_table":
+            has_any = False
+            if isinstance(val, dict):
+                for row_vals in val.values():
+                    if isinstance(row_vals, dict) and any(str(row_vals.get(col) or "").strip() for col in ("existing", "proposed", "change")):
+                        has_any = True
+                        break
+            if not has_any:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"'{label}' requires at least one entry for {type_name}",
+                )
+        else:
+            if not str(val or "").strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"'{label}' is required for {type_name}",
+                )
+
+
 def _clean_required_fields(fields: list[str] | None) -> list[str] | None:
     if fields is None:
         return None
@@ -407,6 +626,7 @@ class PermitTypeIn(BaseModel):
     kind: Literal["construction", "annual_license"] = "construction"
     expiration_rule: Literal["none", "calendar_year", "one_year"] = "none"
     required_fields: list[str] = ["property_address"]
+    custom_fields: list[dict[str, Any]] = []
 
 
 class PermitTypePatch(BaseModel):
@@ -417,6 +637,7 @@ class PermitTypePatch(BaseModel):
     kind: Literal["construction", "annual_license"] | None = None
     expiration_rule: Literal["none", "calendar_year", "one_year"] | None = None
     required_fields: list[str] | None = None
+    custom_fields: list[dict[str, Any]] | None = None
 
 
 class PermitUseIn(BaseModel):
@@ -459,6 +680,16 @@ class PermitCreateIn(BaseModel):
     project_description: str = ""
     estimated_value: str = ""
     accepted_terms: bool = False
+    project_name: str = ""
+    custom_data: dict[str, Any] = {}
+    prerequisite_permit_id: int | None = None
+    related_permit_id: int | None = None
+
+
+class PermitLinkIn(BaseModel):
+    related_permit_id: int
+    relationship: Literal["enabled_by", "enables", "related"] = "enabled_by"
+    notes: str = ""
 
 
 class PermitPatchIn(BaseModel):
@@ -480,6 +711,8 @@ class PermitPatchIn(BaseModel):
     contractor_license: str | None = None
     project_description: str | None = None
     estimated_value: str | None = None
+    project_name: str | None = None
+    custom_data: dict[str, Any] | None = None
 
 
 class ParcelIn(BaseModel):
@@ -550,7 +783,7 @@ def _load_settings(conn) -> dict:
 def _load_catalog(conn, active_only: bool) -> dict:
     where = "WHERE is_active = TRUE" if active_only else ""
     t_rows = conn.execute(
-        f"SELECT id, name, description, sort_order, is_active, kind, expiration_rule, required_fields "
+        f"SELECT id, name, description, sort_order, is_active, kind, expiration_rule, required_fields, custom_fields "
         f"FROM permit_types {where} ORDER BY sort_order ASC, name ASC"
     ).fetchall()
     u_rows = conn.execute(
@@ -568,6 +801,7 @@ def _load_catalog(conn, active_only: bool) -> dict:
             "kind": r[5] or "construction",
             "expiration_rule": r[6] or "none",
             "required_fields": list(r[7]) if isinstance(r[7], list) else ["property_address"],
+            "custom_fields": list(r[8]) if isinstance(r[8], list) else [],
         }
         for r in t_rows
     ]
@@ -587,6 +821,56 @@ def _load_catalog(conn, active_only: bool) -> dict:
         for r in u_rows
     ]
     return {"settings": _load_settings(conn), "types": types, "uses": uses}
+
+
+_SATISFIED_PREREQ_STATUSES = {"approved", "issued", "completed"}
+
+
+def _hydrate_links(conn, ids: list[int]) -> dict[int, list[dict]]:
+    link_rows = conn.execute(
+        "SELECT l.id, l.source_permit_id, l.target_permit_id, l.link_type, l.notes, "
+        "       sp.permit_number, sp.permit_type_name, sp.permit_use_name, sp.status, sp.property_address, sp.project_name, "
+        "       tp.permit_number, tp.permit_type_name, tp.permit_use_name, tp.status, tp.property_address, tp.project_name "
+        "FROM permit_links l "
+        "JOIN permits sp ON sp.id = l.source_permit_id "
+        "JOIN permits tp ON tp.id = l.target_permit_id "
+        "WHERE l.source_permit_id = ANY(%s) OR l.target_permit_id = ANY(%s) "
+        "ORDER BY l.id ASC",
+        (ids, ids),
+    ).fetchall()
+    links_by_permit: dict[int, list[dict]] = {}
+    id_set = set(ids)
+    for lr in link_rows:
+        lid, src_id, tgt_id, ltype, notes = lr[0], lr[1], lr[2], lr[3], lr[4]
+        if src_id in id_set:
+            links_by_permit.setdefault(src_id, []).append({
+                "link_id": lid,
+                "permit_id": tgt_id,
+                "permit_number": lr[11],
+                "permit_type_name": lr[12],
+                "permit_use_name": lr[13],
+                "status": lr[14],
+                "property_address": lr[15],
+                "project_name": lr[16],
+                "direction": "enables" if ltype == "enables" else "related",
+                "link_type": ltype,
+                "notes": notes,
+            })
+        if tgt_id in id_set:
+            links_by_permit.setdefault(tgt_id, []).append({
+                "link_id": lid,
+                "permit_id": src_id,
+                "permit_number": lr[5],
+                "permit_type_name": lr[6],
+                "permit_use_name": lr[7],
+                "status": lr[8],
+                "property_address": lr[9],
+                "project_name": lr[10],
+                "direction": "prerequisite" if ltype == "enables" else "related",
+                "link_type": ltype,
+                "notes": notes,
+            })
+    return links_by_permit
 
 
 def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> list[dict]:
@@ -685,8 +969,14 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
             "created_at": l[5].isoformat() if l[5] else None,
         })
 
+    links_by_permit = _hydrate_links(conn, ids)
     out = []
     for r in rows:
+        permit_links = links_by_permit.get(r[0], [])
+        unmet_prereqs = [
+            lp for lp in permit_links
+            if lp["direction"] == "prerequisite" and lp["status"] not in _SATISFIED_PREREQ_STATUSES
+        ]
         out.append({
             "id": r[0],
             "permit_number": r[1],
@@ -722,6 +1012,10 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
             "expires_at": r[31].isoformat() if r[31] else None,
             "permit_kind": r[32] or "construction",
             "renewed_from_id": r[33],
+            "project_name": r[34] or "",
+            "custom_data": dict(r[35]) if isinstance(r[35], dict) else {},
+            "linked_permits": permit_links,
+            "unmet_prerequisites": unmet_prereqs,
             "documents": docs_by_permit.get(r[0], []),
             "workflow_steps": wf_by_permit.get(r[0], []),
             "inspections": insp_by_permit.get(r[0], []),
@@ -739,7 +1033,7 @@ _PERMIT_COLS = (
     "contractor_name, contractor_license, project_description, estimated_value, "
     "accepted_terms, status, fee_amount, payment_status, review_notes, reviewed_by, "
     "assigned_to, created_at, updated_at, issued_at, closed_at, expires_at, "
-    "permit_kind, renewed_from_id"
+    "permit_kind, renewed_from_id, project_name, custom_data"
 )
 
 
@@ -856,7 +1150,7 @@ def create_permit(
 
     with pool.connection() as conn:
         t_row = conn.execute(
-            "SELECT id, name, kind, required_fields FROM permit_types WHERE id = %s AND is_active = TRUE",
+            "SELECT id, name, kind, required_fields, custom_fields FROM permit_types WHERE id = %s AND is_active = TRUE",
             (body.permit_type_id,),
         ).fetchone()
         if not t_row:
@@ -868,6 +1162,9 @@ def create_permit(
             if not val:
                 lbl = _REQUIRED_FIELD_LABELS.get(fld, fld)
                 raise HTTPException(status_code=400, detail=f"{lbl} is required for {t_row[1]}")
+        custom_fields = list(t_row[4]) if isinstance(t_row[4], list) else []
+        custom_data = _clean_custom_data(body.custom_data)
+        _validate_custom_data(custom_fields, custom_data, t_row[1])
         u_row = conn.execute(
             "SELECT id, name, fee_amount FROM permit_uses "
             "WHERE id = %s AND permit_type_id = %s AND is_active = TRUE",
@@ -875,6 +1172,21 @@ def create_permit(
         ).fetchone()
         if not u_row:
             raise HTTPException(status_code=400, detail="Selected permit use not found")
+
+        project_name = body.project_name.strip()
+        is_mgr = has_permission(user, "permits.manage")
+        for ref_id in (body.prerequisite_permit_id, body.related_permit_id):
+            if ref_id is not None:
+                ref_row = conn.execute(
+                    "SELECT id, applicant_user_id, project_name FROM permits WHERE id = %s",
+                    (ref_id,),
+                ).fetchone()
+                if not ref_row:
+                    raise HTTPException(status_code=400, detail="Linked permit not found")
+                if not is_mgr and ref_row[1] != user["id"]:
+                    raise HTTPException(status_code=403, detail="Cannot link to another applicant's permit")
+                if not project_name and ref_row[2]:
+                    project_name = ref_row[2]
 
         year = datetime.now(timezone.utc).year
         temp_num = f"PRM-{year}-{uuid.uuid4().hex[:8].upper()}"
@@ -885,8 +1197,8 @@ def create_permit(
             " applicant_name, applicant_email, applicant_phone, "
             " property_address, building_name, suite_name, parcel_id, owner_name, "
             " contractor_name, contractor_license, project_description, estimated_value, "
-            " accepted_terms, status, fee_amount, permit_kind) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, 'submitted', %s, %s) "
+            " accepted_terms, status, fee_amount, permit_kind, project_name, custom_data) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, 'submitted', %s, %s, %s, %s::jsonb) "
             "RETURNING id",
             (
                 temp_num,
@@ -910,6 +1222,8 @@ def create_permit(
                 body.estimated_value.strip(),
                 u_row[2] or "",
                 permit_kind,
+                project_name,
+                json.dumps(custom_data),
             ),
         ).fetchone()
         permit_id = row[0]
@@ -918,6 +1232,18 @@ def create_permit(
             "UPDATE permits SET permit_number = %s WHERE id = %s",
             (final_num, permit_id),
         )
+        if body.prerequisite_permit_id is not None and body.prerequisite_permit_id != permit_id:
+            conn.execute(
+                "INSERT INTO permit_links (source_permit_id, target_permit_id, link_type) "
+                "VALUES (%s, %s, 'enables') ON CONFLICT DO NOTHING",
+                (body.prerequisite_permit_id, permit_id),
+            )
+        if body.related_permit_id is not None and body.related_permit_id != permit_id and body.related_permit_id != body.prerequisite_permit_id:
+            conn.execute(
+                "INSERT INTO permit_links (source_permit_id, target_permit_id, link_type) "
+                "VALUES (%s, %s, 'related') ON CONFLICT DO NOTHING",
+                (body.related_permit_id, permit_id),
+            )
         conn.execute(
             "INSERT INTO permit_activity_log (permit_id, action, actor_username, note) "
             "VALUES (%s, 'Submitted', %s, %s)",
@@ -1126,6 +1452,7 @@ def get_permit_pdf(
     rows = [
         ["Permit Type", permit["permit_type_name"]],
         ["Permit Use", permit["permit_use_name"]],
+        ["Project Name", permit.get("project_name") or "—"],
         ["Applicant", permit["applicant_name"]],
         ["Email / Phone", f"{permit['applicant_email'] or '—'} / {permit['applicant_phone'] or '—'}"],
         ["Property Address", permit["property_address"]],
@@ -1148,6 +1475,62 @@ def get_permit_pdf(
     story.append(tbl)
     if permit["project_description"]:
         story.extend([Spacer(1, 12), Paragraph("<b>Project Description</b>", styles["Heading3"]), Paragraph(_xml_escape(str(permit["project_description"])), styles["Normal"])])
+    custom_data = permit.get("custom_data") or {}
+    if custom_data:
+        with pool.connection() as conn:
+            cf_row = conn.execute("SELECT custom_fields FROM permit_types WHERE id = %s", (permit["permit_type_id"],)).fetchone()
+        cf_defs = list(cf_row[0]) if cf_row and isinstance(cf_row[0], list) else []
+        cf_by_key = {f.get("key"): f for f in cf_defs if isinstance(f, dict) and f.get("key")}
+        ordered_keys = [f["key"] for f in cf_defs if isinstance(f, dict) and f.get("key") in custom_data]
+        for k in custom_data:
+            if k not in ordered_keys:
+                ordered_keys.append(k)
+        if ordered_keys:
+            story.extend([Spacer(1, 12), Paragraph("<b>Supplemental Application Details</b>", styles["Heading3"])])
+            for k in ordered_keys:
+                fdef = cf_by_key.get(k, {})
+                lbl = fdef.get("label") or k.replace("_", " ").title()
+                ftype = fdef.get("type") or "text"
+                val = custom_data.get(k)
+                if ftype == "yes_no_explain" and isinstance(val, dict):
+                    ans = str(val.get("answer") or "—").upper()
+                    exp = str(val.get("explanation") or "").strip()
+                    story.append(Paragraph(f"<b>{_xml_escape(lbl)}:</b> {_xml_escape(ans)}", styles["Normal"]))
+                    if exp:
+                        story.append(Paragraph(_xml_escape(exp), styles["Normal"]))
+                    story.append(Spacer(1, 4))
+                elif ftype == "impervious_table" and isinstance(val, dict):
+                    story.append(Paragraph(f"<b>{_xml_escape(lbl)}</b>", styles["Normal"]))
+                    row_names = fdef.get("rows") or list(val.keys())
+                    t_rows = [["Surface", "Existing (sq ft)", "Proposed (sq ft)", "Change (sq ft)"]]
+                    for rname in row_names:
+                        rv = val.get(rname) if isinstance(val.get(rname), dict) else {}
+                        t_rows.append([
+                            str(rname),
+                            str(rv.get("existing") or "—"),
+                            str(rv.get("proposed") or "—"),
+                            str(rv.get("change") or "—"),
+                        ])
+                    ct = Table(t_rows, colWidths=[200, 100, 100, 100])
+                    ct.setStyle(TableStyle([
+                        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+                        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                        ("PADDING", (0, 0), (-1, -1), 4),
+                    ]))
+                    story.append(ct)
+                    story.append(Spacer(1, 6))
+                else:
+                    story.append(Paragraph(f"<b>{_xml_escape(lbl)}:</b> {_xml_escape(str(val or '—'))}", styles["Normal"]))
+                    story.append(Spacer(1, 4))
+    if permit.get("linked_permits"):
+        story.extend([Spacer(1, 12), Paragraph("<b>Linked / Project Permits</b>", styles["Heading3"])])
+        for lp in permit["linked_permits"]:
+            rel_lbl = "Prerequisite" if lp["direction"] == "prerequisite" else ("Enables" if lp["direction"] == "enables" else "Related")
+            story.append(Paragraph(
+                f"• [{rel_lbl}] {_xml_escape(str(lp['permit_number']))} — {_xml_escape(str(lp['permit_type_name']))} ({_xml_escape(str(lp['status']))})",
+                styles["Normal"],
+            ))
     if permit["review_notes"]:
         story.extend([Spacer(1, 12), Paragraph("<b>Staff Review Notes</b>", styles["Heading3"]), Paragraph(_xml_escape(str(permit["review_notes"])), styles["Normal"])])
     if permit.get("workflow_steps"):
@@ -1246,6 +1629,8 @@ def update_permit(
             f"contractor_license = COALESCE(%s, contractor_license), "
             f"project_description = COALESCE(%s, project_description), "
             f"estimated_value = COALESCE(%s, estimated_value), "
+            f"project_name = COALESCE(%s, project_name), "
+            f"custom_data = COALESCE(%s::jsonb, custom_data), "
             f"reviewed_by = %s, "
             f"updated_at = now(){issued_clause}{closed_clause}{exp_clause} "
             f"WHERE id = %s",
@@ -1267,6 +1652,8 @@ def update_permit(
                 body.contractor_license.strip() if body.contractor_license is not None else None,
                 body.project_description.strip() if body.project_description is not None else None,
                 body.estimated_value.strip() if body.estimated_value is not None else None,
+                body.project_name.strip() if body.project_name is not None else None,
+                json.dumps(_clean_custom_data(body.custom_data)) if body.custom_data is not None else None,
                 user["username"],
                 *exp_params,
                 permit_id,
@@ -1681,18 +2068,126 @@ def update_portal_settings(
         return _load_settings(conn)
 
 
+@router.get("/link-candidates")
+def list_link_candidates(
+    q: str = "",
+    user: dict = Depends(require_permission("permits.submit", "permits.manage")),
+):
+    is_mgr = has_permission(user, "permits.manage")
+    ql = f"%{q.strip()}%"
+    with pool.connection() as conn:
+        if is_mgr:
+            if q.strip():
+                rows = conn.execute(
+                    "SELECT id, permit_number, permit_type_name, permit_use_name, property_address, project_name, status "
+                    "FROM permits WHERE permit_number ILIKE %s OR property_address ILIKE %s OR project_name ILIKE %s OR permit_type_name ILIKE %s "
+                    "ORDER BY id DESC LIMIT 50",
+                    (ql, ql, ql, ql),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, permit_number, permit_type_name, permit_use_name, property_address, project_name, status "
+                    "FROM permits ORDER BY id DESC LIMIT 50"
+                ).fetchall()
+        else:
+            if q.strip():
+                rows = conn.execute(
+                    "SELECT id, permit_number, permit_type_name, permit_use_name, property_address, project_name, status "
+                    "FROM permits WHERE applicant_user_id = %s AND (permit_number ILIKE %s OR property_address ILIKE %s OR project_name ILIKE %s OR permit_type_name ILIKE %s) "
+                    "ORDER BY id DESC LIMIT 50",
+                    (user["id"], ql, ql, ql, ql),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, permit_number, permit_type_name, permit_use_name, property_address, project_name, status "
+                    "FROM permits WHERE applicant_user_id = %s ORDER BY id DESC LIMIT 50",
+                    (user["id"],),
+                ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "permit_number": r[1],
+            "permit_type_name": r[2],
+            "permit_use_name": r[3],
+            "property_address": r[4],
+            "project_name": r[5],
+            "status": r[6],
+        }
+        for r in rows
+    ]
+
+
+@router.post("/{permit_id}/links")
+def add_permit_link(
+    permit_id: int,
+    body: PermitLinkIn,
+    user: dict = Depends(require_permission("permits.submit", "permits.manage")),
+):
+    if body.related_permit_id == permit_id:
+        raise HTTPException(status_code=400, detail="Cannot link a permit to itself")
+    is_mgr = has_permission(user, "permits.manage")
+    with pool.connection() as conn:
+        cur = _get_permit_or_404(conn, permit_id, include_internal=is_mgr)
+        _check_permit_access(cur, user)
+        other = conn.execute(
+            "SELECT id, applicant_user_id, permit_number FROM permits WHERE id = %s",
+            (body.related_permit_id,),
+        ).fetchone()
+        if not other:
+            raise HTTPException(status_code=404, detail="Related permit not found")
+        if not is_mgr and other[1] != user["id"]:
+            raise HTTPException(status_code=403, detail="Cannot link to another applicant's permit")
+        if body.relationship == "enabled_by":
+            src_id, tgt_id, ltype = body.related_permit_id, permit_id, "enables"
+        elif body.relationship == "enables":
+            src_id, tgt_id, ltype = permit_id, body.related_permit_id, "enables"
+        else:
+            src_id, tgt_id, ltype = permit_id, body.related_permit_id, "related"
+        conn.execute(
+            "INSERT INTO permit_links (source_permit_id, target_permit_id, link_type, notes) "
+            "VALUES (%s, %s, %s, %s) ON CONFLICT (source_permit_id, target_permit_id, link_type) DO NOTHING",
+            (src_id, tgt_id, ltype, body.notes.strip()),
+        )
+        conn.execute(
+            "INSERT INTO permit_activity_log (permit_id, action, actor_username, note) "
+            "VALUES (%s, 'Linked Permit', %s, %s)",
+            (permit_id, user["username"], f"{body.relationship} -> {other[2]}"),
+        )
+        return _get_permit_or_404(conn, permit_id, include_internal=is_mgr)
+
+
+@router.delete("/{permit_id}/links/{link_id}")
+def delete_permit_link(
+    permit_id: int,
+    link_id: int,
+    user: dict = Depends(require_permission("permits.submit", "permits.manage")),
+):
+    is_mgr = has_permission(user, "permits.manage")
+    with pool.connection() as conn:
+        cur = _get_permit_or_404(conn, permit_id, include_internal=is_mgr)
+        _check_permit_access(cur, user)
+        row = conn.execute(
+            "DELETE FROM permit_links WHERE id = %s AND (source_permit_id = %s OR target_permit_id = %s) RETURNING id",
+            (link_id, permit_id, permit_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Permit link not found")
+        return _get_permit_or_404(conn, permit_id, include_internal=is_mgr)
+
+
 @router.post("/admin/types", status_code=201)
 def create_permit_type(body: PermitTypeIn, _: dict = Depends(require_permission("permits.manage"))):
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Permit type name is required")
     req_fields = _clean_required_fields(body.required_fields) or []
+    c_fields = _clean_custom_fields(body.custom_fields) or []
     with pool.connection() as conn:
         row = conn.execute(
-            "INSERT INTO permit_types (name, description, sort_order, is_active, kind, expiration_rule, required_fields) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb) "
-            "RETURNING id, name, description, sort_order, is_active, kind, expiration_rule, required_fields",
-            (name, body.description.strip(), body.sort_order, body.is_active, body.kind, body.expiration_rule, json.dumps(req_fields)),
+            "INSERT INTO permit_types (name, description, sort_order, is_active, kind, expiration_rule, required_fields, custom_fields) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb) "
+            "RETURNING id, name, description, sort_order, is_active, kind, expiration_rule, required_fields, custom_fields",
+            (name, body.description.strip(), body.sort_order, body.is_active, body.kind, body.expiration_rule, json.dumps(req_fields), json.dumps(c_fields)),
         ).fetchone()
     return {
         "id": row[0],
@@ -1703,12 +2198,14 @@ def create_permit_type(body: PermitTypeIn, _: dict = Depends(require_permission(
         "kind": row[5],
         "expiration_rule": row[6],
         "required_fields": list(row[7]) if isinstance(row[7], list) else [],
+        "custom_fields": list(row[8]) if isinstance(row[8], list) else [],
     }
 
 
 @router.patch("/admin/types/{type_id}")
 def update_permit_type(type_id: int, body: PermitTypePatch, _: dict = Depends(require_permission("permits.manage"))):
     clean_req = _clean_required_fields(body.required_fields)
+    clean_custom = _clean_custom_fields(body.custom_fields)
     with pool.connection() as conn:
         row = conn.execute(
             "UPDATE permit_types SET "
@@ -1718,8 +2215,9 @@ def update_permit_type(type_id: int, body: PermitTypePatch, _: dict = Depends(re
             "is_active = COALESCE(%s, is_active), "
             "kind = COALESCE(%s, kind), "
             "expiration_rule = COALESCE(%s, expiration_rule), "
-            "required_fields = COALESCE(%s::jsonb, required_fields) "
-            "WHERE id = %s RETURNING id, name, description, sort_order, is_active, kind, expiration_rule, required_fields",
+            "required_fields = COALESCE(%s::jsonb, required_fields), "
+            "custom_fields = COALESCE(%s::jsonb, custom_fields) "
+            "WHERE id = %s RETURNING id, name, description, sort_order, is_active, kind, expiration_rule, required_fields, custom_fields",
             (
                 body.name.strip() if body.name is not None else None,
                 body.description.strip() if body.description is not None else None,
@@ -1728,6 +2226,7 @@ def update_permit_type(type_id: int, body: PermitTypePatch, _: dict = Depends(re
                 body.kind,
                 body.expiration_rule,
                 json.dumps(clean_req) if clean_req is not None else None,
+                json.dumps(clean_custom) if clean_custom is not None else None,
                 type_id,
             ),
         ).fetchone()
@@ -1742,6 +2241,7 @@ def update_permit_type(type_id: int, body: PermitTypePatch, _: dict = Depends(re
         "kind": row[5],
         "expiration_rule": row[6],
         "required_fields": list(row[7]) if isinstance(row[7], list) else [],
+        "custom_fields": list(row[8]) if isinstance(row[8], list) else [],
     }
 
 
