@@ -64,19 +64,29 @@ const TAB_DEFS = [
   },
 ];
 
-function AuthModal({ open, initialRegister, nextUrl, reason, onClose }) {
+function AuthModal({ open, initialRegister, initialResetToken, nextUrl, reason, onClose }) {
   const dlgRef = useRef(null);
-  const [registerMode, setRegisterMode] = useState(Boolean(initialRegister));
+  const [mode, setMode] = useState(initialResetToken ? 'reset' : (initialRegister ? 'register' : 'login'));
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [identifier, setIdentifier] = useState('');
+  const [resetToken, setResetToken] = useState(initialResetToken || '');
+  const [info, setInfo] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setRegisterMode(Boolean(initialRegister));
+    if (initialResetToken) {
+      setMode('reset');
+      setResetToken(initialResetToken);
+    } else {
+      setMode(initialRegister ? 'register' : 'login');
+    }
     setError('');
-  }, [initialRegister, open]);
+    setInfo('');
+  }, [initialRegister, initialResetToken, open]);
 
   useEffect(() => {
     const dlg = dlgRef.current;
@@ -91,8 +101,54 @@ function AuthModal({ open, initialRegister, nextUrl, reason, onClose }) {
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
+    setInfo('');
     setBusy(true);
     try {
+      if (mode === 'forgot') {
+        const r = await fetch('/api/password-reset/request', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identifier: identifier.trim() }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          setError(data.detail || 'Unable to request password reset.');
+        } else {
+          setInfo(data.message || 'If an active account matches, a reset link has been sent.');
+        }
+        return;
+      }
+
+      if (mode === 'reset') {
+        if (password !== confirmPassword) {
+          setError('Passwords do not match.');
+          return;
+        }
+        const r = await fetch('/api/password-reset/confirm', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: resetToken, new_password: password }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          setError(data.detail || 'Invalid or expired reset link.');
+          return;
+        }
+        if (location.search.includes('reset=')) {
+          history.replaceState(null, '', location.pathname + (location.hash || ''));
+        }
+        setUsername(data.username || '');
+        setPassword('');
+        setConfirmPassword('');
+        setResetToken('');
+        setMode('login');
+        setInfo('Password updated. You can now sign in with your new password.');
+        return;
+      }
+
+      const registerMode = mode === 'register';
       const endpoint = registerMode ? '/api/register' : '/api/login';
       const r = await fetch(endpoint, {
         method: 'POST',
@@ -121,67 +177,156 @@ function AuthModal({ open, initialRegister, nextUrl, reason, onClose }) {
     }
   }
 
+  const heading =
+    mode === 'register'
+      ? 'Create Applicant Account'
+      : mode === 'forgot'
+        ? 'Reset Your Password'
+        : mode === 'reset'
+          ? 'Choose a New Password'
+          : 'Sign In to CivicDesk';
+
   return (
     <dialog ref={dlgRef} onCancel={(e) => { e.preventDefault(); onClose(); }} style={{ maxWidth: 400, width: '92%' }}>
-      <h2 style={{ marginTop: 0 }}>{registerMode ? 'Create Applicant Account' : 'Sign In to CivicDesk'}</h2>
-      {reason && (
+      <h2 style={{ marginTop: 0 }}>{heading}</h2>
+      {reason && mode === 'login' && (
         <p className="muted" style={{ marginTop: 0, fontSize: '.9rem' }}>{reason}</p>
       )}
       <form onSubmit={handleSubmit}>
-        <div className="field">
-          <label htmlFor="auth-username">Username</label>
-          <input
-            id="auth-username"
-            required
-            autoComplete="username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-          />
-        </div>
-        {registerMode && (
+        {mode === 'forgot' ? (
           <div className="field">
-            <label htmlFor="auth-email">Email (optional)</label>
+            <label htmlFor="auth-ident">Username or Email Address</label>
             <input
-              id="auth-email"
-              type="email"
-              autoComplete="email"
+              id="auth-ident"
+              required
+              autoComplete="username"
               placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
             />
           </div>
+        ) : mode === 'reset' ? (
+          <>
+            <div className="field">
+              <label htmlFor="auth-new-pw">New Password (at least 8 characters)</label>
+              <input
+                id="auth-new-pw"
+                type="password"
+                required
+                minLength={8}
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="auth-confirm-pw">Confirm New Password</label>
+              <input
+                id="auth-confirm-pw"
+                type="password"
+                required
+                minLength={8}
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="field">
+              <label htmlFor="auth-username">Username</label>
+              <input
+                id="auth-username"
+                required
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
+            </div>
+            {mode === 'register' && (
+              <div className="field">
+                <label htmlFor="auth-email">Email (recommended for password reset)</label>
+                <input
+                  id="auth-email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
+            )}
+            <div className="field">
+              <label htmlFor="auth-password">Password</label>
+              <input
+                id="auth-password"
+                type="password"
+                required
+                minLength={mode === 'register' ? 8 : 1}
+                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+          </>
         )}
-        <div className="field">
-          <label htmlFor="auth-password">Password</label>
-          <input
-            id="auth-password"
-            type="password"
-            required
-            minLength={registerMode ? 8 : 1}
-            autoComplete={registerMode ? 'new-password' : 'current-password'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </div>
         {error && <div className="error-msg" role="alert">{error}</div>}
+        {info && <div className="ok-msg" role="status">{info}</div>}
         <div className="dialog-actions" style={{ marginTop: '.75rem' }}>
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
           <button type="submit" className="btn primary" disabled={busy}>
-            {busy ? 'Please wait…' : (registerMode ? 'Create Account' : 'Sign In')}
+            {busy
+              ? 'Please wait…'
+              : mode === 'register'
+                ? 'Create Account'
+                : mode === 'forgot'
+                  ? 'Send Reset Link'
+                  : mode === 'reset'
+                    ? 'Save New Password'
+                    : 'Sign In'}
           </button>
         </div>
       </form>
-      <div style={{ marginTop: '.75rem', textAlign: 'center', fontSize: '.88rem' }}>
-        <a
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            setRegisterMode((v) => !v);
-            setError('');
-          }}
-        >
-          {registerMode ? 'Already have an account? Sign in' : 'Need a citizen/contractor account? Register'}
-        </a>
+      <div style={{ marginTop: '.75rem', textAlign: 'center', fontSize: '.88rem', display: 'flex', flexDirection: 'column', gap: '.35rem' }}>
+        {mode === 'login' && (
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              setMode('forgot');
+              setError('');
+              setInfo('');
+            }}
+          >
+            Forgot password?
+          </a>
+        )}
+        {(mode === 'forgot' || mode === 'reset') ? (
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              setMode('login');
+              setError('');
+              setInfo('');
+            }}
+          >
+            Back to Sign In
+          </a>
+        ) : (
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              setMode((v) => (v === 'register' ? 'login' : 'register'));
+              setError('');
+              setInfo('');
+            }}
+          >
+            {mode === 'register' ? 'Already have an account? Sign in' : 'Need a citizen/contractor account? Register'}
+          </a>
+        )}
       </div>
     </dialog>
   );
@@ -1371,8 +1516,9 @@ function PublicHomePage() {
   const [activeTab, setActiveTab] = useState('overview');
 
   const [authModal, setAuthModal] = useState(() => ({
-    open: params.has('next') || params.get('register') === '1',
+    open: params.has('next') || params.get('register') === '1' || params.has('reset'),
     register: params.get('register') === '1',
+    resetToken: params.get('reset') || '',
     nextUrl: params.get('next') || '/app',
     reason: params.has('next') ? 'Please sign in to continue to your requested workspace page.' : '',
   }));
@@ -1592,9 +1738,10 @@ function PublicHomePage() {
       <AuthModal
         open={authModal.open}
         initialRegister={authModal.register}
+        initialResetToken={authModal.resetToken}
         nextUrl={authModal.nextUrl}
         reason={authModal.reason}
-        onClose={() => setAuthModal((prev) => ({ ...prev, open: false }))}
+        onClose={() => setAuthModal((prev) => ({ ...prev, open: false, resetToken: '' }))}
       />
       <PublicFooter branding={branding} />
     </div>

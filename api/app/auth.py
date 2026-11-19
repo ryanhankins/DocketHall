@@ -82,6 +82,14 @@ CREATE TABLE IF NOT EXISTS sessions (
     expires_at  TIMESTAMPTZ NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id);
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    token_hash  TEXT PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at  TIMESTAMPTZ NOT NULL,
+    used_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS password_reset_tokens_uid_idx ON password_reset_tokens(user_id);
 """
 
 
@@ -323,3 +331,99 @@ def change_password(body: ChangePasswordIn, request: Request):
             (user["id"], _token_hash(token)),
         )
     return {"ok": True}
+
+
+class PasswordResetRequestIn(BaseModel):
+    identifier: str
+
+
+class PasswordResetConfirmIn(BaseModel):
+    token: str
+    new_password: str
+
+
+PASSWORD_RESET_TTL = timedelta(minutes=30)
+
+
+@router.post("/password-reset/request")
+def request_password_reset(body: PasswordResetRequestIn, request: Request):
+    """Email a one-time password reset link to an active user with a configured email."""
+    ident = (body.identifier or "").strip()
+    generic = {
+        "ok": True,
+        "message": "If an active account with an email address matches, a password reset link has been sent.",
+    }
+    if not ident:
+        return generic
+
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT id, username, email FROM users "
+            "WHERE is_active = TRUE AND email <> '' "
+            "  AND (lower(username) = lower(%s) OR lower(email) = lower(%s)) "
+            "ORDER BY id ASC LIMIT 5",
+            (ident, ident),
+        ).fetchall()
+        if not rows:
+            return generic
+
+        from .integrations import get_app_base_url, send_direct_email
+
+        base_url = get_app_base_url(request)
+        for uid, uname, uemail in rows:
+            raw_token = secrets.token_urlsafe(32)
+            conn.execute(
+                "DELETE FROM password_reset_tokens WHERE user_id = %s AND used_at IS NULL",
+                (uid,),
+            )
+            conn.execute(
+                "INSERT INTO password_reset_tokens (token_hash, user_id, expires_at) "
+                "VALUES (%s, %s, now() + %s)",
+                (_token_hash(raw_token), uid, PASSWORD_RESET_TTL),
+            )
+            reset_url = f"{base_url}/?reset={raw_token}"
+            send_direct_email(
+                [uemail],
+                "[CivicDesk] Password Reset Request",
+                (
+                    f"Hello {uname},\n\n"
+                    "A password reset was requested for your CivicDesk account.\n"
+                    f"Open this link within 30 minutes to set a new password:\n{reset_url}\n\n"
+                    "If you did not request this, you can safely ignore this email."
+                ),
+            )
+    return generic
+
+
+@router.post("/password-reset/confirm")
+def confirm_password_reset(body: PasswordResetConfirmIn):
+    """Validate a reset token, update the user's password, and revoke active sessions."""
+    raw_token = (body.token or "").strip()
+    if not raw_token:
+        raise HTTPException(status_code=400, detail="Reset token is required")
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+
+    thash = _token_hash(raw_token)
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT t.user_id, u.username "
+            "FROM password_reset_tokens t "
+            "JOIN users u ON u.id = t.user_id "
+            "WHERE t.token_hash = %s AND t.used_at IS NULL AND t.expires_at > now() AND u.is_active = TRUE",
+            (thash,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=400, detail="Invalid or expired password reset link")
+        uid, uname = row
+        conn.execute(
+            "UPDATE users SET password_hash = %s, is_default_password = %s WHERE id = %s",
+            (hash_password(body.new_password), body.new_password == "admin", uid),
+        )
+        conn.execute("UPDATE password_reset_tokens SET used_at = now() WHERE token_hash = %s", (thash,))
+        conn.execute("DELETE FROM sessions WHERE user_id = %s", (uid,))
+
+    from .audit import record_audit
+
+    record_audit(uname, "user.password_reset", "user", str(uid), "Completed self-service password reset")
+    return {"ok": True, "username": uname}

@@ -450,7 +450,7 @@ async def import_archive(
             if not has_users:
                 existing_user_ids = {r[0] for r in conn.execute("SELECT id FROM users").fetchall()}
             else:
-                conn.execute("TRUNCATE TABLE sessions CASCADE")
+                conn.execute("TRUNCATE TABLE sessions, password_reset_tokens CASCADE")
 
             truncate_targets = [t for t, _, _, _ in reversed(export_tables) if (t != "users" or has_users)]
             conn.execute(f"TRUNCATE TABLE {', '.join(truncate_targets)} RESTART IDENTITY CASCADE")
