@@ -24,6 +24,7 @@ const SERVICE_STYLES = {
   records: { color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
   complaints: { color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
   calendar: { color: '#0284c7', bg: '#f0f9ff', border: '#bae6fd' },
+  alerts: { color: '#4f46e5', bg: '#eef2ff', border: '#c7d2fe' },
 };
 
 function renderGlyph(id, size) {
@@ -89,6 +90,14 @@ function renderGlyph(id, size) {
           <rect x="3" y="4" width="18" height="18" rx="2" />
           <path d="M16 2v4M8 2v4M3 10h18" />
           <circle cx="12" cy="15" r="2" />
+        </svg>
+      );
+    case 'alerts':
+      // Notification bell
+      return (
+        <svg {...props}>
+          <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+          <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
         </svg>
       );
     default:

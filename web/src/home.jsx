@@ -1261,7 +1261,10 @@ function NotifyMeCard() {
     <div className="card">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
         <div style={{ flex: 1, minWidth: 260 }}>
-          <h2 style={{ margin: '0 0 .25rem', fontSize: '1.1rem' }}>Public Email Alerts</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '.65rem', marginBottom: '.35rem' }}>
+            <ServiceIcon id="alerts" size={20} badge />
+            <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Public Email Alerts</h2>
+          </div>
           <p className="muted" style={{ margin: '0 0 .75rem', fontSize: '.9rem' }}>
             Subscribe to receive automatic email alerts whenever new city agendas, code updates, or public records are published. Every email includes a one-click unsubscribe link.
           </p>
