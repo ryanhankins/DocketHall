@@ -37,15 +37,19 @@ if ! echo "$resp" | grep -q '"status":"ok"'; then
   exit 1
 fi
 
-# 2. Swarm services convergence (api, web, db, minio)
+# 2. Swarm services convergence (api, web, db, plus minio if scaled > 0)
 for svc in api web db minio; do
   replicas="$(docker service ls --filter "name=${STACK_NAME}_${svc}" --format '{{.Replicas}}' | head -n 1)"
   if [ -z "$replicas" ]; then
+    [ "$svc" = "minio" ] && continue
     echo "FAIL: service ${STACK_NAME}_${svc} not found" >&2
     exit 1
   fi
   cur="${replicas%%/*}"
   des="${replicas##*/}"
+  if [ "$svc" = "minio" ] && [ "$des" = "0" ]; then
+    continue
+  fi
   if [ "$cur" != "$des" ] || [ "$cur" = "0" ]; then
     echo "FAIL: service ${STACK_NAME}_${svc} replicas=${replicas}" >&2
     exit 1

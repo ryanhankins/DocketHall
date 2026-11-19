@@ -64,7 +64,8 @@ services:
       SMTP_PORT: "${SMTP_PORT:-587}"
       SMTP_SENDER_EMAIL: "${SMTP_SENDER_EMAIL:-}"
       SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
-      # MinIO (S3-compatible object storage)
+      # Object storage: "minio" (default) or "local" (uses LOCAL_RECORDS_DIR without MinIO)
+      STORAGE_BACKEND: "${STORAGE_BACKEND:-minio}"
       MINIO_ENDPOINT: minio:9000
       MINIO_SECURE: "false"
       MINIO_BUCKET: records
@@ -136,7 +137,7 @@ services:
       - minio_data:/data
     networks: [civicdesk]
     deploy:
-      replicas: 1
+      replicas: ${MINIO_REPLICAS:-1}
       restart_policy: { condition: any }
       placement:
         constraints: [node.role == manager]
@@ -152,7 +153,7 @@ services:
       - minio_root_password
     networks: [civicdesk]
     deploy:
-      replicas: 1
+      replicas: ${MINIO_REPLICAS:-1}
       restart_policy: { condition: on-failure, delay: 5s, max_attempts: 10 }
 
 networks:

@@ -37,6 +37,7 @@ from .audit import record_audit
 from .auth import current_user, has_permission
 from .db import _read_secret, pool
 from .integrations import send_notification_email
+from .storage import get_storage_client
 from .subscriptions import notify_topic_subscribers
 from .tenancy import tenant_object_key
 
@@ -252,20 +253,8 @@ ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_surface TEXT NOT N
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_header_bg TEXT NOT NULL DEFAULT '#ffffff';
 """
 
-_minio_client: Minio | None = None
-
-
-def _minio() -> Minio:
-    global _minio_client
-    if _minio_client is None:
-        endpoint = os.environ.get("MINIO_ENDPOINT", "minio:9000")
-        secure = os.environ.get("MINIO_SECURE", "false").lower() == "true"
-        access_key = _read_secret("MINIO_ACCESS_KEY_FILE", "MINIO_ACCESS_KEY")
-        secret_key = _read_secret("MINIO_SECRET_KEY_FILE", "MINIO_SECRET_KEY")
-        _minio_client = Minio(
-            endpoint, access_key=access_key, secret_key=secret_key, secure=secure
-        )
-    return _minio_client
+def _minio():
+    return get_storage_client()
 
 
 def _bucket() -> str:
