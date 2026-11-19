@@ -174,11 +174,13 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
   const [motion, setMotion] = useState('');
   const [fiscal, setFiscal] = useState('');
   const [description, setDescription] = useState('');
+  const [folder, setFolder] = useState('');
   const [formErr, setFormErr] = useState('');
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('open');
   const [bodyFilter, setBodyFilter] = useState('');
+  const [folderFilter, setFolderFilter] = useState('');
   const [dragOverId, setDragOverId] = useState(null);
   const showToast = useToast();
 
@@ -200,6 +202,14 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
     loadAll().catch(e => showToast(e.message, 'error'));
   }, [loadAll, showToast]);
 
+  const folderOptions = useMemo(() => {
+    const set = new Set();
+    for (const it of items) {
+      if ((it.folder || '').trim()) set.add(it.folder.trim());
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [items]);
+
   const filteredItems = useMemo(() => {
     const q = search.trim().toLowerCase();
     const today = todayIso();
@@ -209,10 +219,12 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
       if (statusFilter === 'due' && (it.todo_status === 'done' || (!it.target_date && it.recurrence !== 'every_agenda') || (it.target_date && it.target_date > today))) return false;
       if (statusFilter === 'recurring' && (!it.recurrence || it.recurrence === 'none')) return false;
       if (bodyFilter && it.target_body !== bodyFilter) return false;
-      if (q && !(it.title || '').toLowerCase().includes(q) && !(it.description || '').toLowerCase().includes(q) && !(it.assigned_to || '').toLowerCase().includes(q)) return false;
+      if (folderFilter === '__unfiled__' && (it.folder || '').trim()) return false;
+      if (folderFilter && folderFilter !== '__unfiled__' && (it.folder || '').trim() !== folderFilter) return false;
+      if (q && !(it.title || '').toLowerCase().includes(q) && !(it.description || '').toLowerCase().includes(q) && !(it.assigned_to || '').toLowerCase().includes(q) && !(it.folder || '').toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [items, search, statusFilter, bodyFilter]);
+  }, [items, search, statusFilter, bodyFilter, folderFilter]);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -232,10 +244,11 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
           assigned_to: assignedTo.trim(),
           recurrence,
           recurrence_month: recurrence === 'first_agenda_month' ? Number(recMonth) : null,
+          folder: folder.trim(),
         }),
       });
       setTitle(''); setAssignedTo(''); setTargetBody(''); setTargetDate('');
-      setRecurrence('none'); setSection(''); setPresenter(''); setMotion(''); setFiscal(''); setDescription('');
+      setRecurrence('none'); setSection(''); setPresenter(''); setMotion(''); setFiscal(''); setDescription(''); setFolder('');
       showToast('Added to Todos & Backlog', 'ok');
       await loadAll();
     } catch (err) {
@@ -259,6 +272,9 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
 
       <datalist id="backlog-sections-datalist">
         {sections.map(s => <option key={s} value={s} />)}
+      </datalist>
+      <datalist id="backlog-folders-datalist">
+        {folderOptions.map(f => <option key={f} value={f} />)}
       </datalist>
 
       <div className="card">
@@ -313,6 +329,10 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
               <label htmlFor="backlog-presenter">Presenter</label>
               <input id="backlog-presenter" placeholder="e.g. Public Works" value={presenter} onChange={(e) => setPresenter(e.target.value)} />
             </div>
+            <div className="field" style={{ flex: 1, minWidth: '150px' }}>
+              <label htmlFor="backlog-folder">Folder (optional)</label>
+              <input id="backlog-folder" list="backlog-folders-datalist" placeholder="e.g. Capital Projects" value={folder} onChange={(e) => setFolder(e.target.value)} />
+            </div>
           </div>
           <div className="row" style={{ marginBottom: '.75rem' }}>
             <div className="field" style={{ flex: 1, minWidth: '200px' }}>
@@ -354,6 +374,14 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
             <select id="backlog-filter-body" value={bodyFilter} onChange={(e) => setBodyFilter(e.target.value)}>
               <option value="">All Bodies</option>
               {bodies.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </div>
+          <div className="field" style={{ minWidth: '180px' }}>
+            <label htmlFor="backlog-filter-folder">Folder</label>
+            <select id="backlog-filter-folder" value={folderFilter} onChange={(e) => setFolderFilter(e.target.value)}>
+              <option value="">All Folders</option>
+              <option value="__unfiled__">Unfiled</option>
+              {folderOptions.map(f => <option key={f} value={f}>{f}</option>)}
             </select>
           </div>
         </div>
@@ -405,6 +433,17 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
                         </span>
                         <span className="badge draft">{recurrenceLabel(it)}</span>
                         {it.target_body && <span className="badge text">{it.target_body}</span>}
+                        <span className="badge" style={{ background: '#f1f5f9', color: '#334155', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <span>Folder:</span>
+                          <InlineEditable
+                            value={it.folder || ''}
+                            placeholder="Unfiled"
+                            onSave={async (next) => {
+                              await api(`/api/agendas/backlog/${it.id}`, { method: 'PATCH', body: JSON.stringify({ folder: next }) });
+                              await loadAll();
+                            }}
+                          />
+                        </span>
                         {it.target_date && <span className="muted" style={{ fontSize: '.84rem' }}>Due: {it.target_date}</span>}
                         {it.assigned_to && <span className="muted" style={{ fontSize: '.84rem' }}>Assigned: {it.assigned_to}</span>}
                         {it.section && <span className="muted" style={{ fontSize: '.84rem' }}>Section: {it.section}</span>}

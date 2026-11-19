@@ -592,8 +592,13 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
                               type="button"
                               className="btn sm danger"
                               onClick={async () => {
-                                if (!confirm(`Remove agenda "${a.title}" and all its items/documents?`)) return;
-                                await api(`/api/agendas/${a.id}`, { method: 'DELETE' });
+                                if (!confirm(`Remove agenda "${a.title}"? Unique items will be moved to the Backlog; duplicate/template items will be deleted.`)) return;
+                                const res = await api(`/api/agendas/${a.id}`, { method: 'DELETE' });
+                                if (res?.moved_to_backlog > 0) {
+                                  showToast(`Removed agenda; moved ${res.moved_to_backlog} unique item(s) to Backlog folder "${res.folder}"`, 'ok');
+                                } else {
+                                  showToast('Agenda removed', 'ok');
+                                }
                                 await loadAll();
                               }}
                             >

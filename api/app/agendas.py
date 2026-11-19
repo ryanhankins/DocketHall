@@ -115,6 +115,7 @@ ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS recurrence_month INTEGER;
 ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS source_agenda_id BIGINT REFERENCES agendas(id) ON DELETE SET NULL;
 ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS source_item_id BIGINT REFERENCES agenda_items(id) ON DELETE SET NULL;
 ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS folder TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS backlog_agenda_links (
     backlog_item_id BIGINT NOT NULL REFERENCES agenda_items(id) ON DELETE CASCADE,
     agenda_id       BIGINT NOT NULL REFERENCES agendas(id) ON DELETE CASCADE,
@@ -626,6 +627,7 @@ class BacklogItemIn(ItemIn):
     recurrence_month: int | None = None
     source_agenda_id: int | None = None
     source_item_id: int | None = None
+    folder: str = ""
 
 
 class BacklogItemPatch(BaseModel):
@@ -644,6 +646,7 @@ class BacklogItemPatch(BaseModel):
     recurrence: RecurrenceType | None = None
     recurrence_month: int | None = None
     advance_recurring: bool = True
+    folder: str | None = None
 
 
 class MoveItemIn(BaseModel):
@@ -1197,7 +1200,7 @@ def _load_backlog(conn) -> list[dict]:
         "       i.recommended_motion, i.fiscal_impact, i.revision_status, "
         "       i.target_body, i.target_date, i.todo_status, i.assigned_to, "
         "       i.recurrence, i.recurrence_month, i.source_agenda_id, a.title, "
-        "       i.source_item_id, i.completed_at, i.created_at "
+        "       i.source_item_id, i.completed_at, i.created_at, i.folder "
         "FROM agenda_items i "
         "LEFT JOIN agendas a ON a.id = i.source_agenda_id "
         "WHERE i.agenda_id IS NULL "
@@ -1247,6 +1250,7 @@ def _load_backlog(conn) -> list[dict]:
             "source_item_id": it[17],
             "completed_at": it[18].isoformat() if it[18] else None,
             "created_at": it[19].isoformat() if it[19] else None,
+            "folder": it[20] or "",
             "documents": docs_by_item[it[0]],
         }
         for it in item_rows
@@ -1336,8 +1340,8 @@ def create_backlog_item(body: BacklogItemIn, _: dict = Depends(get_staff_user)):
             "INSERT INTO agenda_items "
             "(agenda_id, position, title, description, section, presenter, recommended_motion, "
             " fiscal_impact, revision_status, target_body, target_date, todo_status, assigned_to, "
-            " recurrence, recurrence_month, source_agenda_id, source_item_id) "
-            "VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            " recurrence, recurrence_month, source_agenda_id, source_item_id, folder) "
+            "VALUES (NULL, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 next_pos,
                 title,
@@ -1355,6 +1359,7 @@ def create_backlog_item(body: BacklogItemIn, _: dict = Depends(get_staff_user)):
                 rec_month,
                 body.source_agenda_id,
                 body.source_item_id,
+                body.folder.strip(),
             ),
         )
         return _load_backlog(conn)
@@ -1414,6 +1419,7 @@ def update_backlog_item(item_id: int, body: BacklogItemPatch, _: dict = Depends(
             "recurrence = %s, "
             "recurrence_month = %s, "
             "todo_status = %s, "
+            "folder = COALESCE(%s, folder), "
             "completed_at = CASE WHEN %s THEN now() WHEN %s THEN NULL ELSE completed_at END "
             "WHERE id = %s AND agenda_id IS NULL",
             (
@@ -1430,6 +1436,7 @@ def update_backlog_item(item_id: int, body: BacklogItemPatch, _: dict = Depends(
                 next_rec,
                 next_month,
                 next_status,
+                body.folder.strip() if body.folder is not None else None,
                 completed_at_set,
                 completed_at_clear,
                 item_id,
@@ -2432,22 +2439,92 @@ def save_agenda_as_template(
 @router.delete("/{agenda_id}")
 def delete_agenda(agenda_id: int, _: dict = Depends(get_staff_user)):
     with pool.connection() as conn:
-        keys = [
-            r[0]
-            for r in conn.execute(
-                "SELECT d.object_key FROM agenda_documents d "
-                "JOIN agenda_items i ON i.id = d.agenda_item_id "
-                "WHERE i.agenda_id = %s",
-                (agenda_id,),
-            ).fetchall()
-        ]
-        row = conn.execute(
-            "DELETE FROM agendas WHERE id = %s RETURNING id", (agenda_id,)
+        ag = conn.execute(
+            "SELECT title, body, meeting_date FROM agendas WHERE id = %s",
+            (agenda_id,),
         ).fetchone()
-        if not row:
+        if not ag:
             raise HTTPException(status_code=404, detail="Agenda not found")
+        ag_title, ag_body, ag_date = ag
+        recover_folder = f"From: {ag_title}" + (f" ({ag_date.isoformat()})" if ag_date else "")
+
+        items = conn.execute(
+            "SELECT id, title, description, source_item_id "
+            "FROM agenda_items WHERE agenda_id = %s ORDER BY position, id",
+            (agenda_id,),
+        ).fetchall()
+
+        unique_ids: list[int] = []
+        dup_ids: list[int] = []
+        for iid, ititle, idesc, src_iid in items:
+            has_link = False
+            if src_iid is not None:
+                has_link = bool(
+                    conn.execute(
+                        "SELECT 1 FROM agenda_items "
+                        "WHERE id = %s AND (agenda_id IS NULL OR agenda_id <> %s)",
+                        (src_iid, agenda_id),
+                    ).fetchone()
+                )
+            if not has_link:
+                has_link = bool(
+                    conn.execute(
+                        "SELECT 1 FROM agenda_items "
+                        "WHERE source_item_id = %s AND (agenda_id IS NULL OR agenda_id <> %s)",
+                        (iid, agenda_id),
+                    ).fetchone()
+                )
+            if not has_link:
+                has_link = bool(
+                    conn.execute(
+                        "SELECT 1 FROM agenda_items "
+                        "WHERE (agenda_id IS NULL OR agenda_id <> %s) "
+                        "  AND lower(trim(title)) = lower(trim(%s)) "
+                        "  AND trim(description) = trim(%s)",
+                        (agenda_id, ititle or "", idesc or ""),
+                    ).fetchone()
+                )
+            if has_link:
+                dup_ids.append(iid)
+            else:
+                unique_ids.append(iid)
+
+        keys: list[str] = []
+        if dup_ids:
+            keys = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT object_key FROM agenda_documents WHERE agenda_item_id = ANY(%s)",
+                    (dup_ids,),
+                ).fetchall()
+            ]
+
+        if unique_ids:
+            next_pos = conn.execute(
+                "SELECT COALESCE(MAX(position), 0) FROM agenda_items WHERE agenda_id IS NULL"
+            ).fetchone()[0]
+            for offset, iid in enumerate(unique_ids, start=1):
+                conn.execute(
+                    "UPDATE agenda_items SET "
+                    "agenda_id = NULL, "
+                    "position = %s, "
+                    "folder = %s, "
+                    "target_body = CASE WHEN target_body = '' THEN %s ELSE target_body END, "
+                    "todo_status = CASE WHEN todo_status = '' THEN 'open' ELSE todo_status END, "
+                    "source_agenda_id = NULL "
+                    "WHERE id = %s",
+                    (next_pos + offset, recover_folder, ag_body or "", iid),
+                )
+
+        conn.execute("DELETE FROM agendas WHERE id = %s", (agenda_id,))
+
     _remove_minio_objects(keys)
-    return {"deleted": True, "id": agenda_id}
+    return {
+        "deleted": True,
+        "id": agenda_id,
+        "moved_to_backlog": len(unique_ids),
+        "folder": recover_folder if unique_ids else "",
+    }
 
 
 @router.post("/{agenda_id}/items", status_code=201)

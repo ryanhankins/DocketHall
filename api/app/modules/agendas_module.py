@@ -35,7 +35,7 @@ AGENDAS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
             "id", "agenda_id", "position", "title", "description", "section",
             "presenter", "recommended_motion", "fiscal_impact", "revision_status",
             "target_body", "target_date", "created_at", "todo_status", "assigned_to",
-            "recurrence", "recurrence_month", "source_agenda_id", "source_item_id",
+            "recurrence", "recurrence_month", "source_agenda_id", "source_item_id", "folder",
             "completed_at", "minutes_action", "minutes_motion_by", "minutes_second_by",
             "minutes_vote", "minutes_notes",
         ],

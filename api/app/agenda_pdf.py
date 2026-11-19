@@ -431,8 +431,9 @@ def _render_toc(
                 last_section = sec
             style = item_p if entry["kind"] == "item" else doc_p
             badge = _rev_badge_markup(entry.get("revision_status")) if entry["kind"] == "item" else ""
+            pg_label = f"p. {entry['page']}" if entry.get("page") else "—"
             row_tbl = Table(
-                [[Paragraph(_esc(entry["label"]) + badge, style), Paragraph(f"p. {entry['page']}", pg_p)]],
+                [[Paragraph(_esc(entry["label"]) + badge, style), Paragraph(pg_label, pg_p)]],
                 colWidths=[6.15 * inch, 0.85 * inch],
             )
             row_tbl.setStyle(TableStyle([
@@ -443,7 +444,7 @@ def _render_toc(
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
                 ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
             ]))
-            if link_records is not None and entry.get("page", 0) >= 1:
+            if link_records is not None and (entry.get("page") or 0) >= 1:
                 flow.append(_TocLinkFlowable(row_tbl, entry["page"] - 1, link_records))
             else:
                 flow.append(row_tbl)
@@ -589,7 +590,8 @@ def build_agenda_packet_pdf(
     rel_entries: list[dict] = []  # {kind, label, rel_page, is_doc, section, revision_status}
 
     for item in agenda.get("items", []):
-        rel_item_page = len(body_writer.pages)
+        docs = item.get("documents", [])
+        rel_item_page = len(body_writer.pages) if (include_item_cover_sheets or docs) else None
         rel_entries.append({
             "kind": "item",
             "label": f"{item['position']}. {item['title']}",
@@ -599,17 +601,9 @@ def build_agenda_packet_pdf(
             "revision_status": item.get("revision_status", ""),
         })
 
-        docs = item.get("documents", [])
         if include_item_cover_sheets:
             cover_reader = PdfReader(io.BytesIO(_render_item_cover(agenda, item, prefs)))
             for page in cover_reader.pages:
-                body_writer.add_page(page)
-        elif not docs:
-            note_reader = PdfReader(io.BytesIO(_render_note_pdf(
-                f"Agenda Item {item['position']}: {item['title']}",
-                item.get("description") or "No supporting documents attached.",
-            )))
-            for page in note_reader.pages:
                 body_writer.add_page(page)
 
         for doc in docs:
@@ -678,7 +672,7 @@ def build_agenda_packet_pdf(
         {
             "kind": e["kind"],
             "label": e["label"],
-            "page": toc_page_count + e["rel_page"] + 1,
+            "page": (toc_page_count + e["rel_page"] + 1) if e["rel_page"] is not None else None,
             "section": e.get("section", ""),
             "revision_status": e.get("revision_status", ""),
         }
@@ -693,7 +687,7 @@ def build_agenda_packet_pdf(
             {
                 "kind": e["kind"],
                 "label": e["label"],
-                "page": actual_toc_pages + e["rel_page"] + 1,
+                "page": (actual_toc_pages + e["rel_page"] + 1) if e["rel_page"] is not None else None,
                 "section": e.get("section", ""),
                 "revision_status": e.get("revision_status", ""),
             }
@@ -723,7 +717,7 @@ def build_agenda_packet_pdf(
 
     parent_bookmark = None
     for e in rel_entries:
-        page_idx = len(toc_reader.pages) + e["rel_page"]
+        page_idx = (len(toc_reader.pages) + e["rel_page"]) if e["rel_page"] is not None else 0
         if not e["is_doc"]:
             parent_bookmark = final_writer.add_outline_item(e["label"], page_idx)
         else:
