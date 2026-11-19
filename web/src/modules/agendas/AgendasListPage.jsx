@@ -18,6 +18,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, formatDate, formatTime12h, toTimeInputValue } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
+import AgendaQuickGuideModal from './AgendaQuickGuideModal.jsx';
 
 function SubmissionRow({ sub, agendas, onReloadAll, onReloadSubs }) {
   const showToast = useToast();
@@ -203,6 +204,10 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [meetingDate, setMeetingDate] = useState('');
+  const [quickStartDismissed, setQuickStartDismissed] = useState(() => {
+    try { return localStorage.getItem('civicdesk.agendasQuickStartDismissed') === '1'; } catch { return false; }
+  });
+  const [guideOpen, setGuideOpen] = useState(false);
   const [meetingTime, setMeetingTime] = useState('');
   const [templateId, setTemplateId] = useState('');
   const [formErr, setFormErr] = useState('');
@@ -334,9 +339,67 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
     }
   };
 
+  const hasAnyAgenda = agendas.length > 0;
+  const hasFinalizedAgenda = agendas.some(a => {
+    const cfg = categories.find(c => c.name === a.status);
+    return Boolean(cfg?.warn_on_leave || (a.status || '').toLowerCase().startsWith('finalized'));
+  });
+  const hasTemplate = templates.length > 0;
+
   return (
     <section id="section-agendas">
-      <h1>Manage Agendas</h1>
+      <div className="between" style={{ marginBottom: '.75rem' }}>
+        <h1 style={{ margin: 0 }}>Manage Agendas</h1>
+        <button type="button" className="btn sm" onClick={() => setGuideOpen(true)}>
+          Clerk &amp; Council Quick Guide
+        </button>
+      </div>
+
+      {!quickStartDismissed && (
+        <div className="card" style={{ background: '#f8fafc', borderColor: '#bfdbfe' }}>
+          <div className="between" style={{ marginBottom: '.5rem' }}>
+            <div>
+              <strong style={{ fontSize: '1rem', color: '#1e3a8a' }}>Getting Started with Agenda Management</strong>
+              <div className="muted" style={{ fontSize: '.85rem' }}>
+                Four quick steps to set up your boards, build packets, and publish to the public.
+              </div>
+            </div>
+            <div className="actions">
+              <button type="button" className="btn sm" onClick={() => setGuideOpen(true)}>Open Quick Guide</button>
+              <button
+                type="button"
+                className="btn sm"
+                onClick={() => {
+                  setQuickStartDismissed(true);
+                  try { localStorage.setItem('civicdesk.agendasQuickStartDismissed', '1'); } catch { /* ignore */ }
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+          <ol style={{ margin: '.25rem 0 0', paddingLeft: '1.25rem', display: 'grid', gap: '.35rem', fontSize: '.9rem' }}>
+            <li>
+              <strong>Configure Boards, Sections &amp; Notice Window:</strong> Set your governing bodies, default time, and 72-hour posting notice under{' '}
+              <button type="button" className="link-btn" onClick={() => onNavigate('#preferences-agenda')}>Agenda Preferences</button>.
+            </li>
+            <li>
+              {hasAnyAgenda || hasTemplate ? '✓ ' : ''}
+              <strong>Create an Agenda (or Starter Template):</strong> Use the <em>New Agenda</em> form below, then click <strong>Save as Template</strong> so future meetings start pre-populated.
+            </li>
+            <li>
+              <strong>Add Items &amp; Supporting PDFs:</strong> Open an agenda to add items, attach backup files, or pull scheduled recurring items from{' '}
+              <button type="button" className="link-btn" onClick={() => onNavigate('#backlog')}>Todos &amp; Backlog</button>.
+            </li>
+            <li>
+              {hasFinalizedAgenda ? '✓ ' : ''}
+              <strong>Finalize to Publish &amp; Record Minutes:</strong> Move the agenda to <strong>Finalized Agendas</strong> to publish packets and alert subscribers, then enter motions and votes in the <strong>Minutes</strong> tab after the meeting.
+            </li>
+          </ol>
+        </div>
+      )}
+
+      <AgendaQuickGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} onNavigate={onNavigate} />
 
       {dueBacklogCount > 0 && (
         <div className="banner show" style={{ background: '#fffbeb', borderColor: '#fcd34d', color: '#92400e' }}>

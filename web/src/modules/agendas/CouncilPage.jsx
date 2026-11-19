@@ -20,6 +20,7 @@ import { api, formatSize } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
 
 export default function CouncilPage() {
+  const [guideOpen, setGuideOpen] = useState(false);
   const [targets, setTargets] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [title, setTitle] = useState('');
@@ -119,7 +120,13 @@ export default function CouncilPage() {
 
   return (
     <section id="section-council">
-      <h1>Propose Agenda Item</h1>
+      <div className="between" style={{ marginBottom: '.75rem' }}>
+        <h1 style={{ margin: 0 }}>Propose Agenda Item</h1>
+        <button type="button" className="btn sm" onClick={() => setGuideOpen(true)}>
+          Clerk &amp; Council Quick Guide
+        </button>
+      </div>
+      <AgendaQuickGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} />
 
       <div className="card">
         <h2>Submit an Agenda Item</h2>
