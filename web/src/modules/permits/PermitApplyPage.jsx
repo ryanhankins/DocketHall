@@ -64,6 +64,12 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
       .catch(e => showToast(e.message, 'error'));
   }, [initialTypeId, initialUseId, showToast]);
 
+  const selectedType = useMemo(
+    () => (catalog.types || []).find(t => String(t.id) === String(typeId)) || null,
+    [catalog.types, typeId],
+  );
+  const isAnnualLicense = selectedType?.kind === 'annual_license';
+
   const availableUses = useMemo(
     () => (catalog.uses || []).filter(u => String(u.permit_type_id) === String(typeId)),
     [catalog.uses, typeId],
@@ -178,53 +184,55 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
             </div>
           )}
 
-          <div className="row" style={{ marginBottom: '.75rem', alignItems: 'flex-end' }}>
-            <div className="field" style={{ flex: 2, minWidth: '220px' }}>
-              <label htmlFor="perm-parcel-lookup">Parcel Lookup (optional — search saved parcels)</label>
-              <input
-                id="perm-parcel-lookup"
-                type="search"
-                placeholder="Search by Parcel ID, Address, or Owner..."
-                value={parcelSearch}
-                onChange={async (e) => {
-                  const q = e.target.value;
-                  setParcelSearch(q);
-                  if (q.trim().length >= 2) {
-                    const list = await api(`/api/permits/parcels?q=${encodeURIComponent(q)}`).catch(() => []);
-                    setParcelResults(Array.isArray(list) ? list : []);
-                  } else {
-                    setParcelResults([]);
-                  }
-                }}
-              />
-            </div>
-            {parcelResults.length > 0 && (
-              <div className="field" style={{ flex: 2, minWidth: '240px' }}>
-                <label>Select Matching Parcel</label>
-                <select
-                  defaultValue=""
-                  onChange={(e) => {
-                    const pr = parcelResults.find(x => String(x.id) === e.target.value);
-                    if (pr) {
-                      if (pr.address) setPropertyAddress(pr.address);
-                      if (pr.building_name) setBuildingName(pr.building_name);
-                      if (pr.suite_name) setSuiteName(pr.suite_name);
-                      if (pr.parcel_id) setParcelId(pr.parcel_id);
-                      if (pr.owner_name) setOwnerName(pr.owner_name);
+          {!isAnnualLicense && (
+            <div className="row" style={{ marginBottom: '.75rem', alignItems: 'flex-end' }}>
+              <div className="field" style={{ flex: 2, minWidth: '220px' }}>
+                <label htmlFor="perm-parcel-lookup">Parcel Lookup (optional — search saved parcels)</label>
+                <input
+                  id="perm-parcel-lookup"
+                  type="search"
+                  placeholder="Search by Parcel ID, Address, or Owner..."
+                  value={parcelSearch}
+                  onChange={async (e) => {
+                    const q = e.target.value;
+                    setParcelSearch(q);
+                    if (q.trim().length >= 2) {
+                      const list = await api(`/api/permits/parcels?q=${encodeURIComponent(q)}`).catch(() => []);
+                      setParcelResults(Array.isArray(list) ? list : []);
+                    } else {
                       setParcelResults([]);
                     }
                   }}
-                >
-                  <option value="">Choose parcel to auto-fill…</option>
-                  {parcelResults.map(pr => (
-                    <option key={pr.id} value={pr.id}>
-                      {pr.parcel_id} — {pr.address || pr.owner_name}
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
-            )}
-          </div>
+              {parcelResults.length > 0 && (
+                <div className="field" style={{ flex: 2, minWidth: '240px' }}>
+                  <label>Select Matching Parcel</label>
+                  <select
+                    defaultValue=""
+                    onChange={(e) => {
+                      const pr = parcelResults.find(x => String(x.id) === e.target.value);
+                      if (pr) {
+                        if (pr.address) setPropertyAddress(pr.address);
+                        if (pr.building_name) setBuildingName(pr.building_name);
+                        if (pr.suite_name) setSuiteName(pr.suite_name);
+                        if (pr.parcel_id) setParcelId(pr.parcel_id);
+                        if (pr.owner_name) setOwnerName(pr.owner_name);
+                        setParcelResults([]);
+                      }
+                    }}
+                  >
+                    <option value="">Choose parcel to auto-fill…</option>
+                    {parcelResults.map(pr => (
+                      <option key={pr.id} value={pr.id}>
+                        {pr.parcel_id} — {pr.address || pr.owner_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="row" style={{ marginBottom: '.75rem' }}>
             <div className="field" style={{ flex: 2, minWidth: '220px' }}>
@@ -243,48 +251,68 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
 
           <div className="row" style={{ marginBottom: '.75rem' }}>
             <div className="field" style={{ flex: 2, minWidth: '240px' }}>
-              <label htmlFor="perm-prop-addr">Land Address *</label>
-              <input id="perm-prop-addr" required placeholder="e.g. 207 Birchwood Ave" value={propertyAddress} onChange={(e) => setPropertyAddress(e.target.value)} />
+              <label htmlFor="perm-prop-addr">
+                {isAnnualLicense ? 'Location / Rack / Resident Address (optional)' : 'Land Address *'}
+              </label>
+              <input
+                id="perm-prop-addr"
+                required={!isAnnualLicense}
+                placeholder={isAnnualLicense ? 'e.g. Kay Beach Rack or 207 Birchwood Ave' : 'e.g. 207 Birchwood Ave'}
+                value={propertyAddress}
+                onChange={(e) => setPropertyAddress(e.target.value)}
+              />
             </div>
             <div className="field" style={{ flex: 1, minWidth: '150px' }}>
-              <label htmlFor="perm-bldg">Building Name</label>
+              <label htmlFor="perm-bldg">{isAnnualLicense ? 'Beach / Zone (optional)' : 'Building Name'}</label>
               <input id="perm-bldg" value={buildingName} onChange={(e) => setBuildingName(e.target.value)} />
             </div>
             <div className="field" style={{ flex: 1, minWidth: '120px' }}>
-              <label htmlFor="perm-suite">Suite / Unit ID</label>
+              <label htmlFor="perm-suite">{isAnnualLicense ? 'Rack / Slot / Tag #' : 'Suite / Unit ID'}</label>
               <input id="perm-suite" value={suiteName} onChange={(e) => setSuiteName(e.target.value)} />
             </div>
           </div>
 
-          <div className="row" style={{ marginBottom: '.75rem' }}>
-            <div className="field" style={{ flex: 1, minWidth: '160px' }}>
-              <label htmlFor="perm-parcel">Parcel Number</label>
-              <input id="perm-parcel" value={parcelId} onChange={(e) => setParcelId(e.target.value)} />
-            </div>
-            <div className="field" style={{ flex: 1, minWidth: '180px' }}>
-              <label htmlFor="perm-owner">Owner Name</label>
-              <input id="perm-owner" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} />
-            </div>
-            <div className="field" style={{ flex: 1, minWidth: '150px' }}>
-              <label htmlFor="perm-value">Estimated Project Value</label>
-              <input id="perm-value" placeholder="e.g. $15,000" value={estValue} onChange={(e) => setEstValue(e.target.value)} />
-            </div>
-          </div>
+          {!isAnnualLicense && (
+            <>
+              <div className="row" style={{ marginBottom: '.75rem' }}>
+                <div className="field" style={{ flex: 1, minWidth: '160px' }}>
+                  <label htmlFor="perm-parcel">Parcel Number</label>
+                  <input id="perm-parcel" value={parcelId} onChange={(e) => setParcelId(e.target.value)} />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: '180px' }}>
+                  <label htmlFor="perm-owner">Owner Name</label>
+                  <input id="perm-owner" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: '150px' }}>
+                  <label htmlFor="perm-value">Estimated Project Value</label>
+                  <input id="perm-value" placeholder="e.g. $15,000" value={estValue} onChange={(e) => setEstValue(e.target.value)} />
+                </div>
+              </div>
 
-          <div className="row" style={{ marginBottom: '.75rem' }}>
-            <div className="field" style={{ flex: 1, minWidth: '200px' }}>
-              <label htmlFor="perm-contractor">Contractor Name (if applicable)</label>
-              <input id="perm-contractor" value={contractorName} onChange={(e) => setContractorName(e.target.value)} />
-            </div>
-            <div className="field" style={{ flex: 1, minWidth: '180px' }}>
-              <label htmlFor="perm-license">Contractor State License #</label>
-              <input id="perm-license" value={contractorLicense} onChange={(e) => setContractorLicense(e.target.value)} />
-            </div>
-          </div>
+              <div className="row" style={{ marginBottom: '.75rem' }}>
+                <div className="field" style={{ flex: 1, minWidth: '200px' }}>
+                  <label htmlFor="perm-contractor">Contractor Name (if applicable)</label>
+                  <input id="perm-contractor" value={contractorName} onChange={(e) => setContractorName(e.target.value)} />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: '180px' }}>
+                  <label htmlFor="perm-license">Contractor State License #</label>
+                  <input id="perm-license" value={contractorLicense} onChange={(e) => setContractorLicense(e.target.value)} />
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="field" style={{ marginBottom: '.85rem' }}>
-            <label htmlFor="perm-desc">Project Description / Scope of Work</label>
-            <textarea id="perm-desc" rows={3} placeholder="Describe the proposed work, dimensions, setbacks, etc." value={projectDesc} onChange={(e) => setProjectDesc(e.target.value)} />
+            <label htmlFor="perm-desc">
+              {isAnnualLicense ? 'Vessel / Item Details (make, color, length, notes)' : 'Project Description / Scope of Work'}
+            </label>
+            <textarea
+              id="perm-desc"
+              rows={3}
+              placeholder={isAnnualLicense ? 'e.g. 12ft blue kayak, registration or description...' : 'Describe the proposed work, dimensions, setbacks, etc.'}
+              value={projectDesc}
+              onChange={(e) => setProjectDesc(e.target.value)}
+            />
           </div>
 
           <div className="field" style={{ marginBottom: '.9rem' }}>

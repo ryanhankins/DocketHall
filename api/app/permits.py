@@ -14,12 +14,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """City Permitting module: public catalog, applications, documents, review, and Permit PDFs."""
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import csv
 import hashlib
 import io
 import os
 import re
+from typing import Literal
 import uuid
 from xml.sax.saxutils import escape as _xml_escape
 
@@ -55,12 +56,16 @@ CREATE TABLE IF NOT EXISTS permit_portal_settings (
     updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE TABLE IF NOT EXISTS permit_types (
-    id          BIGSERIAL PRIMARY KEY,
-    name        TEXT NOT NULL UNIQUE,
-    description TEXT NOT NULL DEFAULT '',
-    sort_order  INTEGER NOT NULL DEFAULT 0,
-    is_active   BOOLEAN NOT NULL DEFAULT TRUE
+    id              BIGSERIAL PRIMARY KEY,
+    name            TEXT NOT NULL UNIQUE,
+    description     TEXT NOT NULL DEFAULT '',
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    kind            TEXT NOT NULL DEFAULT 'construction',
+    expiration_rule TEXT NOT NULL DEFAULT 'none'
 );
+ALTER TABLE permit_types ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'construction';
+ALTER TABLE permit_types ADD COLUMN IF NOT EXISTS expiration_rule TEXT NOT NULL DEFAULT 'none';
 CREATE TABLE IF NOT EXISTS permit_uses (
     id              BIGSERIAL PRIMARY KEY,
     permit_type_id  BIGINT NOT NULL REFERENCES permit_types(id) ON DELETE CASCADE,
@@ -105,9 +110,13 @@ CREATE TABLE IF NOT EXISTS permits (
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     issued_at           TIMESTAMPTZ,
-    expires_at          DATE
+    expires_at          DATE,
+    permit_kind         TEXT NOT NULL DEFAULT 'construction',
+    renewed_from_id     BIGINT REFERENCES permits(id) ON DELETE SET NULL
 );
 ALTER TABLE permits ADD COLUMN IF NOT EXISTS expires_at DATE;
+ALTER TABLE permits ADD COLUMN IF NOT EXISTS permit_kind TEXT NOT NULL DEFAULT 'construction';
+ALTER TABLE permits ADD COLUMN IF NOT EXISTS renewed_from_id BIGINT REFERENCES permits(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS permits_user_idx ON permits(applicant_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS permits_status_idx ON permits(status, created_at DESC);
 CREATE TABLE IF NOT EXISTS permit_documents (
@@ -312,6 +321,24 @@ def bootstrap() -> None:
                     "ON CONFLICT (permit_type_id, name) DO NOTHING",
                     (t_id, u_name, req_plans, req_coi, req_survey, u_idx + 1),
                 )
+
+        # Seed an example annual non-zoning permit type if not already present
+        conn.execute(
+            "INSERT INTO permit_types (name, description, sort_order, kind, expiration_rule) "
+            "VALUES ('Small Craft Permits', 'Annual beach kayak/canoe rack & small craft permits.', %s, 'annual_license', 'calendar_year') "
+            "ON CONFLICT (name) DO NOTHING",
+            (len(_SEED_CATALOG) + 1,),
+        )
+        sc_id = conn.execute(
+            "SELECT id FROM permit_types WHERE name = 'Small Craft Permits'"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO permit_uses "
+            "(permit_type_id, name, fee_amount, requires_plans, requires_coi, requires_survey, sort_order) "
+            "VALUES (%s, 'Kayak / Canoe Beach Rack (Annual)', '$50.00', FALSE, FALSE, FALSE, 1) "
+            "ON CONFLICT (permit_type_id, name) DO NOTHING",
+            (sc_id,),
+        )
         # Clean up initial pre-expansion sample uses if no permits reference them
         conn.execute(
             "DELETE FROM permit_uses u WHERE u.name = ANY(%s) "
@@ -344,6 +371,8 @@ class PermitTypeIn(BaseModel):
     description: str = ""
     sort_order: int = 0
     is_active: bool = True
+    kind: Literal["construction", "annual_license"] = "construction"
+    expiration_rule: Literal["none", "calendar_year", "one_year"] = "none"
 
 
 class PermitTypePatch(BaseModel):
@@ -351,6 +380,8 @@ class PermitTypePatch(BaseModel):
     description: str | None = None
     sort_order: int | None = None
     is_active: bool | None = None
+    kind: Literal["construction", "annual_license"] | None = None
+    expiration_rule: Literal["none", "calendar_year", "one_year"] | None = None
 
 
 class PermitUseIn(BaseModel):
@@ -383,7 +414,7 @@ class PermitCreateIn(BaseModel):
     applicant_name: str
     applicant_email: str = ""
     applicant_phone: str = ""
-    property_address: str
+    property_address: str = ""
     building_name: str = ""
     suite_name: str = ""
     parcel_id: str = ""
@@ -472,7 +503,7 @@ def _load_settings(conn) -> dict:
 def _load_catalog(conn, active_only: bool) -> dict:
     where = "WHERE is_active = TRUE" if active_only else ""
     t_rows = conn.execute(
-        f"SELECT id, name, description, sort_order, is_active "
+        f"SELECT id, name, description, sort_order, is_active, kind, expiration_rule "
         f"FROM permit_types {where} ORDER BY sort_order ASC, name ASC"
     ).fetchall()
     u_rows = conn.execute(
@@ -481,7 +512,15 @@ def _load_catalog(conn, active_only: bool) -> dict:
         f"FROM permit_uses {where} ORDER BY sort_order ASC, name ASC"
     ).fetchall()
     types = [
-        {"id": r[0], "name": r[1], "description": r[2], "sort_order": r[3], "is_active": bool(r[4])}
+        {
+            "id": r[0],
+            "name": r[1],
+            "description": r[2],
+            "sort_order": r[3],
+            "is_active": bool(r[4]),
+            "kind": r[5] or "construction",
+            "expiration_rule": r[6] or "none",
+        }
         for r in t_rows
     ]
     uses = [
@@ -633,6 +672,8 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
             "issued_at": r[29].isoformat() if r[29] else None,
             "closed_at": r[30].isoformat() if r[30] else None,
             "expires_at": r[31].isoformat() if r[31] else None,
+            "permit_kind": r[32] or "construction",
+            "renewed_from_id": r[33],
             "documents": docs_by_permit.get(r[0], []),
             "workflow_steps": wf_by_permit.get(r[0], []),
             "inspections": insp_by_permit.get(r[0], []),
@@ -649,7 +690,8 @@ _PERMIT_COLS = (
     "property_address, building_name, suite_name, parcel_id, owner_name, "
     "contractor_name, contractor_license, project_description, estimated_value, "
     "accepted_terms, status, fee_amount, payment_status, review_notes, reviewed_by, "
-    "assigned_to, created_at, updated_at, issued_at, closed_at, expires_at"
+    "assigned_to, created_at, updated_at, issued_at, closed_at, expires_at, "
+    "permit_kind, renewed_from_id"
 )
 
 
@@ -761,16 +803,19 @@ def create_permit(
 ):
     if not body.accepted_terms:
         raise HTTPException(status_code=400, detail="You must accept the application terms")
-    if not body.applicant_name.strip() or not body.property_address.strip():
-        raise HTTPException(status_code=400, detail="Applicant name and property address are required")
+    if not body.applicant_name.strip():
+        raise HTTPException(status_code=400, detail="Applicant name is required")
 
     with pool.connection() as conn:
         t_row = conn.execute(
-            "SELECT id, name FROM permit_types WHERE id = %s AND is_active = TRUE",
+            "SELECT id, name, kind FROM permit_types WHERE id = %s AND is_active = TRUE",
             (body.permit_type_id,),
         ).fetchone()
         if not t_row:
             raise HTTPException(status_code=400, detail="Selected permit type not found")
+        permit_kind = t_row[2] or "construction"
+        if permit_kind != "annual_license" and not body.property_address.strip():
+            raise HTTPException(status_code=400, detail="Property address is required")
         u_row = conn.execute(
             "SELECT id, name, fee_amount FROM permit_uses "
             "WHERE id = %s AND permit_type_id = %s AND is_active = TRUE",
@@ -788,8 +833,8 @@ def create_permit(
             " applicant_name, applicant_email, applicant_phone, "
             " property_address, building_name, suite_name, parcel_id, owner_name, "
             " contractor_name, contractor_license, project_description, estimated_value, "
-            " accepted_terms, status, fee_amount) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, 'submitted', %s) "
+            " accepted_terms, status, fee_amount, permit_kind) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, 'submitted', %s, %s) "
             "RETURNING id",
             (
                 temp_num,
@@ -812,6 +857,7 @@ def create_permit(
                 body.project_description.strip(),
                 body.estimated_value.strip(),
                 u_row[2] or "",
+                permit_kind,
             ),
         ).fetchone()
         permit_id = row[0]
@@ -1117,6 +1163,18 @@ def update_permit(
                     raise HTTPException(status_code=400, detail="Expiration date must be YYYY-MM-DD")
                 exp_clause = ", expires_at = %s"
                 exp_params = (exp_val,)
+        elif next_status == "issued" and not cur.get("expires_at") and cur.get("permit_type_id"):
+            rule_row = conn.execute(
+                "SELECT expiration_rule FROM permit_types WHERE id = %s",
+                (cur["permit_type_id"],),
+            ).fetchone()
+            rule = rule_row[0] if rule_row else "none"
+            if rule == "calendar_year":
+                exp_clause = ", expires_at = %s"
+                exp_params = (f"{date.today().year}-12-31",)
+            elif rule == "one_year":
+                exp_clause = ", expires_at = %s"
+                exp_params = ((date.today() + timedelta(days=365)).isoformat(),)
         conn.execute(
             f"UPDATE permits SET "
             f"status = COALESCE(%s, status), "
@@ -1407,6 +1465,81 @@ def post_permit_message(
     return updated
 
 
+@router.post("/{permit_id}/renew", status_code=201)
+def renew_permit(
+    permit_id: int,
+    request: Request,
+    user: dict = Depends(require_permission("permits.submit", "permits.manage")),
+):
+    """Clone an existing permit or annual license into a fresh renewal application."""
+    with pool.connection() as conn:
+        src = _get_permit_or_404(conn, permit_id)
+        _check_permit_access(src, user)
+        fee_val = src["fee_amount"]
+        if src.get("permit_use_id"):
+            u_row = conn.execute(
+                "SELECT fee_amount FROM permit_uses WHERE id = %s",
+                (src["permit_use_id"],),
+            ).fetchone()
+            if u_row and u_row[0]:
+                fee_val = u_row[0]
+
+        year = datetime.now(timezone.utc).year
+        temp_num = f"PRM-{year}-{uuid.uuid4().hex[:8].upper()}"
+        row = conn.execute(
+            "INSERT INTO permits "
+            "(permit_number, applicant_user_id, applicant_username, "
+            " permit_type_id, permit_use_id, permit_type_name, permit_use_name, "
+            " applicant_name, applicant_email, applicant_phone, "
+            " property_address, building_name, suite_name, parcel_id, owner_name, "
+            " contractor_name, contractor_license, project_description, estimated_value, "
+            " accepted_terms, status, fee_amount, permit_kind, renewed_from_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, 'submitted', %s, %s, %s) "
+            "RETURNING id",
+            (
+                temp_num,
+                src["applicant_user_id"] or user["id"],
+                src["applicant_username"] or user["username"],
+                src["permit_type_id"],
+                src["permit_use_id"],
+                src["permit_type_name"],
+                src["permit_use_name"],
+                src["applicant_name"],
+                src["applicant_email"],
+                src["applicant_phone"],
+                src["property_address"],
+                src["building_name"],
+                src["suite_name"],
+                src["parcel_id"],
+                src["owner_name"],
+                src["contractor_name"],
+                src["contractor_license"],
+                src["project_description"],
+                src["estimated_value"],
+                fee_val or "",
+                src.get("permit_kind") or "construction",
+                permit_id,
+            ),
+        ).fetchone()
+        new_id = row[0]
+        final_num = f"PRM-{year}-{new_id:04d}"
+        conn.execute("UPDATE permits SET permit_number = %s WHERE id = %s", (final_num, new_id))
+        conn.execute(
+            "INSERT INTO permit_activity_log (permit_id, action, actor_username, note) "
+            "VALUES (%s, 'Renewal Submitted', %s, %s)",
+            (new_id, user["username"], f"Renewed from {src['permit_number']}"),
+        )
+        result = _get_permit_or_404(conn, new_id, include_internal=has_permission(user, "permits.manage"))
+    send_notification_email(
+        "permits_submitted",
+        f"[CivicDesk] Renewal Application {final_num} (from {src['permit_number']})",
+        f"Renewal {final_num} ({src['permit_type_name']} — {src['permit_use_name']}) was submitted by {user['username']}.",
+        link_path=f"/app#permits-review/{new_id}",
+        request=request,
+    )
+    return result
+
+
 @router.delete("/{permit_id}")
 def delete_permit(permit_id: int, _: dict = Depends(require_permission("permits.manage"))):
     with pool.connection() as conn:
@@ -1468,11 +1601,20 @@ def create_permit_type(body: PermitTypeIn, _: dict = Depends(require_permission(
         raise HTTPException(status_code=400, detail="Permit type name is required")
     with pool.connection() as conn:
         row = conn.execute(
-            "INSERT INTO permit_types (name, description, sort_order, is_active) "
-            "VALUES (%s, %s, %s, %s) RETURNING id, name, description, sort_order, is_active",
-            (name, body.description.strip(), body.sort_order, body.is_active),
+            "INSERT INTO permit_types (name, description, sort_order, is_active, kind, expiration_rule) "
+            "VALUES (%s, %s, %s, %s, %s, %s) "
+            "RETURNING id, name, description, sort_order, is_active, kind, expiration_rule",
+            (name, body.description.strip(), body.sort_order, body.is_active, body.kind, body.expiration_rule),
         ).fetchone()
-    return {"id": row[0], "name": row[1], "description": row[2], "sort_order": row[3], "is_active": bool(row[4])}
+    return {
+        "id": row[0],
+        "name": row[1],
+        "description": row[2],
+        "sort_order": row[3],
+        "is_active": bool(row[4]),
+        "kind": row[5],
+        "expiration_rule": row[6],
+    }
 
 
 @router.patch("/admin/types/{type_id}")
@@ -1483,19 +1625,31 @@ def update_permit_type(type_id: int, body: PermitTypePatch, _: dict = Depends(re
             "name = COALESCE(%s, name), "
             "description = COALESCE(%s, description), "
             "sort_order = COALESCE(%s, sort_order), "
-            "is_active = COALESCE(%s, is_active) "
-            "WHERE id = %s RETURNING id, name, description, sort_order, is_active",
+            "is_active = COALESCE(%s, is_active), "
+            "kind = COALESCE(%s, kind), "
+            "expiration_rule = COALESCE(%s, expiration_rule) "
+            "WHERE id = %s RETURNING id, name, description, sort_order, is_active, kind, expiration_rule",
             (
                 body.name.strip() if body.name is not None else None,
                 body.description.strip() if body.description is not None else None,
                 body.sort_order,
                 body.is_active,
+                body.kind,
+                body.expiration_rule,
                 type_id,
             ),
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Permit type not found")
-    return {"id": row[0], "name": row[1], "description": row[2], "sort_order": row[3], "is_active": bool(row[4])}
+    return {
+        "id": row[0],
+        "name": row[1],
+        "description": row[2],
+        "sort_order": row[3],
+        "is_active": bool(row[4]),
+        "kind": row[5],
+        "expiration_rule": row[6],
+    }
 
 
 @router.delete("/admin/types/{type_id}")

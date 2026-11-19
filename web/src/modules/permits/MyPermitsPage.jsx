@@ -149,6 +149,20 @@ export default function MyPermitsPage({ onNavigate }) {
                     <div className="actions">
                       <button type="button" className="btn sm primary" onClick={() => setSelectedId(p.id)}>Open</button>
                       <a className="btn sm" href={`/api/permits/${p.id}/pdf`} target="_blank" rel="noreferrer">PDF</a>
+                      {(p.permit_kind === 'annual_license' || p.expires_at) && (p.status === 'issued' || p.status === 'closed') && (
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={async () => {
+                            const renewed = await api(`/api/permits/${p.id}/renew`, { method: 'POST' });
+                            showToast(`Renewal ${renewed.permit_number} submitted`, 'ok');
+                            await loadPermits();
+                            setSelectedId(renewed.id);
+                          }}
+                        >
+                          Renew
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

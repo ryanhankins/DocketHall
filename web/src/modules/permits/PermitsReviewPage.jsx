@@ -53,7 +53,14 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return permits.filter(p => {
-      if (statusFilter !== 'all' && p.status !== statusFilter) return false;
+      if (statusFilter === 'expiring') {
+        const exp = permitExpiryInfo(p.expires_at);
+        if (!exp || exp.cls === 'muted') return false;
+      } else if (statusFilter === 'annual_license') {
+        if (p.permit_kind !== 'annual_license') return false;
+      } else if (statusFilter !== 'all' && p.status !== statusFilter) {
+        return false;
+      }
       if (q) {
         const hay = `${p.permit_number} ${p.permit_type_name} ${p.permit_use_name} ${p.applicant_name} ${p.property_address} ${p.parcel_id}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -194,6 +201,8 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
             <label htmlFor="perm-rev-status">Status</label>
             <select id="perm-rev-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="all">All ({permits.length})</option>
+              <option value="expiring">Expiring Soon / Expired</option>
+              <option value="annual_license">Annual Licenses Only</option>
               <option value="submitted">Submitted</option>
               <option value="under_review">Under Review</option>
               <option value="needs_info">Needs Info</option>
@@ -235,7 +244,12 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
                     </button>
                   </td>
                   <td>
-                    <div><strong>{p.permit_type_name}</strong></div>
+                    <div>
+                      <strong>{p.permit_type_name}</strong>
+                      {p.permit_kind === 'annual_license' && (
+                        <> <span className="badge draft" style={{ fontSize: '.72rem' }}>Annual License</span></>
+                      )}
+                    </div>
                     <div className="muted" style={{ fontSize: '.82rem' }}>{p.permit_use_name}</div>
                   </td>
                   <td>{p.applicant_name}</td>
@@ -256,6 +270,20 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
                   <td>
                     <div className="actions">
                       <button type="button" className="btn sm primary" onClick={() => setSelectedId(p.id)}>Manage</button>
+                      {(p.permit_kind === 'annual_license' || p.expires_at) && (p.status === 'issued' || p.status === 'closed') && (
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={async () => {
+                            const renewed = await api(`/api/permits/${p.id}/renew`, { method: 'POST' });
+                            showToast(`Renewal ${renewed.permit_number} created`, 'ok');
+                            await loadAll();
+                            setSelectedId(renewed.id);
+                          }}
+                        >
+                          Renew
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn sm danger"

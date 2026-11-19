@@ -46,6 +46,8 @@ export default function PermitCatalogAdminPage() {
   const [uses, setUses] = useState([]);
 
   const [newTypeName, setNewTypeName] = useState('');
+  const [newTypeKind, setNewTypeKind] = useState('construction');
+  const [newTypeExpRule, setNewTypeExpRule] = useState('none');
   const [newUseTypeId, setNewUseTypeId] = useState('');
   const [newUseName, setNewUseName] = useState('');
   const [newUseFee, setNewUseFee] = useState('');
@@ -129,21 +131,48 @@ export default function PermitCatalogAdminPage() {
         <h2>Permit Types &amp; Uses Catalog</h2>
         <form
           className="row"
-          style={{ marginBottom: '1rem' }}
+          style={{ marginBottom: '1rem', alignItems: 'flex-end' }}
           onSubmit={async (e) => {
             e.preventDefault();
             if (!newTypeName.trim()) return;
             await api('/api/permits/admin/types', {
               method: 'POST',
-              body: JSON.stringify({ name: newTypeName.trim(), sort_order: types.length + 1 }),
+              body: JSON.stringify({
+                name: newTypeName.trim(),
+                sort_order: types.length + 1,
+                kind: newTypeKind,
+                expiration_rule: newTypeExpRule,
+              }),
             });
             setNewTypeName('');
             await loadCatalog();
           }}
         >
-          <div className="field" style={{ flex: 1, minWidth: '220px' }}>
-            <label>New Permit Type</label>
-            <input placeholder="e.g. Sign Permit" value={newTypeName} onChange={(e) => setNewTypeName(e.target.value)} />
+          <div className="field" style={{ flex: 2, minWidth: '200px' }}>
+            <label>New Permit / License Type</label>
+            <input placeholder="e.g. Small Craft Permits, Golf Cart Permits" value={newTypeName} onChange={(e) => setNewTypeName(e.target.value)} />
+          </div>
+          <div className="field" style={{ minWidth: '170px' }}>
+            <label>Form Style</label>
+            <select
+              value={newTypeKind}
+              onChange={(e) => {
+                const k = e.target.value;
+                setNewTypeKind(k);
+                if (k === 'annual_license' && newTypeExpRule === 'none') setNewTypeExpRule('calendar_year');
+              }}
+            >
+              <option value="construction">Zoning / Construction</option>
+              <option value="annual_license">Annual License / Permit</option>
+            </select>
+          </div>
+          <div className="field" style={{ minWidth: '180px' }}>
+            <label>Auto-Expiration on Issue</label>
+            <select value={newTypeExpRule} onChange={(e) => setNewTypeExpRule(e.target.value)}>
+              <option value="none">None</option>
+              <option value="calendar_year">End of Year (Dec 31)</option>
+              <option value="one_year">1 Year (365 days)</option>
+            </select>
           </div>
           <button type="submit" className="btn sm primary">Add Permit Type</button>
         </form>
@@ -202,15 +231,51 @@ export default function PermitCatalogAdminPage() {
 
         <table>
           <thead>
-            <tr><th>Permit Type</th><th>Permit Application / Use</th><th>Fee</th><th>Requirements</th><th>Actions</th></tr>
+            <tr><th>Permit / License Type</th><th>Form Style &amp; Renewal</th><th>Application / Use</th><th>Fee</th><th>Requirements</th><th>Actions</th></tr>
           </thead>
           <tbody>
             {types.map(t => {
               const tUses = uses.filter(u => u.permit_type_id === t.id);
+              const kindControls = (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '.25rem' }}>
+                  <select
+                    aria-label={`${t.name} form style`}
+                    style={{ width: 'auto', fontSize: '.82rem', padding: '2px 6px' }}
+                    value={t.kind || 'construction'}
+                    onChange={async (e) => {
+                      await api(`/api/permits/admin/types/${t.id}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ kind: e.target.value }),
+                      });
+                      await loadCatalog();
+                    }}
+                  >
+                    <option value="construction">Zoning / Construction</option>
+                    <option value="annual_license">Annual License / Permit</option>
+                  </select>
+                  <select
+                    aria-label={`${t.name} expiration rule`}
+                    style={{ width: 'auto', fontSize: '.82rem', padding: '2px 6px' }}
+                    value={t.expiration_rule || 'none'}
+                    onChange={async (e) => {
+                      await api(`/api/permits/admin/types/${t.id}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({ expiration_rule: e.target.value }),
+                      });
+                      await loadCatalog();
+                    }}
+                  >
+                    <option value="none">No Auto-Expiration</option>
+                    <option value="calendar_year">Expires Dec 31</option>
+                    <option value="one_year">Expires +365 Days</option>
+                  </select>
+                </div>
+              );
               if (!tUses.length) {
                 return (
                   <tr key={`t-${t.id}`}>
                     <td><strong>{t.name}</strong></td>
+                    <td>{kindControls}</td>
                     <td className="muted">(No uses yet)</td>
                     <td>—</td>
                     <td>—</td>
@@ -229,9 +294,10 @@ export default function PermitCatalogAdminPage() {
                   </tr>
                 );
               }
-              return tUses.map(u => (
+              return tUses.map((u, uIdx) => (
                 <tr key={`u-${u.id}`}>
                   <td>{t.name}</td>
+                  <td>{uIdx === 0 ? kindControls : ''}</td>
                   <td>{u.name}</td>
                   <td>{u.fee_amount || '—'}</td>
                   <td className="muted">
