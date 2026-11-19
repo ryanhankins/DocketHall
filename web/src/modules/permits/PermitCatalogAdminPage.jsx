@@ -20,6 +20,20 @@ import { api } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
 import ModuleNotificationsCard from '../../core/ModuleNotificationsCard.jsx';
 
+const PERMIT_FIELD_OPTIONS = [
+  ['applicant_email', 'Email'],
+  ['applicant_phone', 'Phone'],
+  ['property_address', 'Address / Location'],
+  ['building_name', 'Building / Zone'],
+  ['suite_name', 'Suite / Rack #'],
+  ['parcel_id', 'Parcel #'],
+  ['owner_name', 'Owner'],
+  ['contractor_name', 'Contractor'],
+  ['contractor_license', 'License #'],
+  ['estimated_value', 'Est. Value'],
+  ['project_description', 'Description'],
+];
+
 const PERMIT_NOTIFICATION_EVENTS = [
   {
     key: 'permits_submitted',
@@ -269,6 +283,35 @@ export default function PermitCatalogAdminPage() {
                     <option value="calendar_year">Expires Dec 31</option>
                     <option value="one_year">Expires +365 Days</option>
                   </select>
+                  <details style={{ marginTop: 2 }}>
+                    <summary style={{ cursor: 'pointer', fontSize: '.78rem', color: '#2563eb' }}>
+                      Required Fields ({(t.required_fields || []).length})
+                    </summary>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.25rem .6rem', padding: '.35rem', background: '#f8fafc', borderRadius: 4, marginTop: 2, maxWidth: 260 }}>
+                      {PERMIT_FIELD_OPTIONS.map(([fk, fl]) => {
+                        const checked = (t.required_fields || []).includes(fk);
+                        return (
+                          <label key={fk} style={{ display: 'inline-flex', alignItems: 'center', gap: '.25rem', fontSize: '.76rem', cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              style={{ width: 'auto' }}
+                              checked={checked}
+                              onChange={async () => {
+                                const cur = Array.isArray(t.required_fields) ? t.required_fields : [];
+                                const next = checked ? cur.filter(x => x !== fk) : [...cur, fk];
+                                await api(`/api/permits/admin/types/${t.id}`, {
+                                  method: 'PATCH',
+                                  body: JSON.stringify({ required_fields: next }),
+                                });
+                                await loadCatalog();
+                              }}
+                            />
+                            <span>{fl}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </details>
                 </div>
               );
               if (!tUses.length) {

@@ -69,6 +69,11 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
     [catalog.types, typeId],
   );
   const isAnnualLicense = selectedType?.kind === 'annual_license';
+  const reqFields = useMemo(
+    () => new Set(selectedType?.required_fields || (isAnnualLicense ? [] : ['property_address'])),
+    [selectedType, isAnnualLicense],
+  );
+  const isReq = (f) => reqFields.has(f);
 
   const availableUses = useMemo(
     () => (catalog.uses || []).filter(u => String(u.permit_type_id) === String(typeId)),
@@ -240,63 +245,63 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
               <input id="perm-app-name" required value={applicantName} onChange={(e) => setApplicantName(e.target.value)} />
             </div>
             <div className="field" style={{ flex: 1, minWidth: '180px' }}>
-              <label htmlFor="perm-app-email">Email</label>
-              <input id="perm-app-email" type="email" value={applicantEmail} onChange={(e) => setApplicantEmail(e.target.value)} />
+              <label htmlFor="perm-app-email">Email{isReq('applicant_email') ? ' *' : ''}</label>
+              <input id="perm-app-email" type="email" required={isReq('applicant_email')} value={applicantEmail} onChange={(e) => setApplicantEmail(e.target.value)} />
             </div>
             <div className="field" style={{ flex: 1, minWidth: '160px' }}>
-              <label htmlFor="perm-app-phone">Phone</label>
-              <input id="perm-app-phone" value={applicantPhone} onChange={(e) => setApplicantPhone(e.target.value)} />
+              <label htmlFor="perm-app-phone">Phone{isReq('applicant_phone') ? ' *' : ''}</label>
+              <input id="perm-app-phone" required={isReq('applicant_phone')} value={applicantPhone} onChange={(e) => setApplicantPhone(e.target.value)} />
             </div>
           </div>
 
           <div className="row" style={{ marginBottom: '.75rem' }}>
             <div className="field" style={{ flex: 2, minWidth: '240px' }}>
               <label htmlFor="perm-prop-addr">
-                {isAnnualLicense ? 'Location / Rack / Resident Address (optional)' : 'Land Address *'}
+                {isAnnualLicense ? 'Location / Rack / Resident Address' : 'Land Address'}{isReq('property_address') ? ' *' : ' (optional)'}
               </label>
               <input
                 id="perm-prop-addr"
-                required={!isAnnualLicense}
+                required={isReq('property_address')}
                 placeholder={isAnnualLicense ? 'e.g. Kay Beach Rack or 207 Birchwood Ave' : 'e.g. 207 Birchwood Ave'}
                 value={propertyAddress}
                 onChange={(e) => setPropertyAddress(e.target.value)}
               />
             </div>
             <div className="field" style={{ flex: 1, minWidth: '150px' }}>
-              <label htmlFor="perm-bldg">{isAnnualLicense ? 'Beach / Zone (optional)' : 'Building Name'}</label>
-              <input id="perm-bldg" value={buildingName} onChange={(e) => setBuildingName(e.target.value)} />
+              <label htmlFor="perm-bldg">{isAnnualLicense ? 'Beach / Zone' : 'Building Name'}{isReq('building_name') ? ' *' : ''}</label>
+              <input id="perm-bldg" required={isReq('building_name')} value={buildingName} onChange={(e) => setBuildingName(e.target.value)} />
             </div>
             <div className="field" style={{ flex: 1, minWidth: '120px' }}>
-              <label htmlFor="perm-suite">{isAnnualLicense ? 'Rack / Slot / Tag #' : 'Suite / Unit ID'}</label>
-              <input id="perm-suite" value={suiteName} onChange={(e) => setSuiteName(e.target.value)} />
+              <label htmlFor="perm-suite">{isAnnualLicense ? 'Rack / Slot / Tag #' : 'Suite / Unit ID'}{isReq('suite_name') ? ' *' : ''}</label>
+              <input id="perm-suite" required={isReq('suite_name')} value={suiteName} onChange={(e) => setSuiteName(e.target.value)} />
             </div>
           </div>
 
-          {!isAnnualLicense && (
+          {(!isAnnualLicense || isReq('parcel_id') || isReq('owner_name') || isReq('estimated_value') || isReq('contractor_name') || isReq('contractor_license')) && (
             <>
               <div className="row" style={{ marginBottom: '.75rem' }}>
                 <div className="field" style={{ flex: 1, minWidth: '160px' }}>
-                  <label htmlFor="perm-parcel">Parcel Number</label>
-                  <input id="perm-parcel" value={parcelId} onChange={(e) => setParcelId(e.target.value)} />
+                  <label htmlFor="perm-parcel">Parcel Number{isReq('parcel_id') ? ' *' : ''}</label>
+                  <input id="perm-parcel" required={isReq('parcel_id')} value={parcelId} onChange={(e) => setParcelId(e.target.value)} />
                 </div>
                 <div className="field" style={{ flex: 1, minWidth: '180px' }}>
-                  <label htmlFor="perm-owner">Owner Name</label>
-                  <input id="perm-owner" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} />
+                  <label htmlFor="perm-owner">Owner Name{isReq('owner_name') ? ' *' : ''}</label>
+                  <input id="perm-owner" required={isReq('owner_name')} value={ownerName} onChange={(e) => setOwnerName(e.target.value)} />
                 </div>
                 <div className="field" style={{ flex: 1, minWidth: '150px' }}>
-                  <label htmlFor="perm-value">Estimated Project Value</label>
-                  <input id="perm-value" placeholder="e.g. $15,000" value={estValue} onChange={(e) => setEstValue(e.target.value)} />
+                  <label htmlFor="perm-value">Estimated Project Value{isReq('estimated_value') ? ' *' : ''}</label>
+                  <input id="perm-value" required={isReq('estimated_value')} placeholder="e.g. $15,000" value={estValue} onChange={(e) => setEstValue(e.target.value)} />
                 </div>
               </div>
 
               <div className="row" style={{ marginBottom: '.75rem' }}>
                 <div className="field" style={{ flex: 1, minWidth: '200px' }}>
-                  <label htmlFor="perm-contractor">Contractor Name (if applicable)</label>
-                  <input id="perm-contractor" value={contractorName} onChange={(e) => setContractorName(e.target.value)} />
+                  <label htmlFor="perm-contractor">Contractor Name{isReq('contractor_name') ? ' *' : ' (if applicable)'}</label>
+                  <input id="perm-contractor" required={isReq('contractor_name')} value={contractorName} onChange={(e) => setContractorName(e.target.value)} />
                 </div>
                 <div className="field" style={{ flex: 1, minWidth: '180px' }}>
-                  <label htmlFor="perm-license">Contractor State License #</label>
-                  <input id="perm-license" value={contractorLicense} onChange={(e) => setContractorLicense(e.target.value)} />
+                  <label htmlFor="perm-license">Contractor State License #{isReq('contractor_license') ? ' *' : ''}</label>
+                  <input id="perm-license" required={isReq('contractor_license')} value={contractorLicense} onChange={(e) => setContractorLicense(e.target.value)} />
                 </div>
               </div>
             </>
@@ -304,11 +309,12 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
 
           <div className="field" style={{ marginBottom: '.85rem' }}>
             <label htmlFor="perm-desc">
-              {isAnnualLicense ? 'Vessel / Item Details (make, color, length, notes)' : 'Project Description / Scope of Work'}
+              {isAnnualLicense ? 'Vessel / Item Details (make, color, length, notes)' : 'Project Description / Scope of Work'}{isReq('project_description') ? ' *' : ''}
             </label>
             <textarea
               id="perm-desc"
               rows={3}
+              required={isReq('project_description')}
               placeholder={isAnnualLicense ? 'e.g. 12ft blue kayak, registration or description...' : 'Describe the proposed work, dimensions, setbacks, etc.'}
               value={projectDesc}
               onChange={(e) => setProjectDesc(e.target.value)}

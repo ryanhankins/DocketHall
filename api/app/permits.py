@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 import csv
 import hashlib
 import io
+import json
 import os
 import re
 from typing import Literal
@@ -62,10 +63,12 @@ CREATE TABLE IF NOT EXISTS permit_types (
     sort_order      INTEGER NOT NULL DEFAULT 0,
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,
     kind            TEXT NOT NULL DEFAULT 'construction',
-    expiration_rule TEXT NOT NULL DEFAULT 'none'
+    expiration_rule TEXT NOT NULL DEFAULT 'none',
+    required_fields JSONB NOT NULL DEFAULT '["property_address"]'::jsonb
 );
 ALTER TABLE permit_types ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'construction';
 ALTER TABLE permit_types ADD COLUMN IF NOT EXISTS expiration_rule TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE permit_types ADD COLUMN IF NOT EXISTS required_fields JSONB NOT NULL DEFAULT '["property_address"]'::jsonb;
 CREATE TABLE IF NOT EXISTS permit_uses (
     id              BIGSERIAL PRIMARY KEY,
     permit_type_id  BIGINT NOT NULL REFERENCES permit_types(id) ON DELETE CASCADE,
@@ -324,8 +327,8 @@ def bootstrap() -> None:
 
         # Seed an example annual non-zoning permit type if not already present
         conn.execute(
-            "INSERT INTO permit_types (name, description, sort_order, kind, expiration_rule) "
-            "VALUES ('Small Craft Permits', 'Annual beach kayak/canoe rack & small craft permits.', %s, 'annual_license', 'calendar_year') "
+            "INSERT INTO permit_types (name, description, sort_order, kind, expiration_rule, required_fields) "
+            "VALUES ('Small Craft Permits', 'Annual beach kayak/canoe rack & small craft permits.', %s, 'annual_license', 'calendar_year', '[\"applicant_email\", \"applicant_phone\"]'::jsonb) "
             "ON CONFLICT (name) DO NOTHING",
             (len(_SEED_CATALOG) + 1,),
         )
@@ -366,6 +369,34 @@ class PortalSettingsIn(BaseModel):
     payment_url: str = ""
 
 
+_REQUIRED_FIELD_LABELS = {
+    "applicant_email": "Email Address",
+    "applicant_phone": "Phone Number",
+    "property_address": "Location / Land Address",
+    "building_name": "Building / Beach / Zone",
+    "suite_name": "Suite / Rack / Slot #",
+    "parcel_id": "Parcel Number",
+    "owner_name": "Owner Name",
+    "contractor_name": "Contractor Name",
+    "contractor_license": "Contractor License #",
+    "estimated_value": "Estimated Value",
+    "project_description": "Description / Vessel Details",
+}
+
+
+def _clean_required_fields(fields: list[str] | None) -> list[str] | None:
+    if fields is None:
+        return None
+    out: list[str] = []
+    seen: set[str] = set()
+    for f in fields:
+        k = str(f or "").strip()
+        if k in _REQUIRED_FIELD_LABELS and k not in seen:
+            out.append(k)
+            seen.add(k)
+    return out
+
+
 class PermitTypeIn(BaseModel):
     name: str
     description: str = ""
@@ -373,6 +404,7 @@ class PermitTypeIn(BaseModel):
     is_active: bool = True
     kind: Literal["construction", "annual_license"] = "construction"
     expiration_rule: Literal["none", "calendar_year", "one_year"] = "none"
+    required_fields: list[str] = ["property_address"]
 
 
 class PermitTypePatch(BaseModel):
@@ -382,6 +414,7 @@ class PermitTypePatch(BaseModel):
     is_active: bool | None = None
     kind: Literal["construction", "annual_license"] | None = None
     expiration_rule: Literal["none", "calendar_year", "one_year"] | None = None
+    required_fields: list[str] | None = None
 
 
 class PermitUseIn(BaseModel):
@@ -433,6 +466,18 @@ class PermitPatchIn(BaseModel):
     review_notes: str | None = None
     assigned_to: str | None = None
     expires_at: str | None = None
+    applicant_name: str | None = None
+    applicant_email: str | None = None
+    applicant_phone: str | None = None
+    property_address: str | None = None
+    building_name: str | None = None
+    suite_name: str | None = None
+    parcel_id: str | None = None
+    owner_name: str | None = None
+    contractor_name: str | None = None
+    contractor_license: str | None = None
+    project_description: str | None = None
+    estimated_value: str | None = None
 
 
 class ParcelIn(BaseModel):
@@ -503,7 +548,7 @@ def _load_settings(conn) -> dict:
 def _load_catalog(conn, active_only: bool) -> dict:
     where = "WHERE is_active = TRUE" if active_only else ""
     t_rows = conn.execute(
-        f"SELECT id, name, description, sort_order, is_active, kind, expiration_rule "
+        f"SELECT id, name, description, sort_order, is_active, kind, expiration_rule, required_fields "
         f"FROM permit_types {where} ORDER BY sort_order ASC, name ASC"
     ).fetchall()
     u_rows = conn.execute(
@@ -520,6 +565,7 @@ def _load_catalog(conn, active_only: bool) -> dict:
             "is_active": bool(r[4]),
             "kind": r[5] or "construction",
             "expiration_rule": r[6] or "none",
+            "required_fields": list(r[7]) if isinstance(r[7], list) else ["property_address"],
         }
         for r in t_rows
     ]
@@ -808,14 +854,18 @@ def create_permit(
 
     with pool.connection() as conn:
         t_row = conn.execute(
-            "SELECT id, name, kind FROM permit_types WHERE id = %s AND is_active = TRUE",
+            "SELECT id, name, kind, required_fields FROM permit_types WHERE id = %s AND is_active = TRUE",
             (body.permit_type_id,),
         ).fetchone()
         if not t_row:
             raise HTTPException(status_code=400, detail="Selected permit type not found")
         permit_kind = t_row[2] or "construction"
-        if permit_kind != "annual_license" and not body.property_address.strip():
-            raise HTTPException(status_code=400, detail="Property address is required")
+        req_fields = list(t_row[3]) if isinstance(t_row[3], list) else ["property_address"]
+        for fld in req_fields:
+            val = str(getattr(body, fld, "") or "").strip()
+            if not val:
+                lbl = _REQUIRED_FIELD_LABELS.get(fld, fld)
+                raise HTTPException(status_code=400, detail=f"{lbl} is required for {t_row[1]}")
         u_row = conn.execute(
             "SELECT id, name, fee_amount FROM permit_uses "
             "WHERE id = %s AND permit_type_id = %s AND is_active = TRUE",
@@ -1182,6 +1232,18 @@ def update_permit(
             f"payment_status = COALESCE(%s, payment_status), "
             f"review_notes = COALESCE(%s, review_notes), "
             f"assigned_to = COALESCE(%s, assigned_to), "
+            f"applicant_name = COALESCE(%s, applicant_name), "
+            f"applicant_email = COALESCE(%s, applicant_email), "
+            f"applicant_phone = COALESCE(%s, applicant_phone), "
+            f"property_address = COALESCE(%s, property_address), "
+            f"building_name = COALESCE(%s, building_name), "
+            f"suite_name = COALESCE(%s, suite_name), "
+            f"parcel_id = COALESCE(%s, parcel_id), "
+            f"owner_name = COALESCE(%s, owner_name), "
+            f"contractor_name = COALESCE(%s, contractor_name), "
+            f"contractor_license = COALESCE(%s, contractor_license), "
+            f"project_description = COALESCE(%s, project_description), "
+            f"estimated_value = COALESCE(%s, estimated_value), "
             f"reviewed_by = %s, "
             f"updated_at = now(){issued_clause}{closed_clause}{exp_clause} "
             f"WHERE id = %s",
@@ -1191,6 +1253,18 @@ def update_permit(
                 body.payment_status,
                 body.review_notes.strip() if body.review_notes is not None else None,
                 body.assigned_to.strip() if body.assigned_to is not None else None,
+                body.applicant_name.strip() if body.applicant_name is not None else None,
+                body.applicant_email.strip() if body.applicant_email is not None else None,
+                body.applicant_phone.strip() if body.applicant_phone is not None else None,
+                body.property_address.strip() if body.property_address is not None else None,
+                body.building_name.strip() if body.building_name is not None else None,
+                body.suite_name.strip() if body.suite_name is not None else None,
+                body.parcel_id.strip() if body.parcel_id is not None else None,
+                body.owner_name.strip() if body.owner_name is not None else None,
+                body.contractor_name.strip() if body.contractor_name is not None else None,
+                body.contractor_license.strip() if body.contractor_license is not None else None,
+                body.project_description.strip() if body.project_description is not None else None,
+                body.estimated_value.strip() if body.estimated_value is not None else None,
                 user["username"],
                 *exp_params,
                 permit_id,
@@ -1205,6 +1279,15 @@ def update_permit(
             changes.append(f"Fee -> {body.fee_amount.strip()}")
         if body.assigned_to is not None and body.assigned_to.strip() != cur["assigned_to"]:
             changes.append(f"Assigned -> {body.assigned_to.strip()}")
+        if any(
+            getattr(body, fld) is not None and getattr(body, fld).strip() != (cur.get(fld) or "")
+            for fld in (
+                "applicant_name", "applicant_email", "applicant_phone", "property_address",
+                "building_name", "suite_name", "parcel_id", "owner_name",
+                "contractor_name", "contractor_license", "project_description", "estimated_value",
+            )
+        ):
+            changes.append("Application Details Updated")
         if changes or (body.review_notes is not None and body.review_notes.strip() != cur["review_notes"]):
             conn.execute(
                 "INSERT INTO permit_activity_log (permit_id, action, actor_username, note) "
@@ -1599,12 +1682,13 @@ def create_permit_type(body: PermitTypeIn, _: dict = Depends(require_permission(
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Permit type name is required")
+    req_fields = _clean_required_fields(body.required_fields) or []
     with pool.connection() as conn:
         row = conn.execute(
-            "INSERT INTO permit_types (name, description, sort_order, is_active, kind, expiration_rule) "
-            "VALUES (%s, %s, %s, %s, %s, %s) "
-            "RETURNING id, name, description, sort_order, is_active, kind, expiration_rule",
-            (name, body.description.strip(), body.sort_order, body.is_active, body.kind, body.expiration_rule),
+            "INSERT INTO permit_types (name, description, sort_order, is_active, kind, expiration_rule, required_fields) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb) "
+            "RETURNING id, name, description, sort_order, is_active, kind, expiration_rule, required_fields",
+            (name, body.description.strip(), body.sort_order, body.is_active, body.kind, body.expiration_rule, json.dumps(req_fields)),
         ).fetchone()
     return {
         "id": row[0],
@@ -1614,11 +1698,13 @@ def create_permit_type(body: PermitTypeIn, _: dict = Depends(require_permission(
         "is_active": bool(row[4]),
         "kind": row[5],
         "expiration_rule": row[6],
+        "required_fields": list(row[7]) if isinstance(row[7], list) else [],
     }
 
 
 @router.patch("/admin/types/{type_id}")
 def update_permit_type(type_id: int, body: PermitTypePatch, _: dict = Depends(require_permission("permits.manage"))):
+    clean_req = _clean_required_fields(body.required_fields)
     with pool.connection() as conn:
         row = conn.execute(
             "UPDATE permit_types SET "
@@ -1627,8 +1713,9 @@ def update_permit_type(type_id: int, body: PermitTypePatch, _: dict = Depends(re
             "sort_order = COALESCE(%s, sort_order), "
             "is_active = COALESCE(%s, is_active), "
             "kind = COALESCE(%s, kind), "
-            "expiration_rule = COALESCE(%s, expiration_rule) "
-            "WHERE id = %s RETURNING id, name, description, sort_order, is_active, kind, expiration_rule",
+            "expiration_rule = COALESCE(%s, expiration_rule), "
+            "required_fields = COALESCE(%s::jsonb, required_fields) "
+            "WHERE id = %s RETURNING id, name, description, sort_order, is_active, kind, expiration_rule, required_fields",
             (
                 body.name.strip() if body.name is not None else None,
                 body.description.strip() if body.description is not None else None,
@@ -1636,6 +1723,7 @@ def update_permit_type(type_id: int, body: PermitTypePatch, _: dict = Depends(re
                 body.is_active,
                 body.kind,
                 body.expiration_rule,
+                json.dumps(clean_req) if clean_req is not None else None,
                 type_id,
             ),
         ).fetchone()
@@ -1649,6 +1737,7 @@ def update_permit_type(type_id: int, body: PermitTypePatch, _: dict = Depends(re
         "is_active": bool(row[4]),
         "kind": row[5],
         "expiration_rule": row[6],
+        "required_fields": list(row[7]) if isinstance(row[7], list) else [],
     }
 
 

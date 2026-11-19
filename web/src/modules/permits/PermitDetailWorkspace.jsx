@@ -28,6 +28,21 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
   const [assignedTo, setAssignedTo] = useState(permit.assigned_to || '');
   const [expiresAt, setExpiresAt] = useState(permit.expires_at || '');
   const [notes, setNotes] = useState(permit.review_notes || '');
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [details, setDetails] = useState({
+    applicant_name: permit.applicant_name || '',
+    applicant_email: permit.applicant_email || '',
+    applicant_phone: permit.applicant_phone || '',
+    property_address: permit.property_address || '',
+    building_name: permit.building_name || '',
+    suite_name: permit.suite_name || '',
+    parcel_id: permit.parcel_id || '',
+    owner_name: permit.owner_name || '',
+    contractor_name: permit.contractor_name || '',
+    contractor_license: permit.contractor_license || '',
+    estimated_value: permit.estimated_value || '',
+    project_description: permit.project_description || '',
+  });
 
   // Workflow form
   const [wfName, setWfName] = useState('');
@@ -56,6 +71,21 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
     setAssignedTo(permit.assigned_to || '');
     setExpiresAt(permit.expires_at || '');
     setNotes(permit.review_notes || '');
+    setDetails({
+      applicant_name: permit.applicant_name || '',
+      applicant_email: permit.applicant_email || '',
+      applicant_phone: permit.applicant_phone || '',
+      property_address: permit.property_address || '',
+      building_name: permit.building_name || '',
+      suite_name: permit.suite_name || '',
+      parcel_id: permit.parcel_id || '',
+      owner_name: permit.owner_name || '',
+      contractor_name: permit.contractor_name || '',
+      contractor_license: permit.contractor_license || '',
+      estimated_value: permit.estimated_value || '',
+      project_description: permit.project_description || '',
+    });
+    setEditingDetails(false);
   }, [permit]);
 
   const workflow = permit.workflow_steps || [];
@@ -96,26 +126,136 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
         <div className="card">
           <div className="row" style={{ marginBottom: '.85rem', alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: '240px' }}>
-              <h3 style={{ margin: '0 0 .4rem', fontSize: '.95rem' }}>Property &amp; Applicant</h3>
-              <div style={{ fontSize: '.9rem', lineHeight: 1.55 }}>
-                <div><strong>Applicant:</strong> {permit.applicant_name} ({permit.applicant_username || '—'})</div>
-                <div><strong>Contact:</strong> {permit.applicant_email || '—'} · {permit.applicant_phone || '—'}</div>
-                <div><strong>Location:</strong> {permit.property_address}</div>
-                {(permit.building_name || permit.suite_name) && (
-                  <div><strong>Building / Unit:</strong> {permit.building_name || '—'} / {permit.suite_name || '—'}</div>
+              <div className="between" style={{ marginBottom: '.4rem' }}>
+                <h3 style={{ margin: 0, fontSize: '.95rem' }}>
+                  {permit.permit_kind === 'annual_license' ? 'License & Applicant Details' : 'Property & Applicant'}
+                </h3>
+                {isManager && (
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={() => setEditingDetails(v => !v)}
+                  >
+                    {editingDetails ? 'Cancel' : 'Edit Details'}
+                  </button>
                 )}
-                <div><strong>Parcel / Owner:</strong> {permit.parcel_id || '—'} / {permit.owner_name || '—'}</div>
-                <div><strong>Contractor:</strong> {permit.contractor_name || '—'} (Lic: {permit.contractor_license || '—'})</div>
-                <div><strong>Est. Value:</strong> {permit.estimated_value || '—'}</div>
-                <div><strong>Submitted:</strong> {formatDate(permit.created_at)}</div>
-                {permit.issued_at && <div><strong>Issued:</strong> {formatDate(permit.issued_at)}</div>}
-                {permit.closed_at && <div><strong>Closed:</strong> {formatDate(permit.closed_at)}</div>}
               </div>
-              {permit.project_description && (
-                <div style={{ marginTop: '.65rem' }}>
-                  <strong>Project Description:</strong>
-                  <p className="muted" style={{ margin: '.25rem 0 0' }}>{permit.project_description}</p>
-                </div>
+
+              {editingDetails && isManager ? (
+                <form
+                  style={{ display: 'grid', gap: '.55rem' }}
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setBusy(true);
+                    try {
+                      const updated = await api(`/api/permits/${permit.id}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify(details),
+                      });
+                      showToast(`Saved details for ${permit.permit_number}`, 'ok');
+                      setEditingDetails(false);
+                      onUpdated(updated);
+                    } catch (err) {
+                      showToast(err.message, 'error');
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  <div className="field">
+                    <label>Applicant Name *</label>
+                    <input required value={details.applicant_name} onChange={(e) => setDetails(d => ({ ...d, applicant_name: e.target.value }))} />
+                  </div>
+                  <div className="row">
+                    <div className="field" style={{ flex: 1 }}>
+                      <label>Email</label>
+                      <input type="email" value={details.applicant_email} onChange={(e) => setDetails(d => ({ ...d, applicant_email: e.target.value }))} />
+                    </div>
+                    <div className="field" style={{ flex: 1 }}>
+                      <label>Phone</label>
+                      <input value={details.applicant_phone} onChange={(e) => setDetails(d => ({ ...d, applicant_phone: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>{permit.permit_kind === 'annual_license' ? 'Location / Rack / Resident Address' : 'Land Address'}</label>
+                    <input value={details.property_address} onChange={(e) => setDetails(d => ({ ...d, property_address: e.target.value }))} />
+                  </div>
+                  <div className="row">
+                    <div className="field" style={{ flex: 1 }}>
+                      <label>{permit.permit_kind === 'annual_license' ? 'Beach / Zone' : 'Building Name'}</label>
+                      <input value={details.building_name} onChange={(e) => setDetails(d => ({ ...d, building_name: e.target.value }))} />
+                    </div>
+                    <div className="field" style={{ flex: 1 }}>
+                      <label>{permit.permit_kind === 'annual_license' ? 'Rack / Slot / Tag #' : 'Suite / Unit ID'}</label>
+                      <input value={details.suite_name} onChange={(e) => setDetails(d => ({ ...d, suite_name: e.target.value }))} />
+                    </div>
+                  </div>
+                  {permit.permit_kind !== 'annual_license' && (
+                    <>
+                      <div className="row">
+                        <div className="field" style={{ flex: 1 }}>
+                          <label>Parcel ID</label>
+                          <input value={details.parcel_id} onChange={(e) => setDetails(d => ({ ...d, parcel_id: e.target.value }))} />
+                        </div>
+                        <div className="field" style={{ flex: 1 }}>
+                          <label>Owner Name</label>
+                          <input value={details.owner_name} onChange={(e) => setDetails(d => ({ ...d, owner_name: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="row">
+                        <div className="field" style={{ flex: 1 }}>
+                          <label>Contractor Name</label>
+                          <input value={details.contractor_name} onChange={(e) => setDetails(d => ({ ...d, contractor_name: e.target.value }))} />
+                        </div>
+                        <div className="field" style={{ flex: 1 }}>
+                          <label>Contractor License #</label>
+                          <input value={details.contractor_license} onChange={(e) => setDetails(d => ({ ...d, contractor_license: e.target.value }))} />
+                        </div>
+                      </div>
+                      <div className="field">
+                        <label>Estimated Value</label>
+                        <input value={details.estimated_value} onChange={(e) => setDetails(d => ({ ...d, estimated_value: e.target.value }))} />
+                      </div>
+                    </>
+                  )}
+                  <div className="field">
+                    <label>{permit.permit_kind === 'annual_license' ? 'Vessel / Item Details' : 'Project Description'}</label>
+                    <textarea rows={3} value={details.project_description} onChange={(e) => setDetails(d => ({ ...d, project_description: e.target.value }))} />
+                  </div>
+                  <div className="actions">
+                    <button type="submit" className="btn sm primary" disabled={busy}>Save Details</button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <div style={{ fontSize: '.9rem', lineHeight: 1.55 }}>
+                    <div><strong>Applicant:</strong> {permit.applicant_name} ({permit.applicant_username || '—'})</div>
+                    <div><strong>Contact:</strong> {permit.applicant_email || '—'} · {permit.applicant_phone || '—'}</div>
+                    <div><strong>{permit.permit_kind === 'annual_license' ? 'Location:' : 'Location:'}</strong> {permit.property_address || '—'}</div>
+                    {(permit.building_name || permit.suite_name) && (
+                      <div>
+                        <strong>{permit.permit_kind === 'annual_license' ? 'Beach / Rack / Tag:' : 'Building / Unit:'}</strong>{' '}
+                        {permit.building_name || '—'} / {permit.suite_name || '—'}
+                      </div>
+                    )}
+                    {permit.permit_kind !== 'annual_license' && (
+                      <>
+                        <div><strong>Parcel / Owner:</strong> {permit.parcel_id || '—'} / {permit.owner_name || '—'}</div>
+                        <div><strong>Contractor:</strong> {permit.contractor_name || '—'} (Lic: {permit.contractor_license || '—'})</div>
+                        <div><strong>Est. Value:</strong> {permit.estimated_value || '—'}</div>
+                      </>
+                    )}
+                    <div><strong>Submitted:</strong> {formatDate(permit.created_at)}</div>
+                    {permit.issued_at && <div><strong>Issued:</strong> {formatDate(permit.issued_at)}</div>}
+                    {permit.closed_at && <div><strong>Closed:</strong> {formatDate(permit.closed_at)}</div>}
+                  </div>
+                  {permit.project_description && (
+                    <div style={{ marginTop: '.65rem' }}>
+                      <strong>{permit.permit_kind === 'annual_license' ? 'Vessel / Item Details:' : 'Project Description:'}</strong>
+                      <p className="muted" style={{ margin: '.25rem 0 0' }}>{permit.project_description}</p>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
