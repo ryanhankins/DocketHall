@@ -34,8 +34,10 @@ fi
 export CIVICDESK_SECRET_PREFIX
 export CIVICDESK_PORT="${CIVICDESK_PORT:-8080}"
 export MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-9001}"
+export MINIO_REPLICAS="${MINIO_REPLICAS:-1}"
 export CIVICDESK_TAG="${CIVICDESK_TAG:-latest}"
 export CIVICDESK_REGISTRY="${CIVICDESK_REGISTRY:-}"
+CIVICDESK_PULL_ONLY="${CIVICDESK_PULL_ONLY:-false}"
 
 # 1. Swarm mode
 if [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" != "active" ]; then
@@ -60,23 +62,38 @@ create_secret "${CIVICDESK_SECRET_PREFIX}minio_root_user"     "${MINIO_ROOT_USER
 create_secret "${CIVICDESK_SECRET_PREFIX}minio_root_password" "${MINIO_ROOT_PASSWORD:-$(rand)}"
 
 # 3. Images
-echo "==> Building frontend bundle"
-(cd web && ([ -d node_modules ] || npm ci) && npm run build)
+if [ "$CIVICDESK_PULL_ONLY" = "true" ]; then
+  echo "==> Pulling pre-built images (${CIVICDESK_REGISTRY:-local})"
+  PULL_LIST="api web"
+  if [ "$MINIO_REPLICAS" != "0" ]; then
+    PULL_LIST="$PULL_LIST minio minio-init"
+  fi
+  for name in $PULL_LIST; do
+    docker pull "${CIVICDESK_REGISTRY}civicdesk-${name}:${CIVICDESK_TAG}"
+  done
+else
+  echo "==> Building frontend bundle"
+  (cd web && ([ -d node_modules ] || npm ci) && npm run build)
 
-echo "==> Building images"
-IMAGES="api:api web:web minio:minio minio-init:minio/init"
-for pair in $IMAGES; do
-  name="${pair%%:*}"; ctx="${pair#*:}"
-  docker build -q -t "${CIVICDESK_REGISTRY}civicdesk-${name}:${CIVICDESK_TAG}" "$ctx"
-  if [ -n "$CIVICDESK_REGISTRY" ]; then docker push "${CIVICDESK_REGISTRY}civicdesk-${name}:${CIVICDESK_TAG}"; fi
-done
+  echo "==> Building images"
+  IMAGES="api:api web:web minio:minio minio-init:minio/init"
+  for pair in $IMAGES; do
+    name="${pair%%:*}"; ctx="${pair#*:}"
+    docker build -q -t "${CIVICDESK_REGISTRY}civicdesk-${name}:${CIVICDESK_TAG}" "$ctx"
+    if [ -n "$CIVICDESK_REGISTRY" ]; then docker push "${CIVICDESK_REGISTRY}civicdesk-${name}:${CIVICDESK_TAG}"; fi
+  done
+fi
 
 # 4. Deploy
 echo "==> Deploying stack '$STACK_NAME'"
 docker stack deploy --detach=true -c docker-stack.yml "$STACK_NAME"
 
-# Force services onto freshly built :latest images
-for svc in api web minio; do
+# Force services onto freshly built/pulled images
+UPDATE_SVCS="api web"
+if [ "$MINIO_REPLICAS" != "0" ]; then
+  UPDATE_SVCS="$UPDATE_SVCS minio"
+fi
+for svc in $UPDATE_SVCS; do
   docker service update --detach=true --force --quiet \
     --image "${CIVICDESK_REGISTRY}civicdesk-${svc}:${CIVICDESK_TAG}" \
     "${STACK_NAME}_${svc}" >/dev/null
