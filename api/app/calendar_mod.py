@@ -15,6 +15,7 @@
 
 """City Calendar & Configurable Facility Reservations module."""
 from datetime import date, datetime, timezone
+import os
 from typing import Literal
 import uuid
 
@@ -84,11 +85,12 @@ def bootstrap() -> None:
     with pool.connection() as conn:
         conn.execute("SELECT pg_advisory_xact_lock(424246)")
         conn.execute(SCHEMA)
-        conn.execute(
-            "INSERT INTO reservable_facilities (name, description, daily_fee, capacity, rules, sort_order) "
-            "VALUES ('Village Hall', 'Main municipal meeting hall available for community and private events.', '$75.00', '', 'Please leave hall clean and remove all trash after your event.', 1) "
-            "ON CONFLICT (name) DO NOTHING"
-        )
+        if os.environ.get("SEED_CITY_PROFILE", "").strip().lower() == "birchwood":
+            conn.execute(
+                "INSERT INTO reservable_facilities (name, description, daily_fee, capacity, rules, sort_order) "
+                "VALUES ('Village Hall', 'Main municipal meeting hall available for community and private events.', '$75.00', '', 'Please leave hall clean and remove all trash after your event.', 1) "
+                "ON CONFLICT (name) DO NOTHING"
+            )
 
 
 def _row_to_facility(r) -> dict:

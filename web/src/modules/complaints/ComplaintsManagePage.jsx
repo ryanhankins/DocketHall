@@ -221,9 +221,9 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h2 style={{ margin: 0 }}>Complaint Queue &amp; Investigations (Section 618)</h2>
+          <h2 style={{ margin: 0 }}>Complaint Queue &amp; Investigations</h2>
           <p className="muted" style={{ margin: '4px 0 0' }}>
-            Staff workbench for investigations, Notices of Violation (≤60 days), Council referrals, and Log Book resolutions.
+            Staff workbench for investigations, Notices of Violation, Council/Board referrals, and Log Book resolutions.
           </p>
         </div>
         <button
@@ -260,7 +260,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
 
       {showOralForm && (
         <form className="card" onSubmit={handleLogOral} style={{ display: 'grid', gap: 10 }}>
-          <h3 style={{ margin: 0 }}>Log Oral, Anonymous, or Written Complaint (Section 618.020)</h3>
+          <h3 style={{ margin: 0 }}>Log Oral, Anonymous, or Written Complaint</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
             <label>
               <div className="muted" style={{ fontSize: 12 }}>Intake Channel</div>
@@ -419,7 +419,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                 fontSize: 13,
               }}
             >
-              <strong>Confidential Complainant Data (MN Stat. § 13.44 — Never in Public Log):</strong>
+              <strong>Confidential Complainant Data (Never in Public Log):</strong>
               {!canViewPrivate ? (
                 <div className="muted">
                   Restricted — requires <code>complaints.view_private</code> permission.
@@ -454,7 +454,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                   </select>
                 </label>
                 <label>
-                  <div className="muted" style={{ fontSize: 12 }}>Assisting Agency (618.030)</div>
+                  <div className="muted" style={{ fontSize: 12 }}>Assisting Agency</div>
                   <select
                     className="input"
                     value={editForm.assisting_agency}
@@ -472,7 +472,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                   />
                 </label>
                 <label>
-                  <div className="muted" style={{ fontSize: 12 }}>Council Meeting Date (618.050)</div>
+                  <div className="muted" style={{ fontSize: 12 }}>Council / Board Meeting Date</div>
                   <input
                     type="date"
                     className="input"
@@ -508,7 +508,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
 
               <label>
                 <div className="muted" style={{ fontSize: 12 }}>
-                  Final Resolution (PUBLIC Log Book — Section 618.070)
+                  Final Resolution (PUBLIC Log Book)
                 </div>
                 <textarea
                   className="input"
@@ -553,7 +553,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                   gap: 8,
                 }}
               >
-                <strong>Issue Notice of Violation (Section 618.040)</strong>
+                <strong>Issue Notice of Violation</strong>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                   <label>
                     <div className="muted" style={{ fontSize: 12 }}>Issuing Official *</div>

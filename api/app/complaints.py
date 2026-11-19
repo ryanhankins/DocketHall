@@ -145,7 +145,44 @@ CREATE TABLE IF NOT EXISTS complaint_messages (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS complaint_messages_cid_idx ON complaint_messages(complaint_id, id);
+CREATE TABLE IF NOT EXISTS complaint_settings (
+    id                  INTEGER PRIMARY KEY CHECK (id = 1),
+    code_citation       TEXT NOT NULL DEFAULT '',
+    privacy_statute     TEXT NOT NULL DEFAULT '',
+    max_compliance_days INTEGER NOT NULL DEFAULT 60,
+    ordinance_presets   JSONB NOT NULL DEFAULT '["Zoning / Land Use","Property Maintenance / Nuisance","Noise / Animal Control","Sign / Right-of-Way","Other / Unknown"]'::jsonb,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
+
+_DEFAULT_ORDINANCE_PRESETS = [
+    "Zoning / Land Use",
+    "Property Maintenance / Nuisance",
+    "Noise / Animal Control",
+    "Sign / Right-of-Way",
+    "Other / Unknown",
+]
+
+
+def _load_complaint_settings(conn) -> dict:
+    row = conn.execute(
+        "SELECT code_citation, privacy_statute, max_compliance_days, ordinance_presets "
+        "FROM complaint_settings WHERE id = 1"
+    ).fetchone()
+    if not row:
+        return {
+            "code_citation": "",
+            "privacy_statute": "",
+            "max_compliance_days": 60,
+            "ordinance_presets": list(_DEFAULT_ORDINANCE_PRESETS),
+        }
+    presets = [str(p).strip() for p in (row[3] or []) if str(p).strip()]
+    return {
+        "code_citation": row[0] or "",
+        "privacy_statute": row[1] or "",
+        "max_compliance_days": int(row[2]) if row[2] is not None else 60,
+        "ordinance_presets": presets or list(_DEFAULT_ORDINANCE_PRESETS),
+    }
 
 
 def bootstrap() -> None:
@@ -454,16 +491,58 @@ def _create_complaint_row(
         f"[CivicDesk] New Complaint {cnum}",
         f"Complaint {cnum} ({'anonymous' if is_anon else channel}) was filed"
         + (f" regarding {body.subject_property_address.strip()}" if body.subject_property_address.strip() else "")
-        + ".\n\n(Complainant identity is kept confidential in CivicDesk per MN Stat. 13.44.)",
+        + ".\n\n(Complainant identity is kept confidential in CivicDesk per applicable public-records law.)",
         link_path=f"/app#complaints-manage/{cid}",
         request=request,
     )
     return _serialize_private(row, docs=docs, activity=act, include_internal=False)
 
 
+class ComplaintSettingsIn(BaseModel):
+    code_citation: str = ""
+    privacy_statute: str = ""
+    max_compliance_days: int = 60
+    ordinance_presets: list[str] = list(_DEFAULT_ORDINANCE_PRESETS)
+
+
+@router.get("/settings")
+def get_complaint_settings():
+    with pool.connection() as conn:
+        return _load_complaint_settings(conn)
+
+
+@router.put("/settings")
+def update_complaint_settings(
+    body: ComplaintSettingsIn,
+    user: dict = Depends(require_permission("complaints.manage")),
+):
+    from psycopg.types.json import Jsonb
+
+    max_days = max(0, min(3650, int(body.max_compliance_days)))
+    presets = [str(p).strip() for p in (body.ordinance_presets or []) if str(p).strip()]
+    if not presets:
+        presets = list(_DEFAULT_ORDINANCE_PRESETS)
+    with pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO complaint_settings "
+            "(id, code_citation, privacy_statute, max_compliance_days, ordinance_presets, updated_at) "
+            "VALUES (1, %s, %s, %s, %s, now()) "
+            "ON CONFLICT (id) DO UPDATE SET "
+            "code_citation = EXCLUDED.code_citation, "
+            "privacy_statute = EXCLUDED.privacy_statute, "
+            "max_compliance_days = EXCLUDED.max_compliance_days, "
+            "ordinance_presets = EXCLUDED.ordinance_presets, "
+            "updated_at = now()",
+            (body.code_citation.strip(), body.privacy_statute.strip(), max_days, Jsonb(presets)),
+        )
+        res = _load_complaint_settings(conn)
+    record_audit(user["username"], "complaints.settings.update", "complaint_settings", "1", "Updated complaint settings")
+    return res
+
+
 @router.post("/public")
 def file_public_complaint(body: ComplaintCreateIn, request: Request):
-    """Public / anonymous complaint filing endpoint (no fee, MN Stat. 13.44 confidentiality)."""
+    """Public / anonymous complaint filing endpoint (no fee, confidential complainant protection)."""
     user = current_user(request)
     return _create_complaint_row(body, user, allow_staff_channel=False, request=request)
 
@@ -729,13 +808,15 @@ def issue_notice_of_violation(
     today = date.today()
     if dl < today:
         raise HTTPException(status_code=400, detail="Compliance deadline cannot be in the past")
-    if dl > today + timedelta(days=60):
-        raise HTTPException(
-            status_code=400,
-            detail="Per Section 618.040, compliance deadline cannot exceed 60 days from the Notice date",
-        )
 
     with pool.connection() as conn:
+        settings = _load_complaint_settings(conn)
+        max_days = settings["max_compliance_days"]
+        if max_days > 0 and dl > today + timedelta(days=max_days):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Compliance deadline cannot exceed {max_days} days from the Notice date",
+            )
         with conn.transaction():
             row = conn.execute(
                 f"""

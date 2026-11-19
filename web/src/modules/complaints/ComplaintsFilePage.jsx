@@ -93,10 +93,10 @@ export default function ComplaintsFilePage({ me, onNavigate }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 1040 }}>
       <div>
-        <h2 style={{ margin: 0 }}>File an Administrative Complaint (Section 618)</h2>
+        <h2 style={{ margin: 0 }}>File an Administrative Complaint</h2>
         <p className="muted" style={{ margin: '4px 0 0' }}>
-          There is <strong>no cost or fee</strong> to file a complaint. Pursuant to City Code Section 618.020
-          and Minnesota Statutes § 13.44, your name and contact details are kept{' '}
+          There is <strong>no cost or fee</strong> to file a complaint. Pursuant to applicable
+          public-records law, your name and contact details are kept{' '}
           <strong>confidential</strong> and are never published in the Complaint Log Book.
         </p>
       </div>
@@ -110,7 +110,7 @@ export default function ComplaintsFilePage({ me, onNavigate }) {
             <strong>Complaint Filed:</strong> {submittedRec.complaint_number}
           </div>
           <div className="muted" style={{ fontSize: 14 }}>
-            Your complaint has been logged for staff review under Section 618.030.
+            Your complaint has been logged for staff review.
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {!submittedRec.is_anonymous && (
@@ -159,7 +159,7 @@ export default function ComplaintsFilePage({ me, onNavigate }) {
               onChange={(e) => setIsAnonymous(e.target.checked)}
             />
             <span>
-              File anonymously (accepted at staff discretion per Section 618.020; no personal contact stored)
+              File anonymously (accepted at staff discretion; no personal contact stored)
             </span>
           </label>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -169,7 +169,7 @@ export default function ComplaintsFilePage({ me, onNavigate }) {
               onChange={(e) => setIsRealProperty(e.target.checked)}
             />
             <span>
-              Complaint involves the use of real property (protected under MN Stat. § 13.44)
+              Complaint involves the use of real property (confidential complainant protection)
             </span>
           </label>
 
@@ -223,7 +223,7 @@ export default function ComplaintsFilePage({ me, onNavigate }) {
           )}
         </div>
 
-        <h3 style={{ margin: '4px 0 0' }}>Complaint Details (Section 618.020)</h3>
+        <h3 style={{ margin: '4px 0 0' }}>Complaint Details</h3>
         <div
           style={{
             display: 'grid',
@@ -284,7 +284,7 @@ export default function ComplaintsFilePage({ me, onNavigate }) {
             style={{ width: '100%', minHeight: 180, boxSizing: 'border-box', resize: 'vertical' }}
             value={conduct}
             onChange={(e) => setConduct(e.target.value)}
-            placeholder="Describe the conduct, location, and any prior personal contact attempts (Section 618.010 / 618.020)..."
+            placeholder="Describe the conduct, location, and any prior personal contact attempts..."
           />
         </label>
 

@@ -53,10 +53,10 @@ export default function ComplaintLogPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div>
-        <h2 style={{ margin: 0 }}>Complaint Log Book (Section 618.025 &amp; 618.070)</h2>
+        <h2 style={{ margin: 0 }}>Complaint Log Book</h2>
         <p className="muted" style={{ margin: '4px 0 0' }}>
           Official log of written, anonymous, and investigated oral complaints and their final resolutions.
-          Complainant names and confidential data are excluded per Section 618.025 and MN Stat. § 13.44.
+          Complainant names and confidential data are excluded per applicable public-records law.
         </p>
       </div>
 
@@ -176,7 +176,7 @@ export default function ComplaintLogPage() {
             {selected.investigation_report && (
               <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 10 }}>
                 <div className="muted" style={{ fontSize: 12 }}>
-                  Written Investigation Report (Section 618.030)
+                  Written Investigation Report
                 </div>
                 <div style={{ whiteSpace: 'pre-wrap' }}>{selected.investigation_report}</div>
               </div>
@@ -192,7 +192,7 @@ export default function ComplaintLogPage() {
                   fontSize: 13,
                 }}
               >
-                <strong>Notice of Violation (Section 618.040)</strong>
+                <strong>Notice of Violation</strong>
                 <div>Issued: {formatDate(selected.nov_issued_at)} by {selected.nov_issuing_official}</div>
                 <div>Compliance Deadline: {selected.nov_compliance_deadline}</div>
                 {selected.nov_required_action && (
@@ -211,7 +211,7 @@ export default function ComplaintLogPage() {
                   fontSize: 13,
                 }}
               >
-                <strong>Final Resolution (Section 618.070)</strong>
+                <strong>Final Resolution</strong>
                 <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{selected.final_resolution}</div>
               </div>
             )}

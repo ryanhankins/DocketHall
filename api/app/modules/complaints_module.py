@@ -13,11 +13,17 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Administrative Complaints module definition (Section 618)."""
+"""Administrative & Code Complaints module definition."""
 from .. import complaints
 from ..registry import CivicModule
 
 COMPLAINTS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
+    (
+        "complaint_settings",
+        ["id", "code_citation", "privacy_statute", "max_compliance_days", "ordinance_presets", "updated_at"],
+        {"ordinance_presets"},
+        False,
+    ),
     (
         "complaints",
         [
@@ -61,12 +67,12 @@ COMPLAINTS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
 MODULE = CivicModule(
     id="complaints",
     name="Administrative Complaints",
-    description="Zero-fee complaint intake, MN Stat. 13.44 confidential complainant tracking, public Complaint Log Book, investigations, and Notices of Violation (Section 618).",
+    description="Zero-fee complaint intake, confidential complainant tracking, public Complaint Log Book, investigations, and Notices of Violation.",
     routers=[complaints.router],
     bootstrap=complaints.bootstrap,
     permissions=[
         {"key": "complaints.manage", "label": "Investigate Complaints, Manage Log Book & Issue Notices"},
-        {"key": "complaints.view_private", "label": "View Confidential Complainant Identity & Private Data (MN Stat. 13.44)"},
+        {"key": "complaints.view_private", "label": "View Confidential Complainant Identity & Private Data"},
         {"key": "complaints.submit", "label": "File Complaints & Track My Complaints"},
         {"key": "complaints.log", "label": "View Public Complaint Log Book"},
     ],
@@ -84,7 +90,7 @@ MODULE = CivicModule(
         {
             "id": "complaints-resident",
             "label": "Complaints",
-            "section_title": "Complaints (Sec. 618)",
+            "section_title": "Complaints",
             "permission": "complaints.log",
             "items": [
                 {"section": "complaints-file", "label": "File a Complaint", "permission": "complaints.submit"},

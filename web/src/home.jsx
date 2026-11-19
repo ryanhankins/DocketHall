@@ -52,14 +52,14 @@ const TAB_DEFS = [
   },
   {
     id: 'complaints',
-    label: 'Complaints (Sec. 618)',
+    label: 'Complaints',
     description: 'View the public Complaint Log Book or file a complaint at no cost (no account required).',
     actionLabel: 'Open Complaints →',
   },
   {
     id: 'calendar',
-    label: 'City Calendar & Hall Rentals',
-    description: 'View upcoming meetings, city events, and reserve Village Hall or other public facilities.',
+    label: 'City Calendar & Facility Reservations',
+    description: 'View upcoming meetings, city events, and reserve municipal facilities.',
     actionLabel: 'View Calendar & Reserve →',
   },
 ];
@@ -908,7 +908,7 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
         });
       }
       setFormMsg({
-        text: `Complaint ${created.complaint_number} filed at no cost. Confidential complainant details are protected under MN Stat. § 13.44.`,
+        text: `Complaint ${created.complaint_number} filed at no cost. Confidential complainant details are protected under applicable public-records law.`,
         isError: false,
       });
       setConduct('');
@@ -930,7 +930,7 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem' }}>
           <ServiceIcon id="complaints" size={20} badge />
           <div>
-            <h2 style={{ margin: 0 }}>Administrative Complaints (Section 618)</h2>
+            <h2 style={{ margin: 0 }}>Administrative &amp; Code Complaints</h2>
             <p className="muted" style={{ margin: '4px 0 0' }}>
               View the public Complaint Log Book or file a complaint at no cost without an account.
             </p>
@@ -963,11 +963,11 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
             <strong>Complainant Privacy &amp; Contact (Confidential — Never in Public Log)</strong>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <input type="checkbox" checked={isAnonymous} onChange={(e) => setIsAnonymous(e.target.checked)} />
-              <span>File anonymously (accepted at staff discretion per Section 618.020)</span>
+              <span>File anonymously (accepted at staff discretion)</span>
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <input type="checkbox" checked={isRealProperty} onChange={(e) => setIsRealProperty(e.target.checked)} />
-              <span>Complaint involves the use of real property (protected under MN Stat. § 13.44)</span>
+              <span>Complaint involves the use of real property (confidential complainant protection)</span>
             </label>
             {!isAnonymous && (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
@@ -1019,7 +1019,7 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
               style={{ width: '100%', minHeight: 180, boxSizing: 'border-box', resize: 'vertical' }}
               value={conduct}
               onChange={(e) => setConduct(e.target.value)}
-              placeholder="Describe the conduct, location, and any prior personal contact attempts (Section 618.010 / 618.020)..."
+              placeholder="Describe the conduct, location, and any prior personal contact attempts..."
             />
           </label>
           <label>

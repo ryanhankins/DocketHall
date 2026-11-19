@@ -246,7 +246,7 @@ export default function CalendarManagePage() {
               </div>
               <div className="field" style={{ flex: 1, minWidth: 180 }}>
                 <label>Location (optional)</label>
-                <input placeholder="e.g. Village Hall" value={evForm.location} onChange={(e) => setEvForm(f => ({ ...f, location: e.target.value }))} />
+                <input placeholder="e.g. Community Center" value={evForm.location} onChange={(e) => setEvForm(f => ({ ...f, location: e.target.value }))} />
               </div>
               <div className="field" style={{ flex: 2, minWidth: 220 }}>
                 <label>Notes / Description</label>

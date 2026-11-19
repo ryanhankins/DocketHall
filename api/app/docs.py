@@ -146,7 +146,7 @@ CivicDesk brings meeting agendas, permits, city code, public records, complaints
 
 ## Calendar & Reservations
 - Finalized meetings appear automatically on the Public Calendar.
-- Staff can add community events and manage reservable facilities (such as Village Hall) and reservation requests.""",
+- Staff can add community events and manage reservable municipal facilities and reservation requests.""",
     ),
     (
         "admin-setup",

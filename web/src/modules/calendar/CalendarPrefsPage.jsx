@@ -24,7 +24,7 @@ const CALENDAR_NOTIFICATION_EVENTS = [
   {
     key: 'calendar_reservation_requested',
     label: 'New Facility Reservation Request',
-    description: 'Sent when a resident submits a request to reserve a municipal facility (e.g. Village Hall).',
+    description: 'Sent when a resident submits a request to reserve a municipal facility.',
   },
 ];
 
