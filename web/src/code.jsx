@@ -19,7 +19,7 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../app.css';
 import ServiceIcon from './core/ServiceIcon.jsx';
-import { DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { CivicDeskLogo, DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
 import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
 
@@ -70,7 +70,10 @@ function PublicCityCode() {
             <img src="/api/branding/logo" alt="City Logo" style={{ height: '56px', width: 'auto', borderRadius: '4px', objectFit: 'contain' }} />
           )}
           {branding.city_title && <span>{branding.city_title}</span>}
-          <span>City Code</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
+            <CivicDeskLogo size={24} />
+            <span>City Code</span>
+          </span>
         </a>
         <div className="user-bar">
           <DirectoryHeaderLink branding={branding} />

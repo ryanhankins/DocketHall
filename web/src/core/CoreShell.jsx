@@ -19,6 +19,7 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { ROLE_LABELS, api, downloadBackupArchive, hasPermission, todayIso } from './api.js';
 import { loadEnabledFrontendModules } from './registry.js';
 import ServiceIcon from './ServiceIcon.jsx';
+import { CivicDeskLogo } from './PublicChrome.jsx';
 import { applyTheme } from './theme.js';
 import { useToast } from './toast.jsx';
 
@@ -299,7 +300,10 @@ export default function CoreShell() {
             />
           )}
           {branding.cityTitle && <span id="brand-city-title">{branding.cityTitle}</span>}
-          <span>CivicDesk</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
+            <CivicDeskLogo size={24} />
+            <span>CivicDesk</span>
+          </span>
         </a>
         <div className="user-bar">
           <span id="whoami">

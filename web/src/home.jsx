@@ -20,7 +20,7 @@ import { createRoot } from 'react-dom/client';
 import '../app.css';
 import { ROLE_LABELS, formatDate, formatSize, formatTime12h } from './core/api.js';
 import ServiceIcon from './core/ServiceIcon.jsx';
-import { DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { CivicDeskLogo, DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
 import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
 import { COMPLAINT_STATUSES, ORDINANCE_PRESETS, StatusBadge } from './modules/complaints/constants.jsx';
@@ -1604,7 +1604,10 @@ function PublicHomePage() {
             <img alt="City Logo" src="/api/branding/logo" style={{ height: '52px', width: 'auto', borderRadius: '4px', objectFit: 'contain' }} />
           )}
           {branding.city_title && <span>{branding.city_title}</span>}
-          <span>CivicDesk</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
+            <CivicDeskLogo size={24} />
+            <span>CivicDesk</span>
+          </span>
         </a>
         <div className="user-bar">
           <DirectoryHeaderLink branding={branding} />

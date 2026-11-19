@@ -1,4 +1,4 @@
-# CivicDesk
+# <img src="web/public/civicdesk-logo.svg" alt="CivicDesk logo" width="32" height="32" align="absmiddle" /> CivicDesk
 
 CivicDesk is a self-hosted, modular municipal operations platform built for city clerks, staff, councilmembers, and residents. It combines a **Public Services & Records Portal** with an authenticated **Workspace** for managing meeting agendas, permits, municipal code, public records, code-enforcement complaints, and community calendars.
 

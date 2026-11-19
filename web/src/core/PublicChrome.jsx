@@ -126,3 +126,16 @@ export function DirectoryHeaderLink({ branding }) {
     </a>
   );
 }
+
+export function CivicDeskLogo({ size = 24 }) {
+  return (
+    <img
+      src="/civicdesk-logo.svg"
+      alt=""
+      width={size}
+      height={size}
+      aria-hidden="true"
+      style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
+    />
+  );
+}
