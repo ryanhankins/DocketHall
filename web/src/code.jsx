@@ -19,6 +19,7 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../app.css';
 import ServiceIcon from './core/ServiceIcon.jsx';
+import { PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
 
 function PublicCityCode() {
@@ -55,6 +56,7 @@ function PublicCityCode() {
 
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#f5f7fa' }}>
+      <UrgentAlertBanner branding={branding} />
       <header>
         <a
           href="/"
@@ -167,6 +169,7 @@ function PublicCityCode() {
           </>
         )}
       </main>
+      <PublicFooter branding={branding} />
     </div>
   );
 }

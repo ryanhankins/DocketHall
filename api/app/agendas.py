@@ -231,6 +231,15 @@ ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS city_title TEXT NOT NULL
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS backup_reminder_days INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS last_backup_at TIMESTAMPTZ;
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS posting_notice_hours INTEGER NOT NULL DEFAULT 72;
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS alert_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS alert_level TEXT NOT NULL DEFAULT 'danger';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS alert_title TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS alert_message TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS alert_link_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS alert_link_label TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS footer_text TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS city_website_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS city_website_label TEXT NOT NULL DEFAULT '';
 """
 
 _minio_client: Minio | None = None
@@ -698,6 +707,15 @@ class AgendaCategoryIn(BaseModel):
 
 class GeneralPreferencesIn(BaseModel):
     city_title: str = ""
+    alert_enabled: bool = False
+    alert_level: Literal["danger", "warning", "info"] = "danger"
+    alert_title: str = ""
+    alert_message: str = ""
+    alert_link_url: str = ""
+    alert_link_label: str = ""
+    footer_text: str = ""
+    city_website_url: str = ""
+    city_website_label: str = ""
 
 
 class AgendaPreferencesIn(BaseModel):
@@ -719,7 +737,9 @@ def _load_preferences(conn) -> dict:
         "SELECT include_item_cover_sheets, include_page_numbers, "
         "       city_name, meeting_location, meeting_time, other_notes, "
         "       footer_disclosures, bodies, city_logo_key, sections, categories, "
-        "       city_title, posting_notice_hours "
+        "       city_title, posting_notice_hours, "
+        "       alert_enabled, alert_level, alert_title, alert_message, alert_link_url, alert_link_label, "
+        "       footer_text, city_website_url, city_website_label "
         "FROM agenda_preferences WHERE id = 1"
     ).fetchone()
     if not row:
@@ -736,6 +756,15 @@ def _load_preferences(conn) -> dict:
             "sections": list(DEFAULT_SECTIONS),
             "categories": [dict(c) for c in DEFAULT_CATEGORIES],
             "posting_notice_hours": 72,
+            "alert_enabled": False,
+            "alert_level": "danger",
+            "alert_title": "",
+            "alert_message": "",
+            "alert_link_url": "",
+            "alert_link_label": "",
+            "footer_text": "",
+            "city_website_url": "",
+            "city_website_label": "",
             "city_logo_key": "",
             "has_city_logo": False,
         }
@@ -761,6 +790,15 @@ def _load_preferences(conn) -> dict:
         "sections": list(row[9]) if row[9] is not None else list(DEFAULT_SECTIONS),
         "categories": cats,
         "posting_notice_hours": int(row[12]) if row[12] is not None else 72,
+        "alert_enabled": bool(row[13]),
+        "alert_level": row[14] or "danger",
+        "alert_title": row[15] or "",
+        "alert_message": row[16] or "",
+        "alert_link_url": row[17] or "",
+        "alert_link_label": row[18] or "",
+        "footer_text": row[19] or "",
+        "city_website_url": row[20] or "",
+        "city_website_label": row[21] or "",
         "city_logo_key": logo_key,
         "has_city_logo": bool(logo_key),
     }
@@ -779,19 +817,61 @@ def get_preferences_branding():
     return {
         "city_title": prefs.get("city_title", ""),
         "has_city_logo": bool(prefs.get("has_city_logo", False)),
+        "alert_enabled": bool(prefs.get("alert_enabled", False)),
+        "alert_level": prefs.get("alert_level", "danger"),
+        "alert_title": prefs.get("alert_title", ""),
+        "alert_message": prefs.get("alert_message", ""),
+        "alert_link_url": prefs.get("alert_link_url", ""),
+        "alert_link_label": prefs.get("alert_link_label", ""),
+        "footer_text": prefs.get("footer_text", ""),
+        "city_website_url": prefs.get("city_website_url", ""),
+        "city_website_label": prefs.get("city_website_label", ""),
     }
+
+
+def _validate_optional_http_url(url: str, field_label: str) -> str:
+    clean = url.strip()
+    if not clean:
+        return ""
+    if not clean.startswith(("http://", "https://")) or len(clean) > 500:
+        raise HTTPException(status_code=400, detail=f"{field_label} must start with http:// or https://")
+    return clean
 
 
 @router.put("/preferences/general")
 def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get_staff_user)):
+    alert_url = _validate_optional_http_url(body.alert_link_url, "Alert link URL")
+    city_url = _validate_optional_http_url(body.city_website_url, "Main city website URL")
     with pool.connection() as conn:
         conn.execute(
-            "INSERT INTO agenda_preferences (id, city_title, updated_at) "
-            "VALUES (1, %s, now()) "
+            "INSERT INTO agenda_preferences "
+            "(id, city_title, alert_enabled, alert_level, alert_title, alert_message, "
+            " alert_link_url, alert_link_label, footer_text, city_website_url, city_website_label, updated_at) "
+            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
             "ON CONFLICT (id) DO UPDATE SET "
             "city_title = EXCLUDED.city_title, "
+            "alert_enabled = EXCLUDED.alert_enabled, "
+            "alert_level = EXCLUDED.alert_level, "
+            "alert_title = EXCLUDED.alert_title, "
+            "alert_message = EXCLUDED.alert_message, "
+            "alert_link_url = EXCLUDED.alert_link_url, "
+            "alert_link_label = EXCLUDED.alert_link_label, "
+            "footer_text = EXCLUDED.footer_text, "
+            "city_website_url = EXCLUDED.city_website_url, "
+            "city_website_label = EXCLUDED.city_website_label, "
             "updated_at = now()",
-            (body.city_title.strip(),),
+            (
+                body.city_title.strip(),
+                bool(body.alert_enabled),
+                body.alert_level,
+                body.alert_title.strip(),
+                body.alert_message.strip(),
+                alert_url,
+                body.alert_link_label.strip(),
+                body.footer_text.strip(),
+                city_url,
+                body.city_website_label.strip(),
+            ),
         )
         return _load_preferences(conn)
 

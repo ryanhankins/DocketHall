@@ -20,6 +20,7 @@ import { createRoot } from 'react-dom/client';
 import '../app.css';
 import { ROLE_LABELS, formatDate, formatSize, formatTime12h } from './core/api.js';
 import ServiceIcon from './core/ServiceIcon.jsx';
+import { PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
 import { COMPLAINT_STATUSES, ORDINANCE_PRESETS, StatusBadge } from './modules/complaints/constants.jsx';
 
@@ -1114,8 +1115,9 @@ function PublicHomePage() {
   }
 
   return (
-    <>
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
+      <UrgentAlertBanner branding={branding} />
       <header>
         <a
           href="/#overview"
@@ -1266,7 +1268,8 @@ function PublicHomePage() {
         reason={authModal.reason}
         onClose={() => setAuthModal((prev) => ({ ...prev, open: false }))}
       />
-    </>
+      <PublicFooter branding={branding} />
+    </div>
   );
 }
 
