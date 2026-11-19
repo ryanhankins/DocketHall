@@ -34,6 +34,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .agendas import _bucket, _minio, _remove_minio_objects
+from .audit import record_audit
 from .auth import has_permission, require_permission
 from .db import pool
 from .integrations import send_direct_email, send_notification_email
@@ -1302,6 +1303,7 @@ def update_permit(
         status_changed = body.status is not None and body.status != cur["status"]
         result = _get_permit_or_404(conn, permit_id, include_internal=has_permission(user, "permits.manage"))
     if status_changed:
+        record_audit(user["username"], "permit.status_changed", "permits", cur["permit_number"], f"{cur['permit_number']}: {cur['status']} -> {body.status}")
         send_notification_email(
             "permits_updated",
             f"[CivicDesk] Permit {cur['permit_number']} Status: {body.status}",
@@ -1624,7 +1626,7 @@ def renew_permit(
 
 
 @router.delete("/{permit_id}")
-def delete_permit(permit_id: int, _: dict = Depends(require_permission("permits.manage"))):
+def delete_permit(permit_id: int, admin: dict = Depends(require_permission("permits.manage"))):
     with pool.connection() as conn:
         keys = [
             r[0]
@@ -1632,10 +1634,11 @@ def delete_permit(permit_id: int, _: dict = Depends(require_permission("permits.
                 "SELECT object_key FROM permit_documents WHERE permit_id = %s", (permit_id,)
             ).fetchall()
         ]
-        row = conn.execute("DELETE FROM permits WHERE id = %s RETURNING id", (permit_id,)).fetchone()
+        row = conn.execute("DELETE FROM permits WHERE id = %s RETURNING id, permit_number", (permit_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Permit not found")
     _remove_minio_objects(keys)
+    record_audit(admin["username"], "permit.deleted", "permits", row[1], f"Deleted permit {row[1]}")
     return {"deleted": True, "id": permit_id}
 
 

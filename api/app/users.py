@@ -23,6 +23,7 @@ from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
+from .audit import record_audit
 from .auth import effective_permissions, hash_password, require_admin
 from .db import pool
 
@@ -94,7 +95,7 @@ def list_users(_: dict = Depends(require_admin)):
 
 
 @router.post("", status_code=201)
-def create_user(body: CreateUserIn, _: dict = Depends(require_admin)):
+def create_user(body: CreateUserIn, admin: dict = Depends(require_admin)):
     username = body.username.strip()
     if not _USERNAME_RE.match(username):
         raise HTTPException(
@@ -116,6 +117,7 @@ def create_user(body: CreateUserIn, _: dict = Depends(require_admin)):
 
     user = _row_to_user(row)
     user["generated_password"] = password
+    record_audit(admin["username"], "user.created", "users", user["id"], f"Created user '{username}' (role={body.role})")
     return user
 
 
@@ -155,11 +157,13 @@ def update_user(user_id: int, body: UpdateUserIn, admin: dict = Depends(require_
         ).fetchone()
         if body.is_active is False:
             conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
-    return _row_to_user(row)
+    updated = _row_to_user(row)
+    record_audit(admin["username"], "user.updated", "users", user_id, f"Updated user '{updated['username']}' (role={updated['role']}, active={updated['is_active']})")
+    return updated
 
 
 @router.post("/{user_id}/reset-password")
-def reset_password(user_id: int, _: dict = Depends(require_admin)):
+def reset_password(user_id: int, admin: dict = Depends(require_admin)):
     password = generate_password()
     with pool.connection() as conn:
         row = conn.execute(
@@ -169,6 +173,7 @@ def reset_password(user_id: int, _: dict = Depends(require_admin)):
         if not row:
             raise HTTPException(status_code=404, detail="User not found")
         conn.execute("DELETE FROM sessions WHERE user_id = %s", (user_id,))
+    record_audit(admin["username"], "user.password_reset", "users", row[0], f"Reset password for '{row[1]}'")
     return {"id": row[0], "username": row[1], "generated_password": password}
 
 
@@ -178,8 +183,9 @@ def delete_user(user_id: int, admin: dict = Depends(require_admin)):
         raise HTTPException(status_code=400, detail="Cannot remove your own account")
     with pool.connection() as conn:
         row = conn.execute(
-            "DELETE FROM users WHERE id = %s RETURNING id", (user_id,)
+            "DELETE FROM users WHERE id = %s RETURNING id, username", (user_id,)
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="User not found")
+    record_audit(admin["username"], "user.deleted", "users", user_id, f"Deleted user '{row[1]}'")
     return {"deleted": True, "id": user_id}

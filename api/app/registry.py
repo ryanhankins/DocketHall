@@ -21,6 +21,7 @@ from typing import Callable
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from .audit import record_audit
 from .auth import current_user, has_permission, require_admin
 from .db import pool
 
@@ -189,7 +190,7 @@ def list_modules_admin(_: dict = Depends(require_admin)):
 def toggle_module_admin(
     module_id: str,
     body: ModuleToggleIn,
-    _: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
     if module_id not in _REGISTERED:
         raise HTTPException(status_code=404, detail="Module not found")
@@ -200,4 +201,11 @@ def toggle_module_admin(
             "ON CONFLICT (module_id) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = now()",
             (module_id, body.enabled),
         )
+    record_audit(
+        admin["username"],
+        "module.enabled" if body.enabled else "module.disabled",
+        "modules",
+        module_id,
+        f"{'Enabled' if body.enabled else 'Disabled'} module '{module_id}'",
+    )
     return list_modules_admin()

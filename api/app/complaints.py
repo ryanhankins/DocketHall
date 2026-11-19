@@ -29,6 +29,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from .agendas import _bucket, _minio
+from .audit import record_audit
 from .auth import current_user, has_permission, require_permission
 from .db import pool
 from .integrations import send_notification_email
@@ -1005,7 +1006,7 @@ def delete_complaint(complaint_id: int, user: dict = Depends(require_permission(
                     (complaint_id,),
                 ).fetchall()
             ]
-            row = conn.execute("DELETE FROM complaints WHERE id = %s RETURNING id", (complaint_id,)).fetchone()
+            row = conn.execute("DELETE FROM complaints WHERE id = %s RETURNING id, complaint_number", (complaint_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Complaint not found")
     mc = _minio()
@@ -1015,4 +1016,5 @@ def delete_complaint(complaint_id: int, user: dict = Depends(require_permission(
             mc.remove_object(bkt, k)
         except Exception:
             pass
+    record_audit(user["username"], "complaint.deleted", "complaints", row[1], f"Deleted complaint {row[1]}")
     return {"deleted": True, "id": complaint_id}

@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 
-from . import auth, backup, branding, integrations, registry, subscriptions, users
+from . import audit, auth, backup, branding, integrations, registry, subscriptions, users
 from .db import open_pool, pool
 from .modules import register_builtin_modules
 
@@ -28,6 +28,7 @@ register_builtin_modules()
 async def lifespan(app: FastAPI):
     open_pool()
     auth.bootstrap()
+    audit.bootstrap()
     integrations.bootstrap()
     subscriptions.bootstrap()
     registry.bootstrap()
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CivicDesk API", lifespan=lifespan)
 app.include_router(auth.router)
+app.include_router(audit.router)
 app.include_router(users.router)
 app.include_router(branding.router)
 app.include_router(integrations.router)

@@ -25,6 +25,7 @@ import { useToast } from './toast.jsx';
 const UsersPage = React.lazy(() => import('./UsersPage.jsx'));
 const ModulesPage = React.lazy(() => import('./ModulesPage.jsx'));
 const IntegrationsPage = React.lazy(() => import('./IntegrationsPage.jsx'));
+const AuditLogPage = React.lazy(() => import('./AuditLogPage.jsx'));
 const GeneralPrefsPage = React.lazy(() => import('./GeneralPrefsPage.jsx'));
 const BackupRestorePage = React.lazy(() => import('./BackupRestorePage.jsx'));
 
@@ -194,6 +195,9 @@ export default function CoreShell() {
     }
     if (hash === 'integrations' && isAdmin) {
       return { component: IntegrationsPage, props: {}, activeSection: 'integrations' };
+    }
+    if (hash === 'audit' && isAdmin) {
+      return { component: AuditLogPage, props: {}, activeSection: 'audit' };
     }
     if (hash === 'preferences-general' && canManageSettings) {
       return {
@@ -442,6 +446,15 @@ export default function CoreShell() {
                     onClick={() => navigate('#integrations')}
                   >
                     Email &amp; Integrations
+                  </button>
+                )}
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className={activeSection === 'audit' ? 'active' : ''}
+                    onClick={() => navigate('#audit')}
+                  >
+                    Audit Log
                   </button>
                 )}
                 {canManageSettings && (
