@@ -240,6 +240,8 @@ ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS alert_link_label TEXT NO
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS footer_text TEXT NOT NULL DEFAULT '';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS city_website_url TEXT NOT NULL DEFAULT '';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS city_website_label TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS directory_url TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS directory_label TEXT NOT NULL DEFAULT '';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_primary TEXT NOT NULL DEFAULT '#2563eb';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_secondary TEXT NOT NULL DEFAULT '#1d4ed8';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_tint TEXT NOT NULL DEFAULT '#e6f0ff';
@@ -722,6 +724,8 @@ class GeneralPreferencesIn(BaseModel):
     footer_text: str = ""
     city_website_url: str = ""
     city_website_label: str = ""
+    directory_url: str = ""
+    directory_label: str = ""
     theme_primary: str = "#2563eb"
     theme_secondary: str = "#1d4ed8"
     theme_tint: str = "#e6f0ff"
@@ -772,7 +776,8 @@ def _load_preferences(conn) -> dict:
         "       city_title, posting_notice_hours, "
         "       alert_enabled, alert_level, alert_title, alert_message, alert_link_url, alert_link_label, "
         "       footer_text, city_website_url, city_website_label, "
-        "       theme_primary, theme_secondary, theme_tint, theme_bg, theme_surface, theme_header_bg "
+        "       theme_primary, theme_secondary, theme_tint, theme_bg, theme_surface, theme_header_bg, "
+        "       directory_url, directory_label "
         "FROM agenda_preferences WHERE id = 1"
     ).fetchone()
     if not row:
@@ -798,6 +803,8 @@ def _load_preferences(conn) -> dict:
             "footer_text": "",
             "city_website_url": "",
             "city_website_label": "",
+            "directory_url": "",
+            "directory_label": "",
             **DEFAULT_THEME_COLORS,
             "city_logo_key": "",
             "has_city_logo": False,
@@ -839,6 +846,8 @@ def _load_preferences(conn) -> dict:
         "theme_bg": row[25] or DEFAULT_THEME_COLORS["theme_bg"],
         "theme_surface": row[26] or DEFAULT_THEME_COLORS["theme_surface"],
         "theme_header_bg": row[27] or DEFAULT_THEME_COLORS["theme_header_bg"],
+        "directory_url": row[28] or "",
+        "directory_label": row[29] or "",
         "city_logo_key": logo_key,
         "has_city_logo": bool(logo_key),
     }
@@ -866,6 +875,8 @@ def get_preferences_branding():
         "footer_text": prefs.get("footer_text", ""),
         "city_website_url": prefs.get("city_website_url", ""),
         "city_website_label": prefs.get("city_website_label", ""),
+        "directory_url": prefs.get("directory_url", ""),
+        "directory_label": prefs.get("directory_label", ""),
         "theme_primary": prefs.get("theme_primary", DEFAULT_THEME_COLORS["theme_primary"]),
         "theme_secondary": prefs.get("theme_secondary", DEFAULT_THEME_COLORS["theme_secondary"]),
         "theme_tint": prefs.get("theme_tint", DEFAULT_THEME_COLORS["theme_tint"]),
@@ -888,6 +899,7 @@ def _validate_optional_http_url(url: str, field_label: str) -> str:
 def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get_staff_user)):
     alert_url = _validate_optional_http_url(body.alert_link_url, "Alert link URL")
     city_url = _validate_optional_http_url(body.city_website_url, "Main city website URL")
+    directory_url = _validate_optional_http_url(body.directory_url, "Contact / Directory URL")
     theme_primary = _validate_hex_color(body.theme_primary, DEFAULT_THEME_COLORS["theme_primary"], "Primary color")
     theme_secondary = _validate_hex_color(body.theme_secondary, DEFAULT_THEME_COLORS["theme_secondary"], "Secondary color")
     theme_tint = _validate_hex_color(body.theme_tint, DEFAULT_THEME_COLORS["theme_tint"], "Highlight tint color")
@@ -899,8 +911,9 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
             "INSERT INTO agenda_preferences "
             "(id, city_title, alert_enabled, alert_level, alert_title, alert_message, "
             " alert_link_url, alert_link_label, footer_text, city_website_url, city_website_label, "
-            " theme_primary, theme_secondary, theme_tint, theme_bg, theme_surface, theme_header_bg, updated_at) "
-            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
+            " theme_primary, theme_secondary, theme_tint, theme_bg, theme_surface, theme_header_bg, "
+            " directory_url, directory_label, updated_at) "
+            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
             "ON CONFLICT (id) DO UPDATE SET "
             "city_title = EXCLUDED.city_title, "
             "alert_enabled = EXCLUDED.alert_enabled, "
@@ -918,6 +931,8 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
             "theme_bg = EXCLUDED.theme_bg, "
             "theme_surface = EXCLUDED.theme_surface, "
             "theme_header_bg = EXCLUDED.theme_header_bg, "
+            "directory_url = EXCLUDED.directory_url, "
+            "directory_label = EXCLUDED.directory_label, "
             "updated_at = now()",
             (
                 body.city_title.strip(),
@@ -936,6 +951,8 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
                 theme_bg,
                 theme_surface,
                 theme_header_bg,
+                directory_url,
+                body.directory_label.strip(),
             ),
         )
         return _load_preferences(conn)

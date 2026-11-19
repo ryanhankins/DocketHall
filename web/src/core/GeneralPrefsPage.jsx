@@ -39,6 +39,8 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
   const [footerText, setFooterText] = useState('');
   const [cityWebsiteUrl, setCityWebsiteUrl] = useState('');
   const [cityWebsiteLabel, setCityWebsiteLabel] = useState('');
+  const [directoryUrl, setDirectoryUrl] = useState('');
+  const [directoryLabel, setDirectoryLabel] = useState('');
   const [themeColors, setThemeColors] = useState(() => ({ ...DEFAULT_THEME }));
   const [hasLogo, setHasLogo] = useState(false);
   const [logoVer, setLogoVer] = useState(() => Date.now());
@@ -58,6 +60,8 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
         setFooterText(b.footer_text || '');
         setCityWebsiteUrl(b.city_website_url || '');
         setCityWebsiteLabel(b.city_website_label || '');
+        setDirectoryUrl(b.directory_url || '');
+        setDirectoryLabel(b.directory_label || '');
         setThemeColors({
           theme_primary: b.theme_primary || DEFAULT_THEME.theme_primary,
           theme_secondary: b.theme_secondary || DEFAULT_THEME.theme_secondary,
@@ -125,6 +129,8 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
           footer_text: footerText.trim(),
           city_website_url: cityWebsiteUrl.trim(),
           city_website_label: cityWebsiteLabel.trim(),
+          directory_url: directoryUrl.trim(),
+          directory_label: directoryLabel.trim(),
           ...themeColors,
         }),
       });
@@ -304,6 +310,27 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
                 placeholder="Visit Main City Website"
                 value={cityWebsiteLabel}
                 onChange={(e) => setCityWebsiteLabel(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="row" style={{ marginBottom: '1.1rem' }}>
+            <div className="field" style={{ flex: 2, minWidth: 220 }}>
+              <label htmlFor="pref-directory-url">Contact / Directory URL (shown in Public Portal header, optional)</label>
+              <input
+                id="pref-directory-url"
+                type="url"
+                placeholder="https://cityofbirchwood.com/city-hall/staff-directory/"
+                value={directoryUrl}
+                onChange={(e) => setDirectoryUrl(e.target.value)}
+              />
+            </div>
+            <div className="field" style={{ flex: 1, minWidth: 160 }}>
+              <label htmlFor="pref-directory-label">Contact / Directory Label (optional)</label>
+              <input
+                id="pref-directory-label"
+                placeholder="Contact / Directory"
+                value={directoryLabel}
+                onChange={(e) => setDirectoryLabel(e.target.value)}
               />
             </div>
           </div>

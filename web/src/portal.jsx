@@ -19,7 +19,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../app.css';
 import ServiceIcon from './core/ServiceIcon.jsx';
-import { PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
 
 function PublicPermitsPortal() {
@@ -89,6 +89,7 @@ function PublicPermitsPortal() {
           <span>Permits Portal</span>
         </a>
         <div className="user-bar">
+          <DirectoryHeaderLink branding={branding} />
           {me ? (
             <>
               <span>Signed in as <strong>{me.username}</strong></span>

@@ -20,7 +20,7 @@ import { createRoot } from 'react-dom/client';
 import '../app.css';
 import { ROLE_LABELS, formatDate, formatSize, formatTime12h } from './core/api.js';
 import ServiceIcon from './core/ServiceIcon.jsx';
-import { PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
 import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
 import { COMPLAINT_STATUSES, ORDINANCE_PRESETS, StatusBadge } from './modules/complaints/constants.jsx';
@@ -1406,6 +1406,7 @@ function PublicHomePage() {
           <span>CivicDesk</span>
         </a>
         <div className="user-bar">
+          <DirectoryHeaderLink branding={branding} />
           {me ? (
             <>
               <span>{me.username} ({ROLE_LABELS[me.role] || me.role})</span>

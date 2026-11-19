@@ -19,7 +19,7 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../app.css';
 import ServiceIcon from './core/ServiceIcon.jsx';
-import { PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
 import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
 
@@ -73,6 +73,7 @@ function PublicCityCode() {
           <span>City Code</span>
         </a>
         <div className="user-bar">
+          <DirectoryHeaderLink branding={branding} />
           <a className="btn sm" href="/portal">Permits Portal</a>
           <a className="btn sm primary" href="/">Sign In</a>
         </div>

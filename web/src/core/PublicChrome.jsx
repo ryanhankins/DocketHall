@@ -106,12 +106,23 @@ export function PublicFooter({ branding }) {
             href={websiteUrl}
             target="_blank"
             rel="noreferrer"
-            style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}
+            style={{ color: 'var(--cd-primary)', fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}
           >
             {websiteLabel} &rarr;
           </a>
         )}
       </div>
     </footer>
+  );
+}
+
+export function DirectoryHeaderLink({ branding }) {
+  const url = (branding?.directory_url || '').trim();
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  const label = (branding?.directory_label || '').trim() || 'Contact / Directory';
+  return (
+    <a className="btn sm" href={url} target="_blank" rel="noreferrer">
+      {label}
+    </a>
   );
 }
