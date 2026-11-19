@@ -98,7 +98,14 @@ export default function CalendarManagePage() {
                       <div><strong>{r.facility_name}</strong></div>
                       {r.event_title && <div className="muted" style={{ fontSize: '.82rem' }}>{r.event_title}</div>}
                     </td>
-                    <td>{r.event_date}</td>
+                    <td>
+                      <div>{r.event_date}</div>
+                      <div className="muted" style={{ fontSize: '.8rem' }}>
+                        {r.rental_mode === 'hourly' && r.start_time && r.end_time
+                          ? `${r.start_time}–${r.end_time} (Hourly)`
+                          : 'Full Day (24hrs)'}
+                      </div>
+                    </td>
                     <td>
                       <div>{r.requester_name}</div>
                       <div className="muted" style={{ fontSize: '.82rem' }}>

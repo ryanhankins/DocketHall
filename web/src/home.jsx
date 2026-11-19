@@ -1158,6 +1158,9 @@ function CalendarPublicTab() {
   const [loading, setLoading] = useState(true);
   const [facId, setFacId] = useState('');
   const [evDate, setEvDate] = useState('');
+  const [rentalMode, setRentalMode] = useState('full_day');
+  const [startTime, setStartTime] = useState('09:00');
+  const [endTime, setEndTime] = useState('11:00');
   const [evTitle, setEvTitle] = useState('');
   const [reqName, setReqName] = useState('');
   const [reqEmail, setReqEmail] = useState('');
@@ -1201,10 +1204,18 @@ function CalendarPublicTab() {
   }, [data.items]);
 
   const selectedFac = (data.facilities || []).find((f) => String(f.id) === String(facId)) || null;
+  const hasHourly = Boolean((selectedFac?.hourly_fee || '').trim());
+  const effectiveMode = hasHourly ? rentalMode : 'full_day';
+
+  const daySlots = (data.booked_slots || []).filter(
+    (b) => evDate && facId && String(b.facility_id) === String(facId) && b.event_date === evDate,
+  );
   const dateBooked = Boolean(
-    evDate &&
-      facId &&
-      (data.booked_slots || []).some((b) => String(b.facility_id) === String(facId) && b.event_date === evDate),
+    daySlots.some((b) => {
+      if ((b.rental_mode || 'full_day') === 'full_day' || effectiveMode === 'full_day') return true;
+      if (!startTime || !endTime || !b.start_time || !b.end_time) return false;
+      return startTime < b.end_time && endTime > b.start_time;
+    }),
   );
 
   async function handleReserve(e) {
@@ -1218,6 +1229,9 @@ function CalendarPublicTab() {
         body: JSON.stringify({
           facility_id: Number(facId),
           event_date: evDate,
+          rental_mode: effectiveMode,
+          start_time: effectiveMode === 'hourly' ? startTime : '',
+          end_time: effectiveMode === 'hourly' ? endTime : '',
           event_title: evTitle.trim(),
           requester_name: reqName.trim(),
           requester_email: reqEmail.trim(),
@@ -1342,7 +1356,7 @@ function CalendarPublicTab() {
                 <select id="res-facility" value={facId} onChange={(e) => setFacId(e.target.value)}>
                   {data.facilities.map((f) => (
                     <option key={f.id} value={f.id}>
-                      {f.name} ({f.daily_fee}/day)
+                      {f.name} ({f.daily_fee}/day{f.hourly_fee ? `, ${f.hourly_fee}/hr` : ''})
                     </option>
                   ))}
                 </select>
@@ -1351,11 +1365,34 @@ function CalendarPublicTab() {
                 <label htmlFor="res-date">Event Date *</label>
                 <input id="res-date" type="date" required value={evDate} onChange={(e) => setEvDate(e.target.value)} />
               </div>
+              {hasHourly && (
+                <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                  <label htmlFor="res-mode">Rental Type</label>
+                  <select id="res-mode" value={effectiveMode} onChange={(e) => setRentalMode(e.target.value)}>
+                    <option value="full_day">Full Day / 24hrs ({selectedFac.daily_fee})</option>
+                    <option value="hourly">Hourly ({selectedFac.hourly_fee}/hr)</option>
+                  </select>
+                </div>
+              )}
             </div>
-            {selectedFac && (selectedFac.description || selectedFac.rules || selectedFac.capacity) && (
+            {effectiveMode === 'hourly' && (
+              <div className="row">
+                <div className="field" style={{ minWidth: 150 }}>
+                  <label htmlFor="res-start">Start Time *</label>
+                  <input id="res-start" type="time" required value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+                </div>
+                <div className="field" style={{ minWidth: 150 }}>
+                  <label htmlFor="res-end">End Time *</label>
+                  <input id="res-end" type="time" required value={endTime} onChange={(e) => setEndTime(e.target.value)} />
+                </div>
+              </div>
+            )}
+            {selectedFac && (selectedFac.description || selectedFac.rules || selectedFac.capacity || selectedFac.hourly_fee || selectedFac.deposit_amount) && (
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '.6rem .75rem', fontSize: '.86rem' }}>
                 <div>
-                  <strong>{selectedFac.name}</strong> — {selectedFac.daily_fee} per day
+                  <strong>{selectedFac.name}</strong> — {selectedFac.daily_fee}/24hrs
+                  {selectedFac.hourly_fee ? ` or ${selectedFac.hourly_fee}/hr` : ''}
+                  {selectedFac.deposit_amount ? ` + ${selectedFac.deposit_amount} deposit` : ''}
                   {selectedFac.capacity ? ` · Capacity: ${selectedFac.capacity}` : ''}
                 </div>
                 {selectedFac.description && <div className="muted">{selectedFac.description}</div>}

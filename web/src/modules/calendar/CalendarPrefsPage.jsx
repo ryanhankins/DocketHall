@@ -31,7 +31,7 @@ const CALENDAR_NOTIFICATION_EVENTS = [
 export default function CalendarPrefsPage() {
   const showToast = useToast();
   const [facilities, setFacilities] = useState([]);
-  const [form, setForm] = useState({ name: '', daily_fee: '$75.00', capacity: '', description: '', rules: '' });
+  const [form, setForm] = useState({ name: '', daily_fee: '$75.00', hourly_fee: '', deposit_amount: '', capacity: '', description: '', rules: '' });
 
   const load = useCallback(async () => {
     const list = await api('/api/calendar/facilities');
@@ -60,7 +60,7 @@ export default function CalendarPrefsPage() {
               method: 'POST',
               body: JSON.stringify({ ...form, sort_order: facilities.length + 1 }),
             });
-            setForm({ name: '', daily_fee: '$0.00', capacity: '', description: '', rules: '' });
+            setForm({ name: '', daily_fee: '$0.00', hourly_fee: '', deposit_amount: '', capacity: '', description: '', rules: '' });
             showToast('Facility added', 'ok');
             await load();
           }}
@@ -71,9 +71,17 @@ export default function CalendarPrefsPage() {
               <label>Facility Name *</label>
               <input required placeholder="e.g. Park Pavilion, Fire Hall" value={form.name} onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))} />
             </div>
-            <div className="field" style={{ minWidth: 120 }}>
+            <div className="field" style={{ minWidth: 110 }}>
               <label>Daily Fee</label>
               <input placeholder="$75.00" value={form.daily_fee} onChange={(e) => setForm(f => ({ ...f, daily_fee: e.target.value }))} />
+            </div>
+            <div className="field" style={{ minWidth: 110 }}>
+              <label>Hourly Fee (opt.)</label>
+              <input placeholder="$25.00" value={form.hourly_fee} onChange={(e) => setForm(f => ({ ...f, hourly_fee: e.target.value }))} />
+            </div>
+            <div className="field" style={{ minWidth: 115 }}>
+              <label>Deposit (opt.)</label>
+              <input placeholder="$100.00" value={form.deposit_amount} onChange={(e) => setForm(f => ({ ...f, deposit_amount: e.target.value }))} />
             </div>
             <div className="field" style={{ minWidth: 120 }}>
               <label>Capacity (optional)</label>
@@ -97,7 +105,7 @@ export default function CalendarPrefsPage() {
 
         <table>
           <thead>
-            <tr><th>Facility</th><th>Daily Fee</th><th>Capacity</th><th>Status</th><th>Actions</th></tr>
+            <tr><th>Facility</th><th>Daily Fee</th><th>Hourly Fee</th><th>Deposit</th><th>Capacity</th><th>Status</th><th>Actions</th></tr>
           </thead>
           <tbody>
             {facilities.map((fac) => (
@@ -109,7 +117,7 @@ export default function CalendarPrefsPage() {
                 <td>
                   <input
                     aria-label={`Daily fee for ${fac.name}`}
-                    style={{ width: 95, padding: '2px 6px', fontSize: '.85rem' }}
+                    style={{ width: 90, padding: '2px 6px', fontSize: '.85rem' }}
                     defaultValue={fac.daily_fee}
                     onBlur={async (e) => {
                       const next = e.target.value.trim();
@@ -118,7 +126,45 @@ export default function CalendarPrefsPage() {
                           method: 'PATCH',
                           body: JSON.stringify({ daily_fee: next }),
                         });
-                        showToast(`Updated ${fac.name} fee`, 'ok');
+                        showToast(`Updated ${fac.name} daily fee`, 'ok');
+                        await load();
+                      }
+                    }}
+                  />
+                </td>
+                <td>
+                  <input
+                    aria-label={`Hourly fee for ${fac.name}`}
+                    style={{ width: 85, padding: '2px 6px', fontSize: '.85rem' }}
+                    placeholder="None"
+                    defaultValue={fac.hourly_fee || ''}
+                    onBlur={async (e) => {
+                      const next = e.target.value.trim();
+                      if (next !== (fac.hourly_fee || '')) {
+                        await api(`/api/calendar/facilities/${fac.id}`, {
+                          method: 'PATCH',
+                          body: JSON.stringify({ hourly_fee: next }),
+                        });
+                        showToast(`Updated ${fac.name} hourly fee`, 'ok');
+                        await load();
+                      }
+                    }}
+                  />
+                </td>
+                <td>
+                  <input
+                    aria-label={`Deposit for ${fac.name}`}
+                    style={{ width: 85, padding: '2px 6px', fontSize: '.85rem' }}
+                    placeholder="None"
+                    defaultValue={fac.deposit_amount || ''}
+                    onBlur={async (e) => {
+                      const next = e.target.value.trim();
+                      if (next !== (fac.deposit_amount || '')) {
+                        await api(`/api/calendar/facilities/${fac.id}`, {
+                          method: 'PATCH',
+                          body: JSON.stringify({ deposit_amount: next }),
+                        });
+                        showToast(`Updated ${fac.name} deposit`, 'ok');
                         await load();
                       }
                     }}

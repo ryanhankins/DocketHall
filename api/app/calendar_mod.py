@@ -34,22 +34,29 @@ EVENT_CATEGORIES = ("Community Event", "Holiday / Closure", "Public Works", "Pub
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reservable_facilities (
-    id          BIGSERIAL PRIMARY KEY,
-    name        TEXT NOT NULL UNIQUE,
-    description TEXT NOT NULL DEFAULT '',
-    daily_fee   TEXT NOT NULL DEFAULT '$0.00',
-    capacity    TEXT NOT NULL DEFAULT '',
-    rules       TEXT NOT NULL DEFAULT '',
-    is_active   BOOLEAN NOT NULL DEFAULT TRUE,
-    sort_order  INTEGER NOT NULL DEFAULT 0,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id             BIGSERIAL PRIMARY KEY,
+    name           TEXT NOT NULL UNIQUE,
+    description    TEXT NOT NULL DEFAULT '',
+    daily_fee      TEXT NOT NULL DEFAULT '$0.00',
+    hourly_fee     TEXT NOT NULL DEFAULT '',
+    deposit_amount TEXT NOT NULL DEFAULT '',
+    capacity       TEXT NOT NULL DEFAULT '',
+    rules          TEXT NOT NULL DEFAULT '',
+    is_active      BOOLEAN NOT NULL DEFAULT TRUE,
+    sort_order     INTEGER NOT NULL DEFAULT 0,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE reservable_facilities ADD COLUMN IF NOT EXISTS hourly_fee TEXT NOT NULL DEFAULT '';
+ALTER TABLE reservable_facilities ADD COLUMN IF NOT EXISTS deposit_amount TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS facility_reservations (
     id                 BIGSERIAL PRIMARY KEY,
     reservation_number TEXT NOT NULL UNIQUE,
     facility_id        BIGINT NOT NULL REFERENCES reservable_facilities(id) ON DELETE CASCADE,
     facility_name      TEXT NOT NULL DEFAULT '',
     event_date         DATE NOT NULL,
+    rental_mode        TEXT NOT NULL DEFAULT 'full_day',
+    start_time         TEXT NOT NULL DEFAULT '',
+    end_time           TEXT NOT NULL DEFAULT '',
     event_title        TEXT NOT NULL DEFAULT '',
     requester_name     TEXT NOT NULL,
     requester_email    TEXT NOT NULL DEFAULT '',
@@ -63,6 +70,9 @@ CREATE TABLE IF NOT EXISTS facility_reservations (
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE facility_reservations ADD COLUMN IF NOT EXISTS rental_mode TEXT NOT NULL DEFAULT 'full_day';
+ALTER TABLE facility_reservations ADD COLUMN IF NOT EXISTS start_time TEXT NOT NULL DEFAULT '';
+ALTER TABLE facility_reservations ADD COLUMN IF NOT EXISTS end_time TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS facility_res_date_idx ON facility_reservations(facility_id, event_date, status);
 CREATE TABLE IF NOT EXISTS calendar_events (
     id          BIGSERIAL PRIMARY KEY,
@@ -87,8 +97,8 @@ def bootstrap() -> None:
         conn.execute(SCHEMA)
         if os.environ.get("SEED_CITY_PROFILE", "").strip().lower() == "birchwood":
             conn.execute(
-                "INSERT INTO reservable_facilities (name, description, daily_fee, capacity, rules, sort_order) "
-                "VALUES ('Village Hall', 'Main municipal meeting hall available for community and private events.', '$75.00', '', 'Please leave hall clean and remove all trash after your event.', 1) "
+                "INSERT INTO reservable_facilities (name, description, daily_fee, hourly_fee, deposit_amount, capacity, rules, sort_order) "
+                "VALUES ('Village Hall', 'Main municipal meeting hall available for community and private events.', '$75.00', '$25.00', '$100.00', '', 'Please leave hall clean and remove all trash after your event.', 1) "
                 "ON CONFLICT (name) DO NOTHING"
             )
 
@@ -99,10 +109,12 @@ def _row_to_facility(r) -> dict:
         "name": r[1],
         "description": r[2],
         "daily_fee": r[3],
-        "capacity": r[4],
-        "rules": r[5],
-        "is_active": bool(r[6]),
-        "sort_order": r[7],
+        "hourly_fee": r[4],
+        "deposit_amount": r[5],
+        "capacity": r[6],
+        "rules": r[7],
+        "is_active": bool(r[8]),
+        "sort_order": r[9],
     }
 
 
@@ -113,18 +125,21 @@ def _row_to_reservation(r) -> dict:
         "facility_id": r[2],
         "facility_name": r[3],
         "event_date": r[4].isoformat() if r[4] else None,
-        "event_title": r[5],
-        "requester_name": r[6],
-        "requester_email": r[7],
-        "requester_phone": r[8],
-        "notes": r[9],
-        "fee_amount": r[10],
-        "payment_status": r[11],
-        "status": r[12],
-        "staff_notes": r[13],
-        "reviewed_by": r[14],
-        "created_at": r[15].isoformat() if r[15] else None,
-        "updated_at": r[16].isoformat() if r[16] else None,
+        "rental_mode": r[5] or "full_day",
+        "start_time": r[6] or "",
+        "end_time": r[7] or "",
+        "event_title": r[8],
+        "requester_name": r[9],
+        "requester_email": r[10],
+        "requester_phone": r[11],
+        "notes": r[12],
+        "fee_amount": r[13],
+        "payment_status": r[14],
+        "status": r[15],
+        "staff_notes": r[16],
+        "reviewed_by": r[17],
+        "created_at": r[18].isoformat() if r[18] else None,
+        "updated_at": r[19].isoformat() if r[19] else None,
     }
 
 
@@ -144,8 +159,11 @@ def _row_to_event(r) -> dict:
     }
 
 
+_FAC_COLS = "id, name, description, daily_fee, hourly_fee, deposit_amount, capacity, rules, is_active, sort_order"
+
 _RES_COLS = (
-    "id, reservation_number, facility_id, facility_name, event_date, event_title, "
+    "id, reservation_number, facility_id, facility_name, event_date, "
+    "rental_mode, start_time, end_time, event_title, "
     "requester_name, requester_email, requester_phone, notes, fee_amount, "
     "payment_status, status, staff_notes, reviewed_by, created_at, updated_at"
 )
@@ -155,6 +173,8 @@ class FacilityIn(BaseModel):
     name: str
     description: str = ""
     daily_fee: str = "$0.00"
+    hourly_fee: str = ""
+    deposit_amount: str = ""
     capacity: str = ""
     rules: str = ""
     is_active: bool = True
@@ -165,6 +185,8 @@ class FacilityPatch(BaseModel):
     name: str | None = None
     description: str | None = None
     daily_fee: str | None = None
+    hourly_fee: str | None = None
+    deposit_amount: str | None = None
     capacity: str | None = None
     rules: str | None = None
     is_active: bool | None = None
@@ -174,6 +196,9 @@ class FacilityPatch(BaseModel):
 class PublicReservationIn(BaseModel):
     facility_id: int
     event_date: str
+    rental_mode: Literal["full_day", "hourly"] = "full_day"
+    start_time: str = ""
+    end_time: str = ""
     event_title: str = ""
     requester_name: str
     requester_email: str = ""
@@ -236,8 +261,7 @@ def get_public_calendar(month: str = ""):
 
     with pool.connection() as conn:
         fac_rows = conn.execute(
-            "SELECT id, name, description, daily_fee, capacity, rules, is_active, sort_order "
-            "FROM reservable_facilities WHERE is_active = TRUE ORDER BY sort_order ASC, name ASC"
+            f"SELECT {_FAC_COLS} FROM reservable_facilities WHERE is_active = TRUE ORDER BY sort_order ASC, name ASC"
         ).fetchall()
         facilities = [_row_to_facility(r) for r in fac_rows]
 
@@ -250,10 +274,10 @@ def get_public_calendar(month: str = ""):
         ).fetchall()
 
         res_rows = conn.execute(
-            "SELECT id, facility_id, facility_name, event_date, event_title "
+            "SELECT id, facility_id, facility_name, event_date, event_title, rental_mode, start_time, end_time "
             "FROM facility_reservations "
             "WHERE status = 'approved' AND event_date >= %s AND event_date < %s "
-            "ORDER BY event_date ASC, id ASC",
+            "ORDER BY event_date ASC, start_time ASC, id ASC",
             (start_dt, end_dt),
         ).fetchall()
 
@@ -293,17 +317,24 @@ def get_public_calendar(month: str = ""):
         })
     booked_slots: list[dict] = []
     for r in res_rows:
+        r_mode = r[5] or "full_day"
+        r_start = r[6] or ""
+        r_end = r[7] or ""
         booked_slots.append({
             "facility_id": r[1],
             "facility_name": r[2],
             "event_date": r[3].isoformat(),
+            "rental_mode": r_mode,
+            "start_time": r_start,
+            "end_time": r_end,
         })
+        time_label = f"{r_start}-{r_end}" if (r_mode == "hourly" and r_start and r_end) else "All Day"
         items.append({
             "uid": f"res-{r[0]}",
             "kind": "reservation",
             "title": f"{r[2]} — Reserved" + (f" ({r[4]})" if r[4] else ""),
             "event_date": r[3].isoformat(),
-            "start_time": "All Day",
+            "start_time": time_label,
             "location": r[2],
             "category": "Facility Reserved",
             "description": "",
@@ -318,6 +349,44 @@ def get_public_calendar(month: str = ""):
     }
 
 
+def _parse_hhmm_minutes(raw: str, label: str) -> int:
+    clean = (raw or "").strip()
+    parts = clean.split(":")
+    if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
+        raise HTTPException(status_code=400, detail=f"{label} must be HH:MM")
+    h, m = int(parts[0]), int(parts[1])
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        raise HTTPException(status_code=400, detail=f"{label} must be a valid 24-hour time")
+    return h * 60 + m
+
+
+def _parse_money_float(raw: str) -> float | None:
+    clean = (raw or "").strip().replace("$", "").replace(",", "")
+    if not clean:
+        return None
+    try:
+        return float(clean)
+    except ValueError:
+        return None
+
+
+def _format_money(val: float) -> str:
+    return f"${val:,.2f}"
+
+
+def _compute_reservation_fee(rental_mode: str, start_min: int, end_min: int, daily_fee: str, hourly_fee: str, deposit_amount: str) -> str:
+    if rental_mode == "hourly":
+        hours = (end_min - start_min) / 60.0
+        rate = _parse_money_float(hourly_fee)
+        base = _format_money(rate * hours) if rate is not None else (hourly_fee or "$0.00")
+    else:
+        base = daily_fee or "$0.00"
+    dep = (deposit_amount or "").strip()
+    if dep and _parse_money_float(dep) not in (None, 0.0):
+        return f"{base} + {dep} deposit"
+    return base
+
+
 @router.post("/reservations/public", status_code=201)
 def create_public_reservation(body: PublicReservationIn, request: Request):
     name = body.requester_name.strip()
@@ -329,44 +398,78 @@ def create_public_reservation(body: PublicReservationIn, request: Request):
     if ev_date < date.today():
         raise HTTPException(status_code=400, detail="Reservation date cannot be in the past")
 
+    rental_mode = body.rental_mode
+    start_time = body.start_time.strip()
+    end_time = body.end_time.strip()
+    start_min = 0
+    end_min = 24 * 60
+    if rental_mode == "hourly":
+        if not start_time or not end_time:
+            raise HTTPException(status_code=400, detail="Start time and end time are required for hourly rentals")
+        start_min = _parse_hhmm_minutes(start_time, "Start time")
+        end_min = _parse_hhmm_minutes(end_time, "End time")
+        if end_min <= start_min:
+            raise HTTPException(status_code=400, detail="End time must be after start time")
+        start_time = f"{start_min // 60:02d}:{start_min % 60:02d}"
+        end_time = f"{end_min // 60:02d}:{end_min % 60:02d}"
+    else:
+        start_time = ""
+        end_time = ""
+
     with pool.connection() as conn:
         fac = conn.execute(
-            "SELECT id, name, daily_fee, is_active FROM reservable_facilities WHERE id = %s",
+            "SELECT id, name, daily_fee, hourly_fee, deposit_amount, is_active "
+            "FROM reservable_facilities WHERE id = %s",
             (body.facility_id,),
         ).fetchone()
-        if not fac or not fac[3]:
+        if not fac or not fac[5]:
             raise HTTPException(status_code=400, detail="Selected facility is not available for reservation")
+        if rental_mode == "hourly" and not (fac[3] or "").strip():
+            raise HTTPException(status_code=400, detail=f"{fac[1]} only supports full-day rentals")
 
-        conflict = conn.execute(
-            "SELECT id FROM facility_reservations "
+        existing = conn.execute(
+            "SELECT id, rental_mode, start_time, end_time FROM facility_reservations "
             "WHERE facility_id = %s AND event_date = %s AND status = 'approved'",
             (body.facility_id, ev_date),
-        ).fetchone()
-        if conflict:
-            raise HTTPException(
-                status_code=409,
-                detail=f"{fac[1]} is already reserved on {ev_date.isoformat()}",
-            )
+        ).fetchall()
+        for _, ex_mode, ex_start, ex_end in existing:
+            if (ex_mode or "full_day") == "full_day" or rental_mode == "full_day":
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"{fac[1]} already has a conflicting reservation on {ev_date.isoformat()}",
+                )
+            ex_s = _parse_hhmm_minutes(ex_start, "Existing start") if ex_start else 0
+            ex_e = _parse_hhmm_minutes(ex_end, "Existing end") if ex_end else 24 * 60
+            if start_min < ex_e and end_min > ex_s:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"{fac[1]} is already reserved from {ex_start} to {ex_end} on {ev_date.isoformat()}",
+                )
 
+        fee_str = _compute_reservation_fee(rental_mode, start_min, end_min, fac[2], fac[3], fac[4])
         year = datetime.now(timezone.utc).year
         temp_num = f"RES-{year}-{uuid.uuid4().hex[:8].upper()}"
         row = conn.execute(
             f"INSERT INTO facility_reservations "
-            f"(reservation_number, facility_id, facility_name, event_date, event_title, "
+            f"(reservation_number, facility_id, facility_name, event_date, "
+            f" rental_mode, start_time, end_time, event_title, "
             f" requester_name, requester_email, requester_phone, notes, fee_amount, status) "
-            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending') "
+            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending') "
             f"RETURNING {_RES_COLS}",
             (
                 temp_num,
                 fac[0],
                 fac[1],
                 ev_date,
+                rental_mode,
+                start_time,
+                end_time,
                 body.event_title.strip(),
                 name,
                 body.requester_email.strip(),
                 body.requester_phone.strip(),
                 body.notes.strip(),
-                fac[2] or "$0.00",
+                fee_str,
             ),
         ).fetchone()
         res_id = row[0]
@@ -377,10 +480,11 @@ def create_public_reservation(body: PublicReservationIn, request: Request):
         ).fetchone()
         res = _row_to_reservation(row)
 
+    when_desc = f"{ev_date.isoformat()} ({start_time}–{end_time})" if rental_mode == "hourly" else f"{ev_date.isoformat()} (Full Day / 24hrs)"
     send_notification_email(
         "calendar_reservation_requested",
         f"[CivicDesk] New Facility Reservation Request {final_num}: {fac[1]}",
-        f"{name} requested to reserve {fac[1]} on {ev_date.isoformat()} (Fee: {fac[2]}).",
+        f"{name} requested to reserve {fac[1]} on {when_desc} (Fee: {fee_str}).",
         link_path="/app#calendar-manage",
         request=request,
     )
@@ -388,7 +492,7 @@ def create_public_reservation(body: PublicReservationIn, request: Request):
         send_direct_email(
             [res["requester_email"]],
             f"[CivicDesk] Reservation Request Received: {final_num}",
-            f"We received your request ({final_num}) to reserve {fac[1]} on {ev_date.isoformat()} (Fee: {fac[2]}). "
+            f"We received your request ({final_num}) to reserve {fac[1]} on {when_desc} (Fee: {fee_str}). "
             f"City staff will review and confirm your reservation.",
             link_path="/#calendar",
             request=request,
@@ -401,8 +505,7 @@ def create_public_reservation(body: PublicReservationIn, request: Request):
 def list_facilities(_: dict = Depends(require_permission("calendar.manage"))):
     with pool.connection() as conn:
         rows = conn.execute(
-            "SELECT id, name, description, daily_fee, capacity, rules, is_active, sort_order "
-            "FROM reservable_facilities ORDER BY sort_order ASC, name ASC"
+            f"SELECT {_FAC_COLS} FROM reservable_facilities ORDER BY sort_order ASC, name ASC"
         ).fetchall()
     return [_row_to_facility(r) for r in rows]
 
@@ -414,10 +517,20 @@ def create_facility(body: FacilityIn, _: dict = Depends(require_permission("cale
         raise HTTPException(status_code=400, detail="Facility name is required")
     with pool.connection() as conn:
         row = conn.execute(
-            "INSERT INTO reservable_facilities (name, description, daily_fee, capacity, rules, is_active, sort_order) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) "
-            "RETURNING id, name, description, daily_fee, capacity, rules, is_active, sort_order",
-            (name, body.description.strip(), body.daily_fee.strip() or "$0.00", body.capacity.strip(), body.rules.strip(), body.is_active, body.sort_order),
+            f"INSERT INTO reservable_facilities (name, description, daily_fee, hourly_fee, deposit_amount, capacity, rules, is_active, sort_order) "
+            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            f"RETURNING {_FAC_COLS}",
+            (
+                name,
+                body.description.strip(),
+                body.daily_fee.strip() or "$0.00",
+                body.hourly_fee.strip(),
+                body.deposit_amount.strip(),
+                body.capacity.strip(),
+                body.rules.strip(),
+                body.is_active,
+                body.sort_order,
+            ),
         ).fetchone()
     return _row_to_facility(row)
 
@@ -426,20 +539,24 @@ def create_facility(body: FacilityIn, _: dict = Depends(require_permission("cale
 def update_facility(fac_id: int, body: FacilityPatch, _: dict = Depends(require_permission("calendar.manage"))):
     with pool.connection() as conn:
         row = conn.execute(
-            "UPDATE reservable_facilities SET "
-            "name = COALESCE(%s, name), "
-            "description = COALESCE(%s, description), "
-            "daily_fee = COALESCE(%s, daily_fee), "
-            "capacity = COALESCE(%s, capacity), "
-            "rules = COALESCE(%s, rules), "
-            "is_active = COALESCE(%s, is_active), "
-            "sort_order = COALESCE(%s, sort_order) "
-            "WHERE id = %s "
-            "RETURNING id, name, description, daily_fee, capacity, rules, is_active, sort_order",
+            f"UPDATE reservable_facilities SET "
+            f"name = COALESCE(%s, name), "
+            f"description = COALESCE(%s, description), "
+            f"daily_fee = COALESCE(%s, daily_fee), "
+            f"hourly_fee = COALESCE(%s, hourly_fee), "
+            f"deposit_amount = COALESCE(%s, deposit_amount), "
+            f"capacity = COALESCE(%s, capacity), "
+            f"rules = COALESCE(%s, rules), "
+            f"is_active = COALESCE(%s, is_active), "
+            f"sort_order = COALESCE(%s, sort_order) "
+            f"WHERE id = %s "
+            f"RETURNING {_FAC_COLS}",
             (
                 body.name.strip() if body.name is not None else None,
                 body.description.strip() if body.description is not None else None,
                 body.daily_fee.strip() if body.daily_fee is not None else None,
+                body.hourly_fee.strip() if body.hourly_fee is not None else None,
+                body.deposit_amount.strip() if body.deposit_amount is not None else None,
                 body.capacity.strip() if body.capacity is not None else None,
                 body.rules.strip() if body.rules is not None else None,
                 body.is_active,

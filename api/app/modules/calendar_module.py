@@ -20,7 +20,7 @@ from ..registry import CivicModule
 CALENDAR_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
     (
         "reservable_facilities",
-        ["id", "name", "description", "daily_fee", "capacity", "rules", "is_active", "sort_order", "created_at"],
+        ["id", "name", "description", "daily_fee", "hourly_fee", "deposit_amount", "capacity", "rules", "is_active", "sort_order", "created_at"],
         set(),
         True,
     ),
@@ -28,6 +28,7 @@ CALENDAR_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         "facility_reservations",
         [
             "id", "reservation_number", "facility_id", "facility_name", "event_date",
+            "rental_mode", "start_time", "end_time",
             "event_title", "requester_name", "requester_email", "requester_phone",
             "notes", "fee_amount", "payment_status", "status", "staff_notes",
             "reviewed_by", "created_at", "updated_at",
