@@ -23,7 +23,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 API_APP = os.path.join(ROOT, "api", "app")
 
-EXPECTED_MODULES = {"agendas", "permits", "codification", "records", "complaints", "calendar", "notices", "directory", "forms"}
+EXPECTED_MODULES = {"agendas", "permits", "codification", "records", "complaints", "calendar", "notices", "directory", "forms", "pages"}
 EPHEMERAL_TABLES = {"sessions", "password_reset_tokens"}
 
 _CREATE_TABLE_RE = re.compile(

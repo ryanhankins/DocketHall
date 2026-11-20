@@ -27,6 +27,7 @@ const SERVICE_STYLES = {
   notices: { color: '#0d9488', bg: '#f0fdfa', border: '#99f6e4' },
   directory: { color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc' },
   forms: { color: '#db2777', bg: '#fdf2f8', border: '#fbcfe8' },
+  pages: { color: '#6366f1', bg: '#eef2ff', border: '#c7d2fe' },
   alerts: { color: '#4f46e5', bg: '#eef2ff', border: '#c7d2fe' },
 };
 
@@ -128,6 +129,14 @@ function renderGlyph(id, size) {
           <rect x="8" y="2" width="8" height="4" rx="1" />
           <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
           <path d="M9 12h6M9 16h4" />
+        </svg>
+      );
+    case 'pages':
+      // Layout / city info pages
+      return (
+        <svg {...props}>
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M3 9h18M9 21V9" />
         </svg>
       );
     default:

@@ -32,6 +32,7 @@ const MODULE_LOADERS = {
   notices: () => import('../modules/notices/index.jsx'),
   directory: () => import('../modules/directory/index.jsx'),
   forms: () => import('../modules/forms/index.jsx'),
+  pages: () => import('../modules/pages/index.jsx'),
 };
 
 export async function loadEnabledFrontendModules(enabledModuleIds) {

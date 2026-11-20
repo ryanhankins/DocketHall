@@ -81,7 +81,112 @@ const TAB_DEFS = [
     description: 'Submit city applications, data requests, house-watch forms, and vote in community polls.',
     actionLabel: 'Open Forms & Polls →',
   },
+  {
+    id: 'pages',
+    label: 'City Info Pages & Quick Links',
+    description: 'Browse guides on utilities, trash/recycling, snow rules, and helpful city links.',
+    actionLabel: 'View City Info & Links →',
+  },
 ];
+
+function PagesPublicTab() {
+  const [data, setData] = useState({ pages: [], quick_links: [] });
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState('');
+  const [openId, setOpenId] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
+    fetch(`/api/pages/public${qs}`)
+      .then((r) => (r.ok ? r.json() : { pages: [], quick_links: [] }))
+      .then((d) => { setData({ pages: d.pages || [], quick_links: d.quick_links || [] }); setLoading(false); })
+      .catch(() => { setData({ pages: [], quick_links: [] }); setLoading(false); });
+  }, [q]);
+
+  useEffect(() => { load(); }, [load]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      {data.quick_links.length > 0 && (
+        <div className="card">
+          <h2 style={{ margin: '0 0 .65rem' }}>Quick Links</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '.65rem' }}>
+            {data.quick_links.map((l) => {
+              const isExternal = /^https?:\/\//i.test(l.url);
+              return (
+                <a
+                  key={l.id}
+                  href={l.url}
+                  target={isExternal ? '_blank' : undefined}
+                  rel={isExternal ? 'noreferrer' : undefined}
+                  style={{
+                    display: 'block',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: 8,
+                    padding: '.75rem',
+                    background: '#f8fafc',
+                    textDecoration: 'none',
+                    color: 'inherit',
+                  }}
+                >
+                  <strong style={{ color: 'var(--cd-primary, #2563eb)' }}>{l.label} &rarr;</strong>
+                  {l.description && <div className="muted" style={{ fontSize: '.83rem', marginTop: 3 }}>{l.description}</div>}
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="between" style={{ marginBottom: '.75rem', flexWrap: 'wrap', gap: '.5rem' }}>
+          <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <ServiceIcon id="pages" size={20} badge />
+            <span>City Information Pages</span>
+          </h2>
+          <input
+            placeholder="Search city info…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            style={{ minWidth: 210 }}
+          />
+        </div>
+
+        {loading ? (
+          <p className="muted">Loading city info pages…</p>
+        ) : data.pages.length === 0 ? (
+          <p className="muted">No city information pages published yet.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '.65rem' }}>
+            {data.pages.map((p) => {
+              const isOpen = openId === p.id;
+              return (
+                <div key={p.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '.85rem 1rem', background: '#fff' }}>
+                  <div className="between" style={{ gap: '.5rem', flexWrap: 'wrap' }}>
+                    <div>
+                      <span className="badge draft" style={{ marginRight: '.45rem' }}>{p.category}</span>
+                      <strong style={{ fontSize: '1.04rem' }}>{p.title}</strong>
+                    </div>
+                    <button type="button" className="btn sm" onClick={() => setOpenId(isOpen ? null : p.id)}>
+                      {isOpen ? 'Collapse' : 'Read Page'}
+                    </button>
+                  </div>
+                  {p.summary && <p className="muted" style={{ margin: '.35rem 0 0', fontSize: '.9rem' }}>{p.summary}</p>}
+                  {isOpen && p.body && (
+                    <pre style={{ margin: '.65rem 0 0', paddingTop: '.65rem', borderTop: '1px solid #e2e8f0', whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: '.92rem', lineHeight: 1.6, color: '#1e293b' }}>
+                      {p.body}
+                    </pre>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function FormsPublicTab() {
   const [forms, setForms] = useState([]);
@@ -2283,6 +2388,7 @@ function PublicHomePage() {
             {activeTab === 'notices' && <NoticesPublicTab />}
             {activeTab === 'directory' && <DirectoryPublicTab />}
             {activeTab === 'forms' && <FormsPublicTab />}
+            {activeTab === 'pages' && <PagesPublicTab />}
           </div>
         )}
       </main>
