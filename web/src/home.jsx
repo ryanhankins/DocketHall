@@ -62,7 +62,135 @@ const TAB_DEFS = [
     description: 'View upcoming meetings, city events, and reserve municipal facilities.',
     actionLabel: 'View Calendar & Reserve →',
   },
+  {
+    id: 'notices',
+    label: 'News, Notices, Bids & Jobs',
+    description: 'Read city news flashes, public hearing notices, open RFPs/bids, and job postings.',
+    actionLabel: 'View Notices & Bids →',
+  },
 ];
+
+function NoticesPublicTab() {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [cat, setCat] = useState('');
+  const [q, setQ] = useState('');
+  const [expandedId, setExpandedId] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    if (cat) params.set('category', cat);
+    if (q.trim()) params.set('q', q.trim());
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    fetch(`/api/notices/public${qs}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => { setItems(Array.isArray(rows) ? rows : []); setLoading(false); })
+      .catch(() => { setItems([]); setLoading(false); });
+  }, [cat, q]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const catLabels = {
+    news: 'City News',
+    public_notice: 'Public Notice',
+    bid: 'Bid / RFP',
+    job: 'Job Opening',
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <div className="card">
+        <div className="between" style={{ marginBottom: '.75rem', flexWrap: 'wrap', gap: '.5rem' }}>
+          <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <ServiceIcon id="notices" size={20} badge />
+            <span>News, Public Notices, Bids &amp; Jobs</span>
+          </h2>
+          <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
+            <select value={cat} onChange={(e) => setCat(e.target.value)} style={{ width: 'auto' }}>
+              <option value="">All Categories</option>
+              <option value="news">City News</option>
+              <option value="public_notice">Public Notices</option>
+              <option value="bid">Bids &amp; RFPs</option>
+              <option value="job">Job Openings</option>
+            </select>
+            <input
+              placeholder="Search notices, bids, jobs…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              style={{ minWidth: 200 }}
+            />
+          </div>
+        </div>
+
+        {loading ? (
+          <p className="muted">Loading notices…</p>
+        ) : items.length === 0 ? (
+          <p className="muted">No active notices, news, bids, or job postings right now.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '.75rem' }}>
+            {items.map((n) => {
+              const isOpen = expandedId === n.id;
+              return (
+                <div
+                  key={n.id}
+                  style={{
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 8,
+                    padding: '.85rem 1rem',
+                    background: n.is_pinned ? '#fffbeb' : '#fff',
+                  }}
+                >
+                  <div className="between" style={{ gap: '.5rem', flexWrap: 'wrap', marginBottom: '.35rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '.45rem', flexWrap: 'wrap' }}>
+                      <span className="badge draft">{catLabels[n.category] || n.category}</span>
+                      {n.is_pinned && <span className="badge" style={{ background: '#fef3c7', color: '#92400e' }}>Pinned</span>}
+                      {n.department && <span className="muted" style={{ fontSize: '.82rem' }}>{n.department}</span>}
+                    </div>
+                    <span className="muted" style={{ fontSize: '.82rem' }}>
+                      Posted {new Date(n.publish_at).toLocaleDateString()}
+                      {n.deadline_at ? ` · Deadline: ${n.deadline_at}` : ''}
+                    </span>
+                  </div>
+                  <h3 style={{ margin: '0 0 .3rem', fontSize: '1.05rem' }}>{n.title}</h3>
+                  {n.summary && <p style={{ margin: '0 0 .45rem', color: '#334e68', fontSize: '.92rem' }}>{n.summary}</p>}
+                  {(n.body || n.contact_info || n.attachment_url) && (
+                    <div>
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={() => setExpandedId(isOpen ? null : n.id)}
+                      >
+                        {isOpen ? 'Hide Details' : 'Read Full Details'}
+                      </button>
+                      {n.attachment_url && (
+                        <a
+                          href={n.attachment_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn sm"
+                          style={{ marginLeft: '.4rem' }}
+                        >
+                          View Attachment / PDF
+                        </a>
+                      )}
+                      {isOpen && (
+                        <div style={{ marginTop: '.65rem', paddingTop: '.6rem', borderTop: '1px solid #e2e8f0', fontSize: '.9rem', lineHeight: 1.55 }}>
+                          {n.body && <pre style={{ margin: '0 0 .5rem', whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>{n.body}</pre>}
+                          {n.contact_info && <div><strong>Contact / How to Submit:</strong> {n.contact_info}</div>}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function AuthModal({ open, initialRegister, initialResetToken, nextUrl, reason, onClose }) {
   const dlgRef = useRef(null);
@@ -1771,6 +1899,7 @@ function PublicHomePage() {
             {activeTab === 'records' && <RecordsPublicTab />}
             {activeTab === 'complaints' && <ComplaintsPublicTab me={me} onRequireAuth={openAuth} />}
             {activeTab === 'calendar' && <CalendarPublicTab />}
+            {activeTab === 'notices' && <NoticesPublicTab />}
           </div>
         )}
       </main>

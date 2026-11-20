@@ -24,6 +24,7 @@ const SERVICE_STYLES = {
   records: { color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
   complaints: { color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
   calendar: { color: '#0284c7', bg: '#f0f9ff', border: '#bae6fd' },
+  notices: { color: '#0d9488', bg: '#f0fdfa', border: '#99f6e4' },
   alerts: { color: '#4f46e5', bg: '#eef2ff', border: '#c7d2fe' },
 };
 
@@ -98,6 +99,14 @@ function renderGlyph(id, size) {
         <svg {...props}>
           <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
           <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+        </svg>
+      );
+    case 'notices':
+      // Megaphone / public announcement
+      return (
+        <svg {...props}>
+          <path d="m3 11 18-5v12L3 14v-3z" />
+          <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
         </svg>
       );
     default:

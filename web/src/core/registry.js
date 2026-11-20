@@ -29,6 +29,7 @@ const MODULE_LOADERS = {
   records: () => import('../modules/records/index.jsx'),
   complaints: () => import('../modules/complaints/index.jsx'),
   calendar: () => import('../modules/calendar/index.jsx'),
+  notices: () => import('../modules/notices/index.jsx'),
 };
 
 export async function loadEnabledFrontendModules(enabledModuleIds) {
