@@ -143,8 +143,10 @@ CREATE TABLE IF NOT EXISTS permit_documents (
     sha256        TEXT NOT NULL DEFAULT '',
     object_key    TEXT NOT NULL,
     uploaded_by   TEXT NOT NULL DEFAULT '',
+    inspection_id BIGINT,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE permit_documents ADD COLUMN IF NOT EXISTS inspection_id BIGINT;
 CREATE INDEX IF NOT EXISTS permit_documents_permit_idx ON permit_documents(permit_id, id);
 CREATE TABLE IF NOT EXISTS permit_activity_log (
     id              BIGSERIAL PRIMARY KEY,
@@ -179,11 +181,17 @@ CREATE TABLE IF NOT EXISTS permit_parcels (
     suite_name    TEXT NOT NULL DEFAULT '',
     owner_name    TEXT NOT NULL DEFAULT '',
     lot           TEXT NOT NULL DEFAULT '',
-    block         TEXT NOT NULL DEFAULT '',
-    section       TEXT NOT NULL DEFAULT '',
-    notes         TEXT NOT NULL DEFAULT '',
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    block           TEXT NOT NULL DEFAULT '',
+    section         TEXT NOT NULL DEFAULT '',
+    notes           TEXT NOT NULL DEFAULT '',
+    latitude        DOUBLE PRECISION,
+    longitude       DOUBLE PRECISION,
+    zoning_district TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE permit_parcels ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
+ALTER TABLE permit_parcels ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
+ALTER TABLE permit_parcels ADD COLUMN IF NOT EXISTS zoning_district TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS permit_workflow_steps (
     id           BIGSERIAL PRIMARY KEY,
     permit_id    BIGINT NOT NULL REFERENCES permits(id) ON DELETE CASCADE,
@@ -1185,7 +1193,7 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
     ids = [r[0] for r in rows]
     doc_rows = conn.execute(
         "SELECT id, permit_id, doc_category, title, filename, content_type, "
-        "       size_bytes, uploaded_by, created_at "
+        "       size_bytes, uploaded_by, created_at, inspection_id "
         "FROM permit_documents WHERE permit_id = ANY(%s) ORDER BY id ASC",
         (ids,),
     ).fetchall()
@@ -1201,6 +1209,7 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
             "size_bytes": d[6],
             "uploaded_by": d[7],
             "created_at": d[8].isoformat() if d[8] else None,
+            "inspection_id": d[9],
         })
 
     wf_rows = conn.execute(
@@ -1426,6 +1435,17 @@ def _clean_planning_data(raw: dict[str, Any] | None) -> dict[str, Any]:
     out["extended_60_days"] = bool(raw.get("extended_60_days"))
     if raw.get("agenda_backlog_id"):
         out["agenda_backlog_id"] = int(raw["agenda_backlog_id"])
+    abut = []
+    if isinstance(raw.get("abutting_owners"), list):
+        for entry in raw["abutting_owners"]:
+            if not isinstance(entry, dict):
+                continue
+            nm = str(entry.get("name") or "").strip()
+            ad = str(entry.get("address") or "").strip()
+            pid = str(entry.get("parcel_id") or "").strip()
+            if nm or ad:
+                abut.append({"name": nm, "address": ad, "parcel_id": pid})
+    out["abutting_owners"] = abut
     return out
 
 
@@ -2503,6 +2523,114 @@ def get_property_profile(
     }
 
 
+@router.post("/contractors/send-reminders")
+def send_contractor_renewal_reminders(
+    request: Request,
+    user: dict = Depends(require_permission("permits.manage")),
+):
+    """Send renewal reminder emails to contractors whose license, COI, or bond expires within 30 days or is expired."""
+    with pool.connection() as conn:
+        rows = conn.execute(f"SELECT {_CONTRACTOR_COLS} FROM contractor_licenses").fetchall()
+    ctrs = [_row_to_contractor(r) for r in rows]
+    sent: list[str] = []
+    skipped = 0
+    for c in ctrs:
+        if c["compliant"] and not c["expiring_soon"]:
+            continue
+        email = (c.get("email") or "").strip()
+        if not email:
+            skipped += 1
+            continue
+        issues_txt = "; ".join(c["compliance_issues"]) if c["compliance_issues"] else "Credential expiring within 30 days"
+        send_direct_email(
+            [email],
+            f"[CivicDesk] Contractor License / COI Renewal Reminder ({c['license_number']})",
+            f"Hello {c['contact_name'] or c['business_name']},\n\n"
+            f"Our municipal licensing records show an upcoming or expired credential for {c['business_name']} ({c['license_number']}):\n"
+            f"- Status: {issues_txt}\n"
+            f"- License Expiration: {c['license_expires_at'] or '—'}\n"
+            f"- Insurance Expiration: {c['insurance_expires_at'] or '—'}\n\n"
+            "Please submit updated documentation to City Hall to maintain permit eligibility.",
+            link_path="/portal",
+            request=request,
+        )
+        sent.append(email)
+    record_audit(user["username"], "permits.contractor_reminders", f"Sent {len(sent)} contractor reminder(s)")
+    return {"sent_count": len(sent), "skipped_count": skipped, "recipients": sent}
+
+
+@router.post("/compliance-programs/send-reminders")
+def send_compliance_program_reminders(
+    request: Request,
+    user: dict = Depends(require_permission("permits.manage")),
+):
+    """Send inspection renewal reminders to property owners/agents due within 30 days or overdue."""
+    with pool.connection() as conn:
+        rows = conn.execute(f"SELECT {_COMP_COLS} FROM recurring_compliance_programs WHERE status = 'active'").fetchall()
+    progs = [_row_to_comp_program(r) for r in rows]
+    sent: list[str] = []
+    skipped = 0
+    for p in progs:
+        if p["due_status"] not in ("overdue", "due_soon"):
+            continue
+        email = (p.get("local_agent_email") or "").strip()
+        if not email:
+            skipped += 1
+            continue
+        send_direct_email(
+            [email],
+            f"[CivicDesk] {p['program_type']} Inspection Due — {p['property_address']}",
+            f"Hello {p['local_agent_name'] or p['owner_name'] or 'Property Representative'},\n\n"
+            f"This is a reminder that your {p['program_type']} compliance inspection for {p['property_address']} "
+            f"is {p['due_status'].replace('_', ' ')} (Due Date: {p['next_inspection_date'] or 'TBD'}).\n\n"
+            "Please contact City Hall to schedule your inspection.",
+            link_path="/portal",
+            request=request,
+        )
+        sent.append(email)
+    record_audit(user["username"], "permits.compliance_reminders", f"Sent {len(sent)} compliance reminder(s)")
+    return {"sent_count": len(sent), "skipped_count": skipped, "recipients": sent}
+
+
+@router.get("/parcels/map")
+def get_parcels_map(_: dict = Depends(require_permission("permits.manage"))):
+    """Return registered parcels with coordinates, zoning, and permit/code counts for the interactive SVG GIS viewer."""
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT id, parcel_id, address, owner_name, zoning_district, latitude, longitude "
+            "FROM permit_parcels ORDER BY id ASC"
+        ).fetchall()
+        p_counts: dict[str, int] = {}
+        for pr in conn.execute("SELECT parcel_id, property_address FROM permits WHERE status NOT IN ('closed','denied')").fetchall():
+            if pr[0]:
+                p_counts[pr[0].lower()] = p_counts.get(pr[0].lower(), 0) + 1
+            if pr[1]:
+                p_counts[pr[1].lower()] = p_counts.get(pr[1].lower(), 0) + 1
+        ce_counts: dict[str, int] = {}
+        try:
+            for cr in conn.execute("SELECT subject_property_address FROM complaints WHERE status NOT IN ('resolved','dismissed')").fetchall():
+                if cr[0]:
+                    ce_counts[cr[0].lower()] = ce_counts.get(cr[0].lower(), 0) + 1
+        except Exception:
+            pass
+    out = []
+    for r in rows:
+        pid = r[1] or ""
+        addr = r[2] or ""
+        out.append({
+            "id": r[0],
+            "parcel_id": pid,
+            "address": addr,
+            "owner_name": r[3] or "",
+            "zoning_district": r[4] or "",
+            "latitude": r[5],
+            "longitude": r[6],
+            "active_permits": p_counts.get(pid.lower(), 0) or p_counts.get(addr.lower(), 0),
+            "open_code_cases": ce_counts.get(addr.lower(), 0),
+        })
+    return out
+
+
 @router.get("/{permit_id}")
 def get_permit(
     permit_id: int,
@@ -2520,6 +2648,7 @@ async def upload_permit_document(
     file: UploadFile = File(...),
     doc_category: str = Form("Other"),
     title: str = Form(""),
+    inspection_id: int | None = Form(None),
     user: dict = Depends(require_permission("permits.submit", "permits.manage")),
 ):
     with pool.connection() as conn:
@@ -2551,9 +2680,9 @@ async def upload_permit_document(
     with pool.connection() as conn:
         conn.execute(
             "INSERT INTO permit_documents "
-            "(permit_id, doc_category, title, filename, content_type, size_bytes, sha256, object_key, uploaded_by) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (permit_id, clean_cat, clean_title, orig_name, ctype, len(raw), sha, obj_key, user["username"]),
+            "(permit_id, doc_category, title, filename, content_type, size_bytes, sha256, object_key, uploaded_by, inspection_id) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (permit_id, clean_cat, clean_title, orig_name, ctype, len(raw), sha, obj_key, user["username"], inspection_id),
         )
         conn.execute("UPDATE permits SET updated_at = now() WHERE id = %s", (permit_id,))
         conn.execute(
@@ -3933,6 +4062,149 @@ def get_permit_receipt_pdf(
         content=buf.getvalue(),
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{permit["permit_number"]}-receipt.pdf"'},
+    )
+
+
+class FeeCalculateIn(BaseModel):
+    valuation_dollars: float = 0.0
+    square_feet: float = 0.0
+    rate_per_sqft: float = 0.25
+    plan_review_pct: float = 65.0
+    add_to_ledger: bool = False
+
+
+@router.post("/{permit_id}/fees/calculate")
+def calculate_permit_fees(
+    permit_id: int,
+    body: FeeCalculateIn,
+    user: dict = Depends(require_permission("permits.manage")),
+):
+    """Calculate building permit + plan review fees from construction valuation or square footage."""
+    val = max(0.0, body.valuation_dollars)
+    sqft = max(0.0, body.square_feet)
+    if val <= 0 and sqft <= 0:
+        raise HTTPException(status_code=400, detail="Enter construction valuation or square footage")
+
+    if val > 0:
+        if val <= 2000:
+            base_fee = 75.0
+        elif val <= 25000:
+            base_fee = 75.0 + ((val - 2000.0) / 1000.0) * 12.0
+        elif val <= 100000:
+            base_fee = 351.0 + ((val - 25000.0) / 1000.0) * 9.0
+        else:
+            base_fee = 1026.0 + ((val - 100000.0) / 1000.0) * 6.0
+        basis_label = f"Valuation ${val:,.0f}"
+    else:
+        base_fee = round(sqft * max(0.01, body.rate_per_sqft), 2)
+        basis_label = f"{sqft:,.0f} sq ft @ ${body.rate_per_sqft:.2f}/sq ft"
+
+    base_fee = round(base_fee, 2)
+    plan_review_fee = round(base_fee * (max(0.0, body.plan_review_pct) / 100.0), 2)
+    total_fee = round(base_fee + plan_review_fee, 2)
+
+    if not body.add_to_ledger:
+        return {
+            "base_fee_dollars": base_fee,
+            "plan_review_fee_dollars": plan_review_fee,
+            "total_fee_dollars": total_fee,
+            "basis": basis_label,
+        }
+
+    with pool.connection() as conn:
+        _get_permit_or_404(conn, permit_id)
+        conn.execute(
+            "INSERT INTO permit_fee_entries (permit_id, entry_type, description, amount_cents, recorded_by) "
+            "VALUES (%s, 'fee', %s, %s, %s)",
+            (permit_id, f"Calculated Permit Fee ({basis_label})", int(round(base_fee * 100)), user["username"]),
+        )
+        if plan_review_fee > 0:
+            conn.execute(
+                "INSERT INTO permit_fee_entries (permit_id, entry_type, description, amount_cents, recorded_by) "
+                "VALUES (%s, 'fee', %s, %s, %s)",
+                (permit_id, f"Plan Review Fee ({body.plan_review_pct:.0f}%)", int(round(plan_review_fee * 100)), user["username"]),
+            )
+        _sync_permit_fee_totals(conn, permit_id)
+        conn.execute(
+            "INSERT INTO permit_activity_log (permit_id, action, actor_username, note) "
+            "VALUES (%s, 'Calculated Fees Added', %s, %s)",
+            (permit_id, user["username"], f"Total ${total_fee:,.2f} ({basis_label})"),
+        )
+        return _get_permit_or_404(conn, permit_id, include_internal=True)
+
+
+@router.get("/{permit_id}/neighbor-notices-pdf")
+def get_neighbor_notices_pdf(
+    permit_id: int,
+    _: dict = Depends(require_permission("permits.manage")),
+):
+    """Generate printable abutting neighbor Public Hearing Notice letters & mailing roster PDF."""
+    from reportlab.platypus import PageBreak
+
+    with pool.connection() as conn:
+        permit = _get_permit_or_404(conn, permit_id)
+    pd = permit.get("planning_data") or {}
+    owners = pd.get("abutting_owners") or []
+    if not owners:
+        raise HTTPException(status_code=400, detail="Add at least one abutting neighbor in Planning & Zoning before generating notice letters.")
+
+    hearing_dt = pd.get("public_hearing_date") or pd.get("planning_commission_date") or pd.get("council_hearing_date") or "TBD"
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=54, rightMargin=54, topMargin=54, bottomMargin=54)
+    styles = getSampleStyleSheet()
+    story = []
+    for idx, ow in enumerate(owners):
+        if idx > 0:
+            story.append(PageBreak())
+        story.extend([
+            Paragraph("<b>NOTICE OF PUBLIC HEARING — ZONING &amp; LAND USE</b>", styles["Title"]),
+            Paragraph(f"Date: {date.today().isoformat()}", styles["Normal"]),
+            Spacer(1, 10),
+            Paragraph(f"<b>To:</b> {_xml_escape(ow.get('name') or 'Property Owner')}", styles["Normal"]),
+            Paragraph(f"{_xml_escape(ow.get('address') or '')}" + (f" (Parcel: {_xml_escape(ow['parcel_id'])})" if ow.get("parcel_id") else ""), styles["Normal"]),
+            Spacer(1, 14),
+            Paragraph(
+                f"Dear {_xml_escape(ow.get('name') or 'Neighbor')},<br/><br/>"
+                f"Please take notice that an application (<b>{_xml_escape(permit['permit_number'])}</b> — "
+                f"{_xml_escape(permit['permit_type_name'])}: {_xml_escape(permit['permit_use_name'])}) "
+                f"has been filed for the property located at <b>{_xml_escape(permit['property_address'] or '—')}</b> "
+                f"(Zoning District: {_xml_escape(pd.get('zoning_district') or '—')}).",
+                styles["Normal"],
+            ),
+            Spacer(1, 10),
+            Paragraph(
+                f"<b>Public Hearing Date:</b> {_xml_escape(hearing_dt)}<br/>"
+                f"<b>Applicant:</b> {_xml_escape(permit['applicant_name'] or '—')}",
+                styles["Normal"],
+            ),
+            Spacer(1, 12),
+            Paragraph(
+                "All interested residents and abutting property owners are invited to attend and be heard, "
+                "or submit written comments to City Hall prior to the hearing date.",
+                styles["Normal"],
+            ),
+            Spacer(1, 20),
+            Paragraph("Sincerely,<br/><b>Planning &amp; Zoning Administration</b>", styles["Normal"]),
+        ])
+
+    story.extend([PageBreak(), Paragraph("<b>ABUTTING PROPERTY OWNERS MAILING ROSTER</b>", styles["Heading2"]), Spacer(1, 8)])
+    r_rows = [["Owner Name", "Mailing / Property Address", "Parcel ID"]]
+    for ow in owners:
+        r_rows.append([ow.get("name") or "—", ow.get("address") or "—", ow.get("parcel_id") or "—"])
+    rtbl = Table(r_rows, colWidths=[165, 225, 110])
+    rtbl.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("PADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.append(rtbl)
+    doc.build(story)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{permit["permit_number"]}-neighbor-notices.pdf"'},
     )
 
 

@@ -119,10 +119,24 @@ export default function ContractorsManagePage() {
             Track contractor licenses, liability insurance, and surety bonds. Non-compliant licenses are automatically blocked at permit submission and issuance.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <span className="badge active">Compliant: {compliantCount}</span>
           {expiringCount > 0 && <span className="badge draft">Expiring &le; 30d: {expiringCount}</span>}
           {nonCompliantCount > 0 && <span className="badge disabled">Blocked / Non-Compliant: {nonCompliantCount}</span>}
+          <button
+            type="button"
+            className="btn sm"
+            onClick={async () => {
+              try {
+                const res = await api('/api/permits/contractors/send-reminders', { method: 'POST' });
+                showToast(`Sent ${res.sent_count} reminder(s)${res.skipped_count ? ` (${res.skipped_count} missing email)` : ''}`, 'ok');
+              } catch (err) {
+                showToast(err.message, 'error');
+              }
+            }}
+          >
+            Send 30-Day Renewal Reminders
+          </button>
         </div>
       </div>
 

@@ -85,7 +85,12 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
     public_hearing_date: permit.planning_data?.public_hearing_date || '',
     council_hearing_date: permit.planning_data?.council_hearing_date || '',
     conditions_of_approval: permit.planning_data?.conditions_of_approval || '',
+    abutting_owners: Array.isArray(permit.planning_data?.abutting_owners) ? permit.planning_data.abutting_owners : [],
   });
+  const [newAbutting, setNewAbutting] = useState({ name: '', address: '', parcel_id: '' });
+  const [calcVal, setCalcVal] = useState('');
+  const [calcSqft, setCalcSqft] = useState('');
+  const [calcPlanPct, setCalcPlanPct] = useState('65');
 
   // Message form
   const [msgText, setMsgText] = useState('');
@@ -129,6 +134,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
       public_hearing_date: permit.planning_data?.public_hearing_date || '',
       council_hearing_date: permit.planning_data?.council_hearing_date || '',
       conditions_of_approval: permit.planning_data?.conditions_of_approval || '',
+      abutting_owners: Array.isArray(permit.planning_data?.abutting_owners) ? permit.planning_data.abutting_owners : [],
     });
     setEditingDetails(false);
     if ((permit.contractor_license || '').trim()) {
@@ -839,6 +845,58 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                   />
                 </div>
 
+                <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '.75rem', marginBottom: '.85rem', background: '#f8fafc' }}>
+                  <div className="between" style={{ marginBottom: '.5rem', flexWrap: 'wrap', gap: '.4rem' }}>
+                    <strong style={{ fontSize: '.9rem' }}>Abutting Property Owners ({(planForm.abutting_owners || []).length})</strong>
+                    {(permit.planning_data?.abutting_owners || []).length > 0 && (
+                      <a className="btn sm" href={`/api/permits/${permit.id}/neighbor-notices-pdf`} target="_blank" rel="noreferrer">
+                        Download Neighbor Notice Letters PDF
+                      </a>
+                    )}
+                  </div>
+                  {(planForm.abutting_owners || []).length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '.3rem', marginBottom: '.5rem' }}>
+                      {planForm.abutting_owners.map((ow, idx) => (
+                        <div key={idx} className="between" style={{ fontSize: '.84rem', background: '#fff', padding: '.3rem .55rem', borderRadius: 4, border: '1px solid #e2e8f0' }}>
+                          <span><strong>{ow.name || 'Owner'}</strong> · {ow.address} {ow.parcel_id ? `(${ow.parcel_id})` : ''}</span>
+                          <button
+                            type="button"
+                            className="btn sm danger"
+                            onClick={() => setPlanForm((f) => ({ ...f, abutting_owners: f.abutting_owners.filter((_, j) => j !== idx) }))}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="row" style={{ gap: '.4rem', alignItems: 'flex-end' }}>
+                    <div className="field" style={{ flex: 1, minWidth: 130 }}>
+                      <label>Owner Name</label>
+                      <input placeholder="Neighbor name" value={newAbutting.name} onChange={(e) => setNewAbutting((a) => ({ ...a, name: e.target.value }))} />
+                    </div>
+                    <div className="field" style={{ flex: 2, minWidth: 160 }}>
+                      <label>Mailing Address</label>
+                      <input placeholder="Street, City, State ZIP" value={newAbutting.address} onChange={(e) => setNewAbutting((a) => ({ ...a, address: e.target.value }))} />
+                    </div>
+                    <div className="field" style={{ flex: 1, minWidth: 110 }}>
+                      <label>Parcel ID</label>
+                      <input placeholder="Optional" value={newAbutting.parcel_id} onChange={(e) => setNewAbutting((a) => ({ ...a, parcel_id: e.target.value }))} />
+                    </div>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={() => {
+                        if (!newAbutting.name.trim() && !newAbutting.address.trim()) return;
+                        setPlanForm((f) => ({ ...f, abutting_owners: [...(f.abutting_owners || []), { ...newAbutting }] }));
+                        setNewAbutting({ name: '', address: '', parcel_id: '' });
+                      }}
+                    >
+                      + Add Neighbor
+                    </button>
+                  </div>
+                </div>
+
                 <button type="submit" className="btn primary" disabled={busy}>Save Planning &amp; Zoning</button>
               </form>
             ) : (
@@ -893,7 +951,52 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
             </div>
 
             {isManager && (
-              <form
+              <>
+                <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '.7rem .85rem', marginBottom: '1rem', background: '#f8fafc' }}>
+                  <strong style={{ display: 'block', fontSize: '.88rem', marginBottom: '.45rem' }}>Automated Valuation / Sq-Ft Fee Calculator</strong>
+                  <div className="row" style={{ alignItems: 'flex-end', gap: '.5rem' }}>
+                    <div className="field" style={{ flex: 1, minWidth: 130 }}>
+                      <label>Valuation ($)</label>
+                      <input type="number" min="0" placeholder="e.g. 50000" value={calcVal} onChange={(e) => setCalcVal(e.target.value)} />
+                    </div>
+                    <div className="field" style={{ flex: 1, minWidth: 120 }}>
+                      <label>OR Sq. Ft.</label>
+                      <input type="number" min="0" placeholder="e.g. 1200" value={calcSqft} onChange={(e) => setCalcSqft(e.target.value)} />
+                    </div>
+                    <div className="field" style={{ width: 120 }}>
+                      <label>Plan Review %</label>
+                      <input type="number" min="0" max="100" value={calcPlanPct} onChange={(e) => setCalcPlanPct(e.target.value)} />
+                    </div>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      disabled={busy || (!Number(calcVal) && !Number(calcSqft))}
+                      onClick={async () => {
+                        setBusy(true);
+                        try {
+                          const updated = await api(`/api/permits/${permit.id}/fees/calculate`, {
+                            method: 'POST',
+                            body: JSON.stringify({
+                              valuation_dollars: Number(calcVal) || 0,
+                              square_feet: Number(calcSqft) || 0,
+                              plan_review_pct: Number(calcPlanPct) || 0,
+                              add_to_ledger: true,
+                            }),
+                          });
+                          onUpdated(updated);
+                          showToast('Calculated permit & plan review fees added to ledger', 'ok');
+                        } catch (err) {
+                          showToast(err.message, 'error');
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      Calculate &amp; Add to Ledger
+                    </button>
+                  </div>
+                </div>
+                <form
                 className="row"
                 style={{ marginBottom: '1rem', alignItems: 'flex-end' }}
                 onSubmit={async (e) => {
@@ -950,6 +1053,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                 </div>
                 <button type="submit" className="btn sm primary" disabled={busy}>+ Add Entry</button>
               </form>
+              </>
             )}
 
             {!entries.length ? (
@@ -1306,6 +1410,48 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                                 <button type="submit" className="btn sm">+ Add Item</button>
                               </form>
                             )}
+                            <div style={{ marginTop: '.65rem', paddingTop: '.55rem', borderTop: '1px dashed #cbd5e1' }}>
+                              <div className="between" style={{ flexWrap: 'wrap', gap: '.4rem', marginBottom: '.35rem' }}>
+                                <strong style={{ fontSize: '.83rem' }}>Field Photos &amp; Inspection Attachments</strong>
+                                <label className="btn sm" style={{ cursor: 'pointer' }}>
+                                  + Upload Field Photo / File
+                                  <input
+                                    type="file"
+                                    style={{ display: 'none' }}
+                                    onChange={async (e) => {
+                                      const f = e.target.files?.[0];
+                                      if (!f) return;
+                                      const fd = new FormData();
+                                      fd.append('file', f);
+                                      fd.append('doc_category', 'Inspection Photo');
+                                      fd.append('title', `${ins.inspection_type}: ${f.name}`);
+                                      fd.append('inspection_id', String(ins.id));
+                                      setBusy(true);
+                                      try {
+                                        const updated = await api(`/api/permits/${permit.id}/documents`, { method: 'POST', body: fd });
+                                        onUpdated(updated);
+                                        showToast('Field photo attached to inspection', 'ok');
+                                      } catch (err) {
+                                        showToast(err.message, 'error');
+                                      } finally {
+                                        setBusy(false);
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              </div>
+                              {docs.filter((d) => d.inspection_id === ins.id).length === 0 ? (
+                                <span className="muted" style={{ fontSize: '.8rem' }}>No photos/files attached to this inspection yet.</span>
+                              ) : (
+                                <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
+                                  {docs.filter((d) => d.inspection_id === ins.id).map((d) => (
+                                    <a key={d.id} className="btn sm" href={`/api/permits/${permit.id}/documents/${d.id}/download`} target="_blank" rel="noreferrer">
+                                      {d.filename} ({formatSize(d.size_bytes)})
+                                    </a>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       )}

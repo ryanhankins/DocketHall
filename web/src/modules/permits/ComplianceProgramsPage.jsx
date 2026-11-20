@@ -118,10 +118,24 @@ export default function ComplianceProgramsPage() {
             Track recurring Rental Housing, Short-Term Rental (STR), Commercial Fire, and Backflow/FOG inspection cycles with automatic next-due dates and Compliance Certificates.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <span className="badge active">Total: {items.length}</span>
           {dueSoonCount > 0 && <span className="badge draft">Due &le; 30d: {dueSoonCount}</span>}
           {overdueCount > 0 && <span className="badge disabled">Overdue: {overdueCount}</span>}
+          <button
+            type="button"
+            className="btn sm"
+            onClick={async () => {
+              try {
+                const res = await api('/api/permits/compliance-programs/send-reminders', { method: 'POST' });
+                showToast(`Sent ${res.sent_count} reminder(s)${res.skipped_count ? ` (${res.skipped_count} missing email)` : ''}`, 'ok');
+              } catch (err) {
+                showToast(err.message, 'error');
+              }
+            }}
+          >
+            Send 30-Day Reminders
+          </button>
         </div>
       </div>
 

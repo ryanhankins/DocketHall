@@ -64,7 +64,8 @@ PERMITS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         "permit_parcels",
         [
             "id", "parcel_id", "address", "building_name", "suite_name",
-            "owner_name", "lot", "block", "section", "notes", "created_at",
+            "owner_name", "lot", "block", "section", "notes",
+            "latitude", "longitude", "zoning_district", "created_at",
         ],
         set(),
         True,
@@ -98,7 +99,7 @@ PERMITS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         [
             "id", "permit_id", "doc_category", "title", "filename",
             "content_type", "size_bytes", "sha256", "object_key",
-            "uploaded_by", "created_at",
+            "uploaded_by", "inspection_id", "created_at",
         ],
         set(),
         True,
