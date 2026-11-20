@@ -25,6 +25,7 @@ const ContractorsManagePage = React.lazy(() => import('./ContractorsManagePage.j
 const ComplianceProgramsPage = React.lazy(() => import('./ComplianceProgramsPage.jsx'));
 const PermitsReportsPage = React.lazy(() => import('./PermitsReportsPage.jsx'));
 const PropertyProfilePage = React.lazy(() => import('./PropertyProfilePage.jsx'));
+const FieldInspectorPage = React.lazy(() => import('./FieldInspectorPage.jsx'));
 
 const permitsModule = {
   id: 'permits',
@@ -73,6 +74,11 @@ const permitsModule = {
       match: (hash) => (hash === 'permits-reports' ? {} : null),
       permission: 'permits.manage',
       component: PermitsReportsPage,
+    },
+    {
+      match: (hash) => (hash === 'field-inspector' ? {} : null),
+      permission: 'permits.manage',
+      component: FieldInspectorPage,
     },
     {
       match: (hash) => {

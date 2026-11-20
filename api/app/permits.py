@@ -218,11 +218,15 @@ CREATE TABLE IF NOT EXISTS permit_inspections (
     result           TEXT NOT NULL DEFAULT 'scheduled',
     notes            TEXT NOT NULL DEFAULT '',
     checklist        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    signature_data   TEXT NOT NULL DEFAULT '',
+    signed_by        TEXT NOT NULL DEFAULT '',
     completed_at     TIMESTAMPTZ,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE permit_inspections ADD COLUMN IF NOT EXISTS requested_window TEXT NOT NULL DEFAULT '';
 ALTER TABLE permit_inspections ADD COLUMN IF NOT EXISTS checklist JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE permit_inspections ADD COLUMN IF NOT EXISTS signature_data TEXT NOT NULL DEFAULT '';
+ALTER TABLE permit_inspections ADD COLUMN IF NOT EXISTS signed_by TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS permit_inspections_permit_idx ON permit_inspections(permit_id, id);
 CREATE TABLE IF NOT EXISTS permit_messages (
     id              BIGSERIAL PRIMARY KEY,
@@ -951,6 +955,8 @@ class InspectionPatch(BaseModel):
     result: str | None = None
     notes: str | None = None
     checklist: list[dict[str, Any]] | None = None
+    signature_data: str | None = None
+    signed_by: str | None = None
 
 
 _INSPECTION_CHECKLIST_TEMPLATES: dict[str, list[str]] = {
@@ -1241,7 +1247,7 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
         })
 
     insp_rows = conn.execute(
-        "SELECT id, permit_id, inspection_type, scheduled_date, requested_window, inspector, result, notes, checklist, completed_at, created_at "
+        "SELECT id, permit_id, inspection_type, scheduled_date, requested_window, inspector, result, notes, checklist, signature_data, signed_by, completed_at, created_at "
         "FROM permit_inspections WHERE permit_id = ANY(%s) ORDER BY id ASC",
         (ids,),
     ).fetchall()
@@ -1257,8 +1263,10 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
             "result": ins[6],
             "notes": ins[7],
             "checklist": ins[8] if isinstance(ins[8], list) else [],
-            "completed_at": ins[9].isoformat() if ins[9] else None,
-            "created_at": ins[10].isoformat() if ins[10] else None,
+            "signature_data": ins[9] or "",
+            "signed_by": ins[10] or "",
+            "completed_at": ins[11].isoformat() if ins[11] else None,
+            "created_at": ins[12].isoformat() if ins[12] else None,
         })
 
     msg_rows = conn.execute(
@@ -3336,7 +3344,7 @@ def list_inspection_queue(
         rows = conn.execute(
             "SELECT i.id, i.permit_id, p.permit_number, p.property_address, p.permit_type_name, "
             "       i.inspection_type, i.scheduled_date, i.requested_window, i.inspector, "
-            "       i.result, i.notes, i.checklist, i.completed_at, i.created_at "
+            "       i.result, i.notes, i.checklist, i.signature_data, i.signed_by, i.completed_at, i.created_at "
             "FROM permit_inspections i "
             "JOIN permits p ON p.id = i.permit_id "
             "WHERE (%s = '' OR i.result = %s) "
@@ -3358,8 +3366,10 @@ def list_inspection_queue(
             "result": r[9],
             "notes": r[10],
             "checklist": r[11] if isinstance(r[11], list) else [],
-            "completed_at": r[12].isoformat() if r[12] else None,
-            "created_at": r[13].isoformat() if r[13] else None,
+            "signature_data": r[12] or "",
+            "signed_by": r[13] or "",
+            "completed_at": r[14].isoformat() if r[14] else None,
+            "created_at": r[15].isoformat() if r[15] else None,
         }
         for r in rows
     ]
@@ -3448,7 +3458,9 @@ def update_inspection(
             f"inspector = COALESCE(%s, inspector), "
             f"result = COALESCE(%s, result), "
             f"notes = COALESCE(%s, notes), "
-            f"checklist = COALESCE(%s::jsonb, checklist){comp_clause} "
+            f"checklist = COALESCE(%s::jsonb, checklist), "
+            f"signature_data = COALESCE(%s, signature_data), "
+            f"signed_by = COALESCE(%s, signed_by){comp_clause} "
             f"WHERE id = %s AND permit_id = %s RETURNING inspection_type, result",
             (
                 body.scheduled_date.strip() if body.scheduled_date is not None else None,
@@ -3457,6 +3469,8 @@ def update_inspection(
                 body.result,
                 body.notes.strip() if body.notes is not None else None,
                 checklist_json,
+                body.signature_data if body.signature_data is not None else None,
+                body.signed_by.strip() if body.signed_by is not None else None,
                 insp_id,
                 permit_id,
             ),

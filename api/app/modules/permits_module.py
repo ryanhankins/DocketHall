@@ -83,7 +83,8 @@ PERMITS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         "permit_inspections",
         [
             "id", "permit_id", "inspection_type", "scheduled_date", "requested_window",
-            "inspector", "result", "notes", "checklist", "completed_at", "created_at",
+            "inspector", "result", "notes", "checklist", "signature_data", "signed_by",
+            "completed_at", "created_at",
         ],
         {"checklist"},
         True,
@@ -175,6 +176,7 @@ MODULE = CivicModule(
             "permission": "permits.manage",
             "items": [
                 {"section": "permits-review", "label": "Permit Review Queue", "permission": "permits.manage"},
+                {"section": "field-inspector", "label": "Field Inspector Mode", "permission": "permits.manage"},
                 {"section": "properties", "label": "Property 360° Lookup", "permission": "permits.manage", "feature": "property_360"},
                 {"section": "permits-reports", "label": "Reports & Revenue", "permission": "permits.manage", "feature": "reports"},
                 {"section": "contractors", "label": "Contractors & Licenses", "permission": "permits.manage", "feature": "contractors"},
