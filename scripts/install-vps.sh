@@ -96,6 +96,14 @@ EOF
   systemctl reload caddy
 else
   export COOKIE_SECURE="${COOKIE_SECURE:-false}"
+  echo "==> Configuring Caddy HTTP reverse proxy on :80"
+  cat >/etc/caddy/Caddyfile <<EOF
+:80 {
+    reverse_proxy 127.0.0.1:${CIVICDESK_PORT}
+}
+EOF
+  systemctl enable --now caddy
+  systemctl reload caddy
 fi
 
 echo "==> Deploying CivicDesk stack"
