@@ -249,13 +249,14 @@ export default function HelpDocsPage({ me }) {
         <div className="card" style={{ marginBottom: 0 }}>
           <div className="field" style={{ marginBottom: '.65rem' }}>
             <input
+              aria-label="Search help guides"
               placeholder="Search guides…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
           <div className="field" style={{ marginBottom: '.85rem' }}>
-            <select value={audienceFilter} onChange={(e) => setAudienceFilter(e.target.value)}>
+            <select aria-label="Filter help topics by audience" value={audienceFilter} onChange={(e) => setAudienceFilter(e.target.value)}>
               <option value="">All Audiences</option>
               {Object.entries(AUDIENCE_LABELS).map(([k, v]) => (
                 <option key={k} value={k}>{v}</option>

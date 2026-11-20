@@ -545,6 +545,7 @@ function DirectoryPublicTab({ features = {} }) {
             <span>Directory, Local Resources &amp; FAQs</span>
           </h2>
           <input
+            aria-label="Search contacts, businesses, resources, or FAQs"
             placeholder="Search contacts, businesses, resources, or FAQs…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -762,7 +763,7 @@ function NoticesPublicTab({ features = {} }) {
             <span>News, Public Notices, Bids &amp; Jobs</span>
           </h2>
           <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
-            <select value={cat} onChange={(e) => setCat(e.target.value)} style={{ width: 'auto' }}>
+            <select aria-label="Filter notices by category" value={cat} onChange={(e) => setCat(e.target.value)} style={{ width: 'auto' }}>
               <option value="">All Categories</option>
               <option value="news">City News</option>
               <option value="public_notice">Public Notices</option>
@@ -770,6 +771,7 @@ function NoticesPublicTab({ features = {} }) {
               {features.jobs !== false && <option value="job">Job Openings</option>}
             </select>
             <input
+              aria-label="Search notices, bids, and jobs"
               placeholder="Search notices, bids, jobs…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
@@ -1874,7 +1876,7 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {} }) {
         >
           <h3 style={{ margin: 0 }}>Report a Public Works / 311 Issue</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
-            <select value={woForm.category} onChange={(e) => setWoForm((f) => ({ ...f, category: e.target.value }))}>
+            <select aria-label="311 request category" value={woForm.category} onChange={(e) => setWoForm((f) => ({ ...f, category: e.target.value }))}>
               <option value="Pothole / Street">Pothole / Street</option>
               <option value="Streetlight">Streetlight Outage</option>
               <option value="Water / Sewer">Water / Sewer</option>
@@ -2024,7 +2026,7 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {} }) {
           </form>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: '1rem' }}>
             <input style={{ flex: '1 1 240px' }} placeholder="Search complaint #, property, ordinance, resolution…" value={q} onChange={(e) => setQ(e.target.value)} />
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <select aria-label="Filter complaints by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="">All Statuses</option>
               {COMPLAINT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
@@ -2285,7 +2287,16 @@ function CalendarPublicTab({ features = {} }) {
               return (
                 <div
                   key={iso}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Select date ${iso}${dayItems.length ? `, ${dayItems.length} event(s)` : ''}`}
                   onClick={() => setEvDate(iso)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setEvDate(iso);
+                    }
+                  }}
                   style={{
                     minHeight: 74,
                     border: evDate === iso ? '2px solid #2563eb' : '1px solid #e2e8f0',

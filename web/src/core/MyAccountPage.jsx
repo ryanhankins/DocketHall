@@ -261,41 +261,41 @@ export default function MyAccountPage({ me, onNavigate }) {
         }}
       >
         {enabled.has('permits') && (
-          <div className="card" style={{ marginBottom: 0, cursor: 'pointer' }} onClick={() => setTab('permits')}>
+          <button type="button" className="card" style={{ marginBottom: 0, cursor: 'pointer', textAlign: 'left', width: '100%' }} onClick={() => setTab('permits')}>
             <div className="muted" style={{ fontSize: '.8rem' }}>Open Permits</div>
             <div style={{ fontSize: '1.6rem', fontWeight: 700 }}>{counts.open_permits ?? 0}</div>
             <div className="muted" style={{ fontSize: '.78rem' }}>{counts.total_permits ?? 0} total</div>
-          </div>
+          </button>
         )}
         {enabled.has('permits') && (
-          <div className="card" style={{ marginBottom: 0, cursor: 'pointer' }} onClick={() => setTab('permits')}>
+          <button type="button" className="card" style={{ marginBottom: 0, cursor: 'pointer', textAlign: 'left', width: '100%' }} onClick={() => setTab('permits')}>
             <div className="muted" style={{ fontSize: '.8rem' }}>Upcoming Inspections</div>
             <div style={{ fontSize: '1.6rem', fontWeight: 700 }}>{counts.upcoming_inspections ?? 0}</div>
             <div className="muted" style={{ fontSize: '.78rem' }}>{inspections.length} total</div>
-          </div>
+          </button>
         )}
         {enabled.has('complaints') && (
-          <div className="card" style={{ marginBottom: 0, cursor: 'pointer' }} onClick={() => setTab('complaints')}>
+          <button type="button" className="card" style={{ marginBottom: 0, cursor: 'pointer', textAlign: 'left', width: '100%' }} onClick={() => setTab('complaints')}>
             <div className="muted" style={{ fontSize: '.8rem' }}>Open 311 Requests</div>
             <div style={{ fontSize: '1.6rem', fontWeight: 700 }}>{counts.open_complaints ?? 0}</div>
             <div className="muted" style={{ fontSize: '.78rem' }}>{counts.total_complaints ?? 0} total</div>
-          </div>
+          </button>
         )}
         {enabled.has('calendar') && (
-          <div className="card" style={{ marginBottom: 0, cursor: 'pointer' }} onClick={() => setTab('reservations')}>
+          <button type="button" className="card" style={{ marginBottom: 0, cursor: 'pointer', textAlign: 'left', width: '100%' }} onClick={() => setTab('reservations')}>
             <div className="muted" style={{ fontSize: '.8rem' }}>Facility Bookings</div>
             <div style={{ fontSize: '1.6rem', fontWeight: 700 }}>{counts.reservations ?? 0}</div>
             <div className="muted" style={{ fontSize: '.78rem' }}>By account email</div>
-          </div>
+          </button>
         )}
         {enabled.has('records') && (
-          <div className="card" style={{ marginBottom: 0, cursor: 'pointer' }} onClick={() => setTab('records')}>
+          <button type="button" className="card" style={{ marginBottom: 0, cursor: 'pointer', textAlign: 'left', width: '100%' }} onClick={() => setTab('records')}>
             <div className="muted" style={{ fontSize: '.8rem' }}>FOIA Requests</div>
             <div style={{ fontSize: '1.6rem', fontWeight: 700 }}>{counts.records_requests ?? 0}</div>
             <div className="muted" style={{ fontSize: '.78rem' }}>By account email</div>
-          </div>
+          </button>
         )}
-        <div className="card" style={{ marginBottom: 0, cursor: 'pointer' }} onClick={() => setTab('forms')}>
+        <button type="button" className="card" style={{ marginBottom: 0, cursor: 'pointer', textAlign: 'left', width: '100%' }} onClick={() => setTab('forms')}>
           <div className="muted" style={{ fontSize: '.8rem' }}>Forms &amp; Alerts</div>
           <div style={{ fontSize: '1.6rem', fontWeight: 700 }}>
             {(counts.form_submissions ?? 0) + (counts.subscriptions ?? 0)}
@@ -303,7 +303,7 @@ export default function MyAccountPage({ me, onNavigate }) {
           <div className="muted" style={{ fontSize: '.78rem' }}>
             {counts.form_submissions ?? 0} forms &middot; {counts.subscriptions ?? 0} alerts
           </div>
-        </div>
+        </button>
       </div>
 
       <div className="card" style={{ padding: '.6rem .8rem' }}>

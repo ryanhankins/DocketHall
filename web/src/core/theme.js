@@ -54,6 +54,60 @@ function isDarkHex(hex) {
   return lum < 0.45;
 }
 
+function relativeLuminance(hex) {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec((hex || '').trim());
+  if (!m) return null;
+  const toLin = (c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * toLin(parseInt(m[1], 16))
+    + 0.7152 * toLin(parseInt(m[2], 16))
+    + 0.0722 * toLin(parseInt(m[3], 16));
+}
+
+export function contrastRatio(hexA, hexB) {
+  const l1 = relativeLuminance(hexA);
+  const l2 = relativeLuminance(hexB);
+  if (l1 === null || l2 === null) return null;
+  const [hi, lo] = l1 >= l2 ? [l1, l2] : [l2, l1];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+export function getThemeContrastWarnings(theme = {}) {
+  const primary = theme.theme_primary || DEFAULT_THEME.theme_primary;
+  const secondary = theme.theme_secondary || DEFAULT_THEME.theme_secondary;
+  const tint = theme.theme_tint || DEFAULT_THEME.theme_tint;
+  const bg = theme.theme_bg || DEFAULT_THEME.theme_bg;
+  const surface = theme.theme_surface || DEFAULT_THEME.theme_surface;
+  const headerBg = theme.theme_header_bg || DEFAULT_THEME.theme_header_bg;
+
+  const checks = [
+    { a: primary, b: '#ffffff', min: 4.5, desc: `Primary Accent (${primary}) with white button text` },
+    { a: primary, b: surface, min: 4.5, desc: `Primary Accent (${primary}) links on Card Surface (${surface})` },
+    { a: primary, b: tint, min: 4.5, desc: `Primary Accent (${primary}) text on Soft Highlight (${tint})` },
+    { a: secondary, b: surface, min: 3.0, desc: `Secondary Accent (${secondary}) focus/border on Card Surface (${surface})` },
+    { a: '#1f2933', b: surface, min: 4.5, desc: `Body text (#1f2933) on Card Surface (${surface})` },
+    { a: '#616e7c', b: surface, min: 4.5, desc: `Muted text (#616e7c) on Card Surface (${surface})` },
+    { a: '#1f2933', b: bg, min: 4.5, desc: `Body text (#1f2933) on Page Background (${bg})` },
+    {
+      a: isDarkHex(headerBg) ? '#ffffff' : '#18181c',
+      b: headerBg,
+      min: 4.5,
+      desc: `Header text on Header Background (${headerBg})`,
+    },
+  ];
+
+  const warnings = [];
+  for (const c of checks) {
+    const ratio = contrastRatio(c.a, c.b);
+    if (ratio !== null && ratio < c.min) {
+      warnings.push(`${c.desc}: ${ratio.toFixed(2)}:1 (WCAG 2.1 AA requires >= ${c.min}:1)`);
+    }
+  }
+  return warnings;
+}
+
 export function applyTheme(theme = {}) {
   if (typeof document === 'undefined') return;
   const root = document.documentElement.style;

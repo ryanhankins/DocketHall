@@ -17,7 +17,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { api } from './api.js';
-import { DEFAULT_THEME, THEME_PRESETS, applyTheme } from './theme.js';
+import { DEFAULT_THEME, THEME_PRESETS, applyTheme, getThemeContrastWarnings } from './theme.js';
 
 const COLOR_FIELDS = [
   { key: 'theme_primary', label: 'Primary Accent (buttons, links, active tabs)' },
@@ -397,6 +397,31 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
               );
             })}
           </div>
+
+          {(() => {
+            const contrastWarnings = getThemeContrastWarnings(themeColors);
+            if (!contrastWarnings.length) return null;
+            return (
+              <div
+                className="banner show"
+                role="alert"
+                style={{
+                  background: '#fffbeb',
+                  borderColor: '#f59e0b',
+                  color: '#92400e',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: '.35rem',
+                  marginBottom: '1rem',
+                }}
+              >
+                <strong>WCAG 2.1 AA Contrast Warning:</strong>
+                <ul style={{ margin: '0 0 0 1.2rem', padding: 0, fontSize: '.86rem' }}>
+                  {contrastWarnings.map((w) => <li key={w}>{w}</li>)}
+                </ul>
+              </div>
+            );
+          })()}
 
           <button type="submit" className="btn primary">Save General Preferences</button>
           {msg.text && (
