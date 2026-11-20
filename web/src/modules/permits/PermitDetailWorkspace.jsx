@@ -61,8 +61,11 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
   // Inspection form
   const [inspType, setInspType] = useState('Final Inspection');
   const [inspDate, setInspDate] = useState('');
+  const [inspWindow, setInspWindow] = useState('');
   const [inspInspector, setInspInspector] = useState('');
   const [inspNotes, setInspNotes] = useState('');
+  const [openChecklistId, setOpenChecklistId] = useState(null);
+  const [newCheckItem, setNewCheckItem] = useState('');
 
   // Message form
   const [msgText, setMsgText] = useState('');
@@ -179,6 +182,17 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
             + Create Follow-Up Permit
           </button>
           <a className="btn sm primary" href={`/api/permits/${permit.id}/pdf`} target="_blank" rel="noreferrer">Permit PDF</a>
+          {(permit.status === 'issued' || permit.status === 'closed') && (
+            <a
+              className="btn sm"
+              href={`/api/permits/${permit.id}/certificate-of-occupancy`}
+              target="_blank"
+              rel="noreferrer"
+              title="Download Certificate of Occupancy / Completion (requires all active inspections passed)"
+            >
+              Certificate of Occupancy PDF
+            </a>
+          )}
         </div>
       </div>
 
@@ -742,98 +756,232 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
 
       {tab === 'inspections' && (
         <div className="card">
-          <h2>Inspections</h2>
-          <form
-            className="row"
-            style={{ marginBottom: '1rem', alignItems: 'flex-end' }}
-            onSubmit={async (e) => {
-              e.preventDefault();
-              const updated = await api(`/api/permits/${permit.id}/inspections`, {
-                method: 'POST',
-                body: JSON.stringify({
-                  inspection_type: inspType.trim(),
-                  scheduled_date: inspDate,
-                  inspector: inspInspector.trim(),
-                  notes: inspNotes.trim(),
-                }),
-              });
-              setInspDate(''); setInspNotes('');
-              showToast('Inspection scheduled', 'ok');
-              onUpdated(updated);
-            }}
-          >
-            <div className="field" style={{ flex: 2, minWidth: '180px' }}>
-              <label>Inspection Type</label>
-              <input required placeholder="e.g. Footing, Framing, Final Inspection" value={inspType} onChange={(e) => setInspType(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Requested / Scheduled Date</label>
-              <input type="date" value={inspDate} onChange={(e) => setInspDate(e.target.value)} />
-            </div>
-            {isManager && (
-              <div className="field" style={{ flex: 1, minWidth: '140px' }}>
-                <label>Inspector</label>
-                <input placeholder="Inspector name" value={inspInspector} onChange={(e) => setInspInspector(e.target.value)} />
+          <h2>Inspections &amp; Field Checklists</h2>
+          {!isManager && permit.status !== 'approved' && permit.status !== 'issued' ? (
+            <p className="muted" style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: '.6rem .8rem', marginBottom: '1rem' }}>
+              Self-service inspection scheduling opens once your permit is <strong>Approved</strong> or <strong>Issued</strong>.
+            </p>
+          ) : (
+            <form
+              className="row"
+              style={{ marginBottom: '1rem', alignItems: 'flex-end' }}
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  const updated = await api(`/api/permits/${permit.id}/inspections`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                      inspection_type: inspType.trim(),
+                      scheduled_date: inspDate,
+                      requested_window: inspWindow,
+                      inspector: inspInspector.trim(),
+                      notes: inspNotes.trim(),
+                    }),
+                  });
+                  setInspDate(''); setInspWindow(''); setInspNotes('');
+                  showToast('Inspection scheduled with field checklist', 'ok');
+                  onUpdated(updated);
+                } catch (err) {
+                  showToast(err.message, 'error');
+                }
+              }}
+            >
+              <div className="field" style={{ flex: 2, minWidth: '180px' }}>
+                <label>Inspection Type</label>
+                <input
+                  list="civicdesk-insp-types"
+                  required
+                  placeholder="e.g. Footing, Framing, Electrical, Final Inspection"
+                  value={inspType}
+                  onChange={(e) => setInspType(e.target.value)}
+                />
+                <datalist id="civicdesk-insp-types">
+                  <option value="Footing Inspection" />
+                  <option value="Framing Inspection" />
+                  <option value="Electrical Rough / Final" />
+                  <option value="Plumbing Rough / Final" />
+                  <option value="Erosion Control Inspection" />
+                  <option value="Final Inspection" />
+                </datalist>
               </div>
-            )}
-            <div className="field" style={{ flex: 2, minWidth: '180px' }}>
-              <label>Notes</label>
-              <input placeholder="Access instructions or notes" value={inspNotes} onChange={(e) => setInspNotes(e.target.value)} />
-            </div>
-            <button type="submit" className="btn sm primary">{isManager ? 'Schedule Inspection' : 'Request Inspection'}</button>
-          </form>
+              <div className="field">
+                <label>Requested / Scheduled Date</label>
+                <input type="date" value={inspDate} onChange={(e) => setInspDate(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Preferred Window</label>
+                <select value={inspWindow} onChange={(e) => setInspWindow(e.target.value)}>
+                  <option value="">Anytime</option>
+                  <option value="AM (8am–12pm)">AM (8am–12pm)</option>
+                  <option value="PM (12pm–4pm)">PM (12pm–4pm)</option>
+                </select>
+              </div>
+              {isManager && (
+                <div className="field" style={{ flex: 1, minWidth: '140px' }}>
+                  <label>Inspector</label>
+                  <input placeholder="Inspector name" value={inspInspector} onChange={(e) => setInspInspector(e.target.value)} />
+                </div>
+              )}
+              <div className="field" style={{ flex: 2, minWidth: '180px' }}>
+                <label>Notes</label>
+                <input placeholder="Access instructions or notes" value={inspNotes} onChange={(e) => setInspNotes(e.target.value)} />
+              </div>
+              <button type="submit" className="btn sm primary">{isManager ? 'Schedule Inspection' : 'Request Inspection'}</button>
+            </form>
+          )}
 
           {!inspections.length ? (
             <p className="muted">No inspections scheduled yet.</p>
           ) : (
             <table>
               <thead>
-                <tr><th>Inspection</th><th>Date</th><th>Inspector</th><th>Result</th><th>Notes</th>{isManager && <th>Actions</th>}</tr>
+                <tr><th>Inspection</th><th>Date &amp; Window</th><th>Inspector</th><th>Checklist</th><th>Result</th><th>Notes</th>{isManager && <th>Actions</th>}</tr>
               </thead>
               <tbody>
-                {inspections.map(ins => (
-                  <tr key={ins.id}>
-                    <td><strong>{ins.inspection_type}</strong></td>
-                    <td>{ins.scheduled_date || 'TBD'}</td>
-                    <td>{ins.inspector || '—'}</td>
-                    <td>
-                      {isManager ? (
-                        <select
-                          className="btn sm"
-                          style={{ width: 'auto' }}
-                          value={ins.result}
-                          onChange={async (e) => {
-                            onUpdated(await api(`/api/permits/${permit.id}/inspections/${ins.id}`, {
-                              method: 'PATCH', body: JSON.stringify({ result: e.target.value }),
-                            }));
-                          }}
-                        >
-                          <option value="scheduled">Scheduled</option>
-                          <option value="passed">Passed</option>
-                          <option value="failed">Failed</option>
-                          <option value="partial">Partial</option>
-                          <option value="cancelled">Cancelled</option>
-                        </select>
-                      ) : (
-                        <span className={`badge ${ins.result === 'passed' ? 'active' : (ins.result === 'failed' ? 'disabled' : 'draft')}`}>
-                          {ins.result}
-                        </span>
+                {inspections.map((ins) => {
+                  const cl = Array.isArray(ins.checklist) ? ins.checklist : [];
+                  const passedCount = cl.filter((c) => c.status === 'pass' || c.status === 'na').length;
+                  const failedCount = cl.filter((c) => c.status === 'fail').length;
+                  const isOpen = openChecklistId === ins.id;
+                  return (
+                    <React.Fragment key={ins.id}>
+                      <tr>
+                        <td><strong>{ins.inspection_type}</strong></td>
+                        <td>
+                          <div>{ins.scheduled_date || 'TBD'}</div>
+                          {ins.requested_window && <div className="muted" style={{ fontSize: '.78rem' }}>{ins.requested_window}</div>}
+                        </td>
+                        <td>{ins.inspector || '—'}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn sm"
+                            onClick={() => setOpenChecklistId(isOpen ? null : ins.id)}
+                          >
+                            {isOpen ? 'Hide' : 'Checklist'} ({passedCount}/{cl.length}{failedCount > 0 ? `, ${failedCount} fail` : ''})
+                          </button>
+                        </td>
+                        <td>
+                          {isManager ? (
+                            <select
+                              className="btn sm"
+                              style={{ width: 'auto' }}
+                              value={ins.result}
+                              onChange={async (e) => {
+                                onUpdated(await api(`/api/permits/${permit.id}/inspections/${ins.id}`, {
+                                  method: 'PATCH', body: JSON.stringify({ result: e.target.value }),
+                                }));
+                              }}
+                            >
+                              <option value="scheduled">Scheduled</option>
+                              <option value="passed">Passed</option>
+                              <option value="failed">Failed</option>
+                              <option value="partial">Partial</option>
+                              <option value="cancelled">Cancelled</option>
+                            </select>
+                          ) : (
+                            <span className={`badge ${ins.result === 'passed' ? 'active' : (ins.result === 'failed' ? 'disabled' : 'draft')}`}>
+                              {ins.result}
+                            </span>
+                          )}
+                        </td>
+                        <td className="muted">{ins.notes || '—'}</td>
+                        {isManager && (
+                          <td>
+                            <button
+                              type="button"
+                              className="btn sm danger"
+                              onClick={async () => onUpdated(await api(`/api/permits/${permit.id}/inspections/${ins.id}`, { method: 'DELETE' }))}
+                            >
+                              Remove
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                      {isOpen && (
+                        <tr>
+                          <td colSpan={isManager ? 7 : 6} style={{ background: '#f8fafc', padding: '.75rem 1rem' }}>
+                            <strong style={{ display: 'block', marginBottom: '.4rem', fontSize: '.88rem' }}>
+                              Field Checklist — {ins.inspection_type}
+                            </strong>
+                            {cl.length === 0 ? (
+                              <p className="muted" style={{ margin: '0 0 .5rem' }}>No checklist items yet.</p>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '.4rem', marginBottom: '.65rem' }}>
+                                {cl.map((ci, idx) => (
+                                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap', fontSize: '.86rem' }}>
+                                    <span style={{ flex: 2, minWidth: 220 }}>{ci.item}</span>
+                                    {isManager ? (
+                                      <>
+                                        <select
+                                          className="btn sm"
+                                          style={{ width: 'auto' }}
+                                          value={ci.status || 'pending'}
+                                          onChange={async (e) => {
+                                            const next = cl.map((x, j) => (j === idx ? { ...x, status: e.target.value } : x));
+                                            onUpdated(await api(`/api/permits/${permit.id}/inspections/${ins.id}`, {
+                                              method: 'PATCH',
+                                              body: JSON.stringify({ checklist: next }),
+                                            }));
+                                          }}
+                                        >
+                                          <option value="pending">Pending</option>
+                                          <option value="pass">Pass</option>
+                                          <option value="fail">Fail</option>
+                                          <option value="na">N/A</option>
+                                        </select>
+                                        <input
+                                          style={{ flex: 1, minWidth: 140 }}
+                                          placeholder="Field note (optional)"
+                                          defaultValue={ci.note || ''}
+                                          onBlur={async (e) => {
+                                            if ((e.target.value || '') === (ci.note || '')) return;
+                                            const next = cl.map((x, j) => (j === idx ? { ...x, note: e.target.value } : x));
+                                            onUpdated(await api(`/api/permits/${permit.id}/inspections/${ins.id}`, {
+                                              method: 'PATCH',
+                                              body: JSON.stringify({ checklist: next }),
+                                            }));
+                                          }}
+                                        />
+                                      </>
+                                    ) : (
+                                      <span className={`badge ${ci.status === 'pass' ? 'active' : (ci.status === 'fail' ? 'disabled' : 'draft')}`}>
+                                        {ci.status || 'pending'}
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {isManager && (
+                              <form
+                                style={{ display: 'flex', gap: '.4rem', alignItems: 'center' }}
+                                onSubmit={async (e) => {
+                                  e.preventDefault();
+                                  if (!newCheckItem.trim()) return;
+                                  const next = [...cl, { item: newCheckItem.trim(), status: 'pending', note: '' }];
+                                  setNewCheckItem('');
+                                  onUpdated(await api(`/api/permits/${permit.id}/inspections/${ins.id}`, {
+                                    method: 'PATCH',
+                                    body: JSON.stringify({ checklist: next }),
+                                  }));
+                                }}
+                              >
+                                <input
+                                  placeholder="Add custom checklist item…"
+                                  value={newCheckItem}
+                                  onChange={(e) => setNewCheckItem(e.target.value)}
+                                  style={{ flex: 1 }}
+                                />
+                                <button type="submit" className="btn sm">+ Add Item</button>
+                              </form>
+                            )}
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                    <td className="muted">{ins.notes || '—'}</td>
-                    {isManager && (
-                      <td>
-                        <button
-                          type="button"
-                          className="btn sm danger"
-                          onClick={async () => onUpdated(await api(`/api/permits/${permit.id}/inspections/${ins.id}`, { method: 'DELETE' }))}
-                        >
-                          Remove
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                ))}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           )}

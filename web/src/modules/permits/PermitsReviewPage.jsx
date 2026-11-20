@@ -27,6 +27,8 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
   const [statusFilter, setStatusFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [showParcels, setShowParcels] = useState(false);
+  const [showInspQueue, setShowInspQueue] = useState(false);
+  const [inspQueue, setInspQueue] = useState([]);
   const [parcels, setParcels] = useState([]);
   const [parcelQuery, setParcelQuery] = useState('');
   const [newParcel, setNewParcel] = useState({ parcel_id: '', address: '', building_name: '', suite_name: '', owner_name: '' });
@@ -49,6 +51,14 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
   useEffect(() => {
     if (showParcels) loadParcels(parcelQuery).catch(() => {});
   }, [showParcels, parcelQuery, loadParcels]);
+
+  useEffect(() => {
+    if (showInspQueue) {
+      api('/api/permits/inspections/queue?result=scheduled')
+        .then((rows) => setInspQueue(Array.isArray(rows) ? rows : []))
+        .catch(() => setInspQueue([]));
+    }
+  }, [showInspQueue]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -109,6 +119,9 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
       <div className="between" style={{ marginBottom: '1rem' }}>
         <h1 style={{ margin: 0 }}>Permit Review Queue</h1>
         <div className="actions">
+          <button type="button" className="btn sm" onClick={() => setShowInspQueue(v => !v)}>
+            {showInspQueue ? 'Hide Inspection Queue' : 'Daily Inspection Queue'}
+          </button>
           <button type="button" className="btn sm" onClick={() => setShowParcels(v => !v)}>
             {showParcels ? 'Hide Parcel Directory' : 'Parcel Directory'}
           </button>
@@ -117,6 +130,54 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
           </button>
         </div>
       </div>
+
+      {showInspQueue && (
+        <div className="card">
+          <h2>Daily Inspection Queue (Scheduled)</h2>
+          {!inspQueue.length ? (
+            <p className="muted">No scheduled inspections in the queue.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Date &amp; Window</th>
+                  <th>Permit # &amp; Address</th>
+                  <th>Inspection Type</th>
+                  <th>Inspector</th>
+                  <th>Checklist</th>
+                  <th>Open</th>
+                </tr>
+              </thead>
+              <tbody>
+                {inspQueue.map((iq) => {
+                  const cl = Array.isArray(iq.checklist) ? iq.checklist : [];
+                  const done = cl.filter((c) => c.status === 'pass' || c.status === 'na').length;
+                  return (
+                    <tr key={iq.id}>
+                      <td>
+                        <strong>{iq.scheduled_date || 'TBD'}</strong>
+                        {iq.requested_window && <div className="muted" style={{ fontSize: '.78rem' }}>{iq.requested_window}</div>}
+                      </td>
+                      <td>
+                        <strong>{iq.permit_number}</strong>
+                        <div className="muted" style={{ fontSize: '.82rem' }}>{iq.property_address || '—'}</div>
+                      </td>
+                      <td>{iq.inspection_type}</td>
+                      <td>{iq.inspector || 'Unassigned'}</td>
+                      <td>{done}/{cl.length}</td>
+                      <td>
+                        <button type="button" className="btn sm" onClick={() => setSelectedId(iq.permit_id)}>
+                          Open Permit
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {showParcels && (
         <div className="card">

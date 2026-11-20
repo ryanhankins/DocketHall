@@ -81,10 +81,10 @@ PERMITS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
     (
         "permit_inspections",
         [
-            "id", "permit_id", "inspection_type", "scheduled_date", "inspector",
-            "result", "notes", "completed_at", "created_at",
+            "id", "permit_id", "inspection_type", "scheduled_date", "requested_window",
+            "inspector", "result", "notes", "checklist", "completed_at", "created_at",
         ],
-        set(),
+        {"checklist"},
         True,
     ),
     (

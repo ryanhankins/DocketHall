@@ -195,16 +195,20 @@ CREATE TABLE IF NOT EXISTS permit_workflow_steps (
 );
 CREATE INDEX IF NOT EXISTS permit_workflow_permit_idx ON permit_workflow_steps(permit_id, id);
 CREATE TABLE IF NOT EXISTS permit_inspections (
-    id              BIGSERIAL PRIMARY KEY,
-    permit_id       BIGINT NOT NULL REFERENCES permits(id) ON DELETE CASCADE,
-    inspection_type TEXT NOT NULL,
-    scheduled_date  TEXT NOT NULL DEFAULT '',
-    inspector       TEXT NOT NULL DEFAULT '',
-    result          TEXT NOT NULL DEFAULT 'scheduled',
-    notes           TEXT NOT NULL DEFAULT '',
-    completed_at    TIMESTAMPTZ,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+    id               BIGSERIAL PRIMARY KEY,
+    permit_id        BIGINT NOT NULL REFERENCES permits(id) ON DELETE CASCADE,
+    inspection_type  TEXT NOT NULL,
+    scheduled_date   TEXT NOT NULL DEFAULT '',
+    requested_window TEXT NOT NULL DEFAULT '',
+    inspector        TEXT NOT NULL DEFAULT '',
+    result           TEXT NOT NULL DEFAULT 'scheduled',
+    notes            TEXT NOT NULL DEFAULT '',
+    checklist        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    completed_at     TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE permit_inspections ADD COLUMN IF NOT EXISTS requested_window TEXT NOT NULL DEFAULT '';
+ALTER TABLE permit_inspections ADD COLUMN IF NOT EXISTS checklist JSONB NOT NULL DEFAULT '[]'::jsonb;
 CREATE INDEX IF NOT EXISTS permit_inspections_permit_idx ON permit_inspections(permit_id, id);
 CREATE TABLE IF NOT EXISTS permit_messages (
     id              BIGSERIAL PRIMARY KEY,
@@ -843,16 +847,83 @@ class WorkflowStepPatch(BaseModel):
 class InspectionIn(BaseModel):
     inspection_type: str
     scheduled_date: str = ""
+    requested_window: str = ""
     inspector: str = ""
     result: str = "scheduled"
     notes: str = ""
+    checklist: list[dict[str, Any]] | None = None
 
 
 class InspectionPatch(BaseModel):
     scheduled_date: str | None = None
+    requested_window: str | None = None
     inspector: str | None = None
     result: str | None = None
     notes: str | None = None
+    checklist: list[dict[str, Any]] | None = None
+
+
+_INSPECTION_CHECKLIST_TEMPLATES: dict[str, list[str]] = {
+    "footing": [
+        "Property lines / setbacks verified against site plan",
+        "Excavation depth below frost line & undisturbed soil",
+        "Formwork, rebar size/spacing, and anchor bolts verified",
+    ],
+    "framing": [
+        "Load-bearing headers, beams, and joist spans match approved plans",
+        "Fireblocking, draftstopping, and hurricane ties installed",
+        "Egress window dimensions & sill heights compliant",
+    ],
+    "electrical": [
+        "Service panel grounding, bonding, and GFCI/AFCI protection",
+        "Box fill, wire gauge, and nail-plate protection verified",
+        "Smoke / CO interconnected detectors installed",
+    ],
+    "plumbing": [
+        "DWV water/air pressure test holding without leaks",
+        "Proper pipe slope, venting, and cleanout access",
+        "Backflow preventer & water heater T&P relief installed",
+    ],
+    "erosion": [
+        "Silt fence / perimeter sediment controls properly trenched",
+        "Construction entrance stabilized & street free of sediment",
+        "Stormwater/wetland buffer stakes intact",
+    ],
+    "final": [
+        "All prior rough/trade inspections passed",
+        "Address numbers visible from street",
+        "Handrails, guardrails, and safety glazing compliant",
+        "Site grading & erosion stabilization complete",
+    ],
+}
+
+
+def _default_checklist_for(inspection_type: str) -> list[dict[str, str]]:
+    low = inspection_type.strip().lower()
+    for key, items in _INSPECTION_CHECKLIST_TEMPLATES.items():
+        if key in low:
+            return [{"item": txt, "status": "pending", "note": ""} for txt in items]
+    return [
+        {"item": "Work matches approved permit plans & conditions", "status": "pending", "note": ""},
+        {"item": "Safety & Municipal Code requirements verified", "status": "pending", "note": ""},
+    ]
+
+
+def _clean_checklist(raw: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        item = str(entry.get("item") or "").strip()
+        if not item:
+            continue
+        st = str(entry.get("status") or "pending").strip().lower()
+        if st not in ("pending", "pass", "fail", "na"):
+            st = "pending"
+        out.append({"item": item, "status": st, "note": str(entry.get("note") or "").strip()})
+    return out
 
 
 class PermitMessageIn(BaseModel):
@@ -1016,7 +1087,7 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
         })
 
     insp_rows = conn.execute(
-        "SELECT id, permit_id, inspection_type, scheduled_date, inspector, result, notes, completed_at, created_at "
+        "SELECT id, permit_id, inspection_type, scheduled_date, requested_window, inspector, result, notes, checklist, completed_at, created_at "
         "FROM permit_inspections WHERE permit_id = ANY(%s) ORDER BY id ASC",
         (ids,),
     ).fetchall()
@@ -1027,11 +1098,13 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
             "permit_id": ins[1],
             "inspection_type": ins[2],
             "scheduled_date": ins[3],
-            "inspector": ins[4],
-            "result": ins[5],
-            "notes": ins[6],
-            "completed_at": ins[7].isoformat() if ins[7] else None,
-            "created_at": ins[8].isoformat() if ins[8] else None,
+            "requested_window": ins[4] or "",
+            "inspector": ins[5],
+            "result": ins[6],
+            "notes": ins[7],
+            "checklist": ins[8] if isinstance(ins[8], list) else [],
+            "completed_at": ins[9].isoformat() if ins[9] else None,
+            "created_at": ins[10].isoformat() if ins[10] else None,
         })
 
     msg_rows = conn.execute(
@@ -1691,6 +1764,93 @@ def get_permit_pdf(
     )
 
 
+@router.get("/{permit_id}/certificate-of-occupancy")
+def get_certificate_of_occupancy(
+    permit_id: int,
+    force: bool = False,
+    user: dict = Depends(require_permission("permits.submit", "permits.manage")),
+):
+    with pool.connection() as conn:
+        permit = _get_permit_or_404(conn, permit_id)
+    _check_permit_access(permit, user)
+    if permit["status"] not in ("issued", "closed"):
+        raise HTTPException(
+            status_code=400,
+            detail="Certificate of Occupancy / Completion is only available after a permit is Issued or Closed.",
+        )
+    insps = permit.get("inspections") or []
+    is_mgr = has_permission(user, "permits.manage")
+    open_or_failed = [i for i in insps if i["result"] in ("failed", "scheduled", "partial")]
+    if open_or_failed and not (is_mgr and force):
+        raise HTTPException(
+            status_code=400,
+            detail="All active inspections must pass before issuing Certificate of Occupancy / Completion.",
+        )
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=54, rightMargin=54, topMargin=54, bottomMargin=54)
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph("<b>CERTIFICATE OF OCCUPANCY &amp; COMPLETION</b>", styles["Title"]),
+        Paragraph(f"Permit Number: <b>{_xml_escape(str(permit['permit_number'] or ''))}</b>", styles["Normal"]),
+        Spacer(1, 10),
+        Paragraph(
+            "This certifies that the work described under the permit below has been inspected and found to be in "
+            "substantial compliance with applicable municipal ordinances and building codes.",
+            styles["Normal"],
+        ),
+        Spacer(1, 12),
+    ]
+    rows = [
+        ["Property Address", permit["property_address"] or "—"],
+        ["Parcel ID / Owner", f"{permit['parcel_id'] or '—'} / {permit['owner_name'] or '—'}"],
+        ["Applicant", permit["applicant_name"] or "—"],
+        ["Permit Type / Use", f"{permit['permit_type_name']} — {permit['permit_use_name']}"],
+        ["Contractor", f"{permit['contractor_name'] or '—'} (Lic: {permit['contractor_license'] or '—'})"],
+        ["Permit Issued", (permit["issued_at"] or "")[:10] or "—"],
+        ["Certificate Date", date.today().isoformat()],
+    ]
+    tbl = Table(rows, colWidths=[145, 355])
+    tbl.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#eef2f6")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.extend([tbl, Spacer(1, 14)])
+
+    passed = [i for i in insps if i["result"] == "passed"]
+    if passed:
+        story.append(Paragraph("<b>Completed &amp; Passed Inspections</b>", styles["Heading2"]))
+        insp_tbl_rows = [["Inspection Type", "Date", "Inspector", "Notes"]]
+        for i in passed:
+            insp_tbl_rows.append([
+                i["inspection_type"],
+                (i["completed_at"] or i["scheduled_date"] or "—")[:10],
+                i["inspector"] or "—",
+                i["notes"] or "Passed",
+            ])
+        itbl = Table(insp_tbl_rows, colWidths=[150, 85, 110, 155])
+        itbl.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("PADDING", (0, 0), (-1, -1), 5),
+        ]))
+        story.extend([itbl, Spacer(1, 18)])
+
+    story.append(Paragraph("Authorized Municipal Official: _______________________________   Date: _______________", styles["Normal"]))
+    doc.build(story)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{permit["permit_number"]}-certificate.pdf"'},
+    )
+
+
 # ------------------------------------------------------------------ staff endpoints
 @router.get("")
 def list_all_permits(_: dict = Depends(require_permission("permits.manage"))):
@@ -1934,6 +2094,47 @@ def delete_workflow_step(
 
 
 # ------------------------------------------------------------------ inspections
+@router.get("/inspections/queue")
+def list_inspection_queue(
+    result: str = "scheduled",
+    inspector: str = "",
+    _: dict = Depends(require_permission("permits.manage")),
+):
+    res_filter = result.strip().lower()
+    insp_filter = f"%{inspector.strip()}%"
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT i.id, i.permit_id, p.permit_number, p.property_address, p.permit_type_name, "
+            "       i.inspection_type, i.scheduled_date, i.requested_window, i.inspector, "
+            "       i.result, i.notes, i.checklist, i.completed_at, i.created_at "
+            "FROM permit_inspections i "
+            "JOIN permits p ON p.id = i.permit_id "
+            "WHERE (%s = '' OR i.result = %s) "
+            "AND (%s = '%%' OR i.inspector ILIKE %s) "
+            "ORDER BY CASE WHEN i.scheduled_date = '' THEN 1 ELSE 0 END, i.scheduled_date ASC, i.id ASC",
+            (res_filter, res_filter, insp_filter, insp_filter),
+        ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "permit_id": r[1],
+            "permit_number": r[2],
+            "property_address": r[3],
+            "permit_type_name": r[4],
+            "inspection_type": r[5],
+            "scheduled_date": r[6],
+            "requested_window": r[7] or "",
+            "inspector": r[8],
+            "result": r[9],
+            "notes": r[10],
+            "checklist": r[11] if isinstance(r[11], list) else [],
+            "completed_at": r[12].isoformat() if r[12] else None,
+            "created_at": r[13].isoformat() if r[13] else None,
+        }
+        for r in rows
+    ]
+
+
 @router.post("/{permit_id}/inspections", status_code=201)
 def add_inspection(
     permit_id: int,
@@ -1945,21 +2146,31 @@ def add_inspection(
         raise HTTPException(status_code=400, detail="Inspection type is required")
     is_mgr = has_permission(user, "permits.manage")
     result = body.result if (is_mgr and body.result in INSPECTION_RESULTS) else "scheduled"
+    checklist = _clean_checklist(body.checklist)
+    if not checklist:
+        checklist = _default_checklist_for(body.inspection_type)
     with pool.connection() as conn:
         permit = _get_permit_or_404(conn, permit_id)
         _check_permit_access(permit, user)
+        if not is_mgr and permit["status"] not in ("approved", "issued"):
+            raise HTTPException(
+                status_code=400,
+                detail="Self-service inspection scheduling is available once a permit is Approved or Issued.",
+            )
         applicant_email = _resolve_applicant_email(conn, permit)
         comp_val = "now()" if result in ("passed", "failed", "partial") else "NULL"
         conn.execute(
-            f"INSERT INTO permit_inspections (permit_id, inspection_type, scheduled_date, inspector, result, notes, completed_at) "
-            f"VALUES (%s, %s, %s, %s, %s, %s, {comp_val})",
+            f"INSERT INTO permit_inspections (permit_id, inspection_type, scheduled_date, requested_window, inspector, result, notes, checklist, completed_at) "
+            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, {comp_val})",
             (
                 permit_id,
                 body.inspection_type.strip(),
                 body.scheduled_date.strip(),
+                body.requested_window.strip(),
                 body.inspector.strip() if is_mgr else "",
                 result,
                 body.notes.strip(),
+                json.dumps(checklist),
             ),
         )
         conn.execute(
@@ -1991,6 +2202,7 @@ def update_inspection(
 ):
     if body.result is not None and body.result not in INSPECTION_RESULTS:
         raise HTTPException(status_code=400, detail="Invalid inspection result")
+    checklist_json = json.dumps(_clean_checklist(body.checklist)) if body.checklist is not None else None
     with pool.connection() as conn:
         permit = _get_permit_or_404(conn, permit_id)
         applicant_email = _resolve_applicant_email(conn, permit)
@@ -2002,15 +2214,19 @@ def update_inspection(
         row = conn.execute(
             f"UPDATE permit_inspections SET "
             f"scheduled_date = COALESCE(%s, scheduled_date), "
+            f"requested_window = COALESCE(%s, requested_window), "
             f"inspector = COALESCE(%s, inspector), "
             f"result = COALESCE(%s, result), "
-            f"notes = COALESCE(%s, notes){comp_clause} "
+            f"notes = COALESCE(%s, notes), "
+            f"checklist = COALESCE(%s::jsonb, checklist){comp_clause} "
             f"WHERE id = %s AND permit_id = %s RETURNING inspection_type, result",
             (
                 body.scheduled_date.strip() if body.scheduled_date is not None else None,
+                body.requested_window.strip() if body.requested_window is not None else None,
                 body.inspector.strip() if body.inspector is not None else None,
                 body.result,
                 body.notes.strip() if body.notes is not None else None,
+                checklist_json,
                 insp_id,
                 permit_id,
             ),
