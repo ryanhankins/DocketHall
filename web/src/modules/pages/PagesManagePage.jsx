@@ -17,6 +17,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../../core/api.js';
+import { getLinkTextWarnings } from '../../core/a11y.js';
 import { useToast } from '../../core/toast.jsx';
 
 const EMPTY_PAGE = {
@@ -164,6 +165,9 @@ export default function PagesManagePage() {
               <div className="field" style={{ marginBottom: '.75rem' }}>
                 <label htmlFor="pg-body">Page Content</label>
                 <textarea id="pg-body" rows={6} value={pageForm.body} onChange={(e) => setPageForm((f) => ({ ...f, body: e.target.value }))} />
+                {getLinkTextWarnings(pageForm.body).map((w) => (
+                  <div key={w} className="muted" role="status" style={{ color: '#92400e', fontSize: '.82rem', marginTop: '.25rem' }}>{w}</div>
+                ))}
               </div>
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', cursor: 'pointer', fontSize: '.9rem', marginBottom: '.85rem' }}>
                 <input type="checkbox" style={{ width: 'auto', flexShrink: 0 }} checked={pageForm.is_public} onChange={(e) => setPageForm((f) => ({ ...f, is_public: e.target.checked }))} />
@@ -230,6 +234,9 @@ export default function PagesManagePage() {
                 <div className="field" style={{ flex: 1, minWidth: 180 }}>
                   <label htmlFor="ql-lbl">Button Label *</label>
                   <input id="ql-lbl" required placeholder="e.g. Pay Water Bill, Report Streetlight Outage" value={linkForm.label} onChange={(e) => setLinkForm((f) => ({ ...f, label: e.target.value }))} />
+                  {getLinkTextWarnings(linkForm.label, { isStandaloneLabel: true }).map((w) => (
+                    <div key={w} className="muted" role="status" style={{ color: '#92400e', fontSize: '.82rem', marginTop: '.25rem' }}>{w}</div>
+                  ))}
                 </div>
                 <div className="field" style={{ flex: 2, minWidth: 220 }}>
                   <label htmlFor="ql-url">Target URL or Portal Path *</label>

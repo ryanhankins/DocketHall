@@ -17,6 +17,7 @@
 
 import React, { useMemo, useRef, useState } from 'react';
 import { api, formatSize } from '../../core/api.js';
+import { checkPdfFileBeforeUpload } from '../../core/a11y.js';
 import { InlineEditable } from '../../core/InlineEditable.jsx';
 import PdfComplianceButton from '../../core/PdfComplianceButton.jsx';
 import { useToast } from '../../core/toast.jsx';
@@ -111,6 +112,18 @@ function ItemCard({
       setDocTitle('');
       if (fileInputRef.current) fileInputRef.current.value = '';
       if (latest) onAgendaUpdated(latest);
+      for (const f of files) {
+        const res = await checkPdfFileBeforeUpload(f);
+        if (res && !res.compliant) {
+          const textFail = (res.checks || []).some((c) => c.id === 'text' && c.status === 'fail');
+          showToast(
+            textFail
+              ? `Accessibility warning: "${f.name}" has no selectable text layer (scanned PDF).`
+              : `Accessibility warning: "${f.name}" scored ${res.score}% (${res.summary}). Use Check PDF for details.`,
+            'error',
+          );
+        }
+      }
     } catch (err) {
       setDocErr(err.message);
     } finally {

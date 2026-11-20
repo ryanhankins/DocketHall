@@ -17,6 +17,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, formatDate } from '../../core/api.js';
+import { checkPdfFileBeforeUpload, getLinkTextWarnings } from '../../core/a11y.js';
 import { useToast } from '../../core/toast.jsx';
 import ModuleNotificationsCard from '../../core/ModuleNotificationsCard.jsx';
 
@@ -58,6 +59,7 @@ export default function NoticesManagePage() {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [editingId, setEditingId] = useState(null);
   const [attachFile, setAttachFile] = useState(null);
+  const [pdfWarn, setPdfWarn] = useState('');
   const [saving, setSaving] = useState(false);
   const showToast = useToast();
 
@@ -201,6 +203,9 @@ export default function NoticesManagePage() {
               value={form.body}
               onChange={(e) => setForm((f) => ({ ...f, body: e.target.value }))}
             />
+            {getLinkTextWarnings(form.body).map((w) => (
+              <div key={w} className="muted" role="status" style={{ color: '#92400e', fontSize: '.82rem', marginTop: '.25rem' }}>{w}</div>
+            ))}
           </div>
 
           <div className="row" style={{ marginBottom: '.75rem' }}>
@@ -225,8 +230,26 @@ export default function NoticesManagePage() {
                 type="file"
                 accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
                 style={{ marginTop: 4, fontSize: '.8rem' }}
-                onChange={(e) => setAttachFile(e.target.files?.[0] || null)}
+                onChange={async (e) => {
+                  const f = e.target.files?.[0] || null;
+                  setAttachFile(f);
+                  setPdfWarn('');
+                  const res = await checkPdfFileBeforeUpload(f);
+                  if (res && !res.compliant) {
+                    const textCheck = (res.checks || []).find((c) => c.id === 'text');
+                    if (textCheck && textCheck.status === 'fail') {
+                      setPdfWarn('WCAG 2.1 AA Warning: This PDF has no selectable text layer (scanned image). Run OCR before publishing.');
+                    } else {
+                      setPdfWarn(`WCAG 2.1 AA Warning: Uploaded PDF scored ${res.score}% (${res.summary}). Check Title, Language, and Tagged PDF settings.`);
+                    }
+                  }
+                }}
               />
+              {pdfWarn && (
+                <div className="muted" role="alert" style={{ color: '#92400e', fontSize: '.8rem', marginTop: 4 }}>
+                  {pdfWarn}
+                </div>
+              )}
             </div>
             <div className="field" style={{ minWidth: 150 }}>
               <label htmlFor="notice-deadline">Deadline Date (Bids/Jobs)</label>
