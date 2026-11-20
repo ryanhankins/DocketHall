@@ -61,6 +61,9 @@ MODULE = CivicModule(
         {"key": "records.manage", "label": "Manage Contracts, Resolutions & Document Repository"},
         {"key": "records.view", "label": "View Internal Contracts & Document Repository"},
     ],
+    features=[
+        {"key": "foia_requests", "label": "FOIA / Public Records Requests", "description": "Online FOIA intake, status tracking, and response file delivery.", "default": True},
+    ],
     nav_groups=[
         {
             "id": "records-staff",

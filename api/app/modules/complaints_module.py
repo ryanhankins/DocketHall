@@ -95,6 +95,10 @@ MODULE = CivicModule(
         {"key": "complaints.submit", "label": "File Complaints & Track My Complaints"},
         {"key": "complaints.log", "label": "View Public Complaint Log Book"},
     ],
+    features=[
+        {"key": "work_orders", "label": "311 Public Works Orders", "description": "Dispatch and track public works maintenance orders from 311 requests.", "default": True},
+        {"key": "nov_enforcement", "label": "Notices of Violation & Hearings", "description": "Formal NOV issuance, compliance deadlines, citations, and council hearings.", "default": True},
+    ],
     nav_groups=[
         {
             "id": "complaints-staff",

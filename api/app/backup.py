@@ -51,8 +51,8 @@ _CORE_TABLES: list[tuple[str, list[str], set[str], bool]] = [
     ),
     (
         "core_modules",
-        ["module_id", "enabled", "updated_at"],
-        set(),
+        ["module_id", "enabled", "features", "updated_at"],
+        {"features"},
         False,
     ),
     (

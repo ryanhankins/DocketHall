@@ -30,6 +30,7 @@ const AuditLogPage = React.lazy(() => import('./AuditLogPage.jsx'));
 const GeneralPrefsPage = React.lazy(() => import('./GeneralPrefsPage.jsx'));
 const BackupRestorePage = React.lazy(() => import('./BackupRestorePage.jsx'));
 const HelpDocsPage = React.lazy(() => import('./HelpDocsPage.jsx'));
+const MyAccountPage = React.lazy(() => import('./MyAccountPage.jsx'));
 
 export default function CoreShell() {
   const [me, setMe] = useState(null);
@@ -230,6 +231,13 @@ export default function CoreShell() {
         activeSection: 'help',
       };
     }
+    if (hash === 'my-account') {
+      return {
+        component: MyAccountPage,
+        props: { me, onNavigate: navigate },
+        activeSection: 'my-account',
+      };
+    }
     for (const mod of Object.values(frontendMods)) {
       for (const r of (mod.routes || [])) {
         if (r.permission && !hasPermission(me, r.permission)) continue;
@@ -264,12 +272,16 @@ export default function CoreShell() {
   useEffect(() => {
     if (!me || resolved || Object.keys(frontendMods).length === 0) return;
     let fallback = '';
-    if (isAdmin) fallback = 'users';
-    else {
+    if (me.role === 'applicant' || me.role === 'read_only') {
+      fallback = 'my-account';
+    } else if (isAdmin) {
+      fallback = 'users';
+    } else {
       for (const m of modulesMeta) {
         const first = m.nav_groups?.[0]?.items?.[0]?.section;
         if (first) { fallback = first; break; }
       }
+      if (!fallback) fallback = 'my-account';
     }
     if (fallback && hash !== fallback) {
       history.replaceState(null, '', `#${fallback}`);
@@ -361,6 +373,15 @@ export default function CoreShell() {
       <div className="shell">
         {me && (
           <nav id="menu">
+            <div style={{ marginBottom: '.5rem', paddingBottom: '.5rem', borderBottom: '1px solid #e2e8f0' }}>
+              <button
+                type="button"
+                className={activeSection === 'my-account' ? 'active' : ''}
+                onClick={() => navigate('#my-account')}
+              >
+                My Civic Account
+              </button>
+            </div>
             {collapsibleGroupIds.length >= 2 && (
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '.25rem' }}>
                 <button

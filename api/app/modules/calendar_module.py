@@ -53,6 +53,9 @@ MODULE = CivicModule(
     permissions=[
         {"key": "calendar.manage", "label": "Manage City Calendar, Events & Facility Reservations"},
     ],
+    features=[
+        {"key": "reservations", "label": "Municipal Facility Reservations", "description": "Allow residents to book pavilions/halls online with optional fee collection.", "default": True},
+    ],
     nav_groups=[
         {
             "id": "calendar-staff",

@@ -41,6 +41,10 @@ MODULE = CivicModule(
     permissions=[
         {"key": "notices.manage", "label": "Manage City News, Public Notices, Bids & Jobs"},
     ],
+    features=[
+        {"key": "bids", "label": "Bids, RFPs & Solicitations", "description": "Publish procurement solicitations and bid deadlines.", "default": True},
+        {"key": "jobs", "label": "Job Postings", "description": "Publish municipal employment openings.", "default": True},
+    ],
     nav_groups=[
         {
             "id": "notices-staff",

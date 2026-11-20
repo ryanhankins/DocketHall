@@ -85,6 +85,9 @@ class LiveSmokeTest(unittest.TestCase):
             ids = {m["id"] for m in data["modules"]}
             self.assertTrue({"agendas", "permits", "codification", "records", "complaints"}.issubset(ids))
         for admin_path in (
+            "/api/my-account/summary",
+            "/api/modules/admin",
+            "/api/modules/admin/presets",
             "/api/permits/contractors",
             "/api/permits/link-candidates",
             "/api/permits/compliance-programs",

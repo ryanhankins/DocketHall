@@ -161,6 +161,12 @@ MODULE = CivicModule(
         {"key": "permits.manage", "label": "Review Permits & Manage Permit Catalog"},
         {"key": "permits.submit", "label": "Apply for Permits & Track My Permits"},
     ],
+    features=[
+        {"key": "property_360", "label": "Property / Parcel 360° View", "description": "Unified parcel lookup linking permits, complaints, and inspections.", "default": True},
+        {"key": "reports", "label": "Reports & Revenue Analytics", "description": "Permit volume, fee revenue, and turnaround reporting.", "default": True},
+        {"key": "contractors", "label": "Contractor Licensing & Registry", "description": "Track contractor licenses, insurance, and bond expirations.", "default": True},
+        {"key": "compliance_programs", "label": "Rental & Fire Compliance Programs", "description": "Recurring inspection cycles for rental properties and businesses.", "default": True},
+    ],
     nav_groups=[
         {
             "id": "permits-staff",
@@ -169,10 +175,10 @@ MODULE = CivicModule(
             "permission": "permits.manage",
             "items": [
                 {"section": "permits-review", "label": "Permit Review Queue", "permission": "permits.manage"},
-                {"section": "properties", "label": "Property 360° Lookup", "permission": "permits.manage"},
-                {"section": "permits-reports", "label": "Reports & Revenue", "permission": "permits.manage"},
-                {"section": "contractors", "label": "Contractors & Licenses", "permission": "permits.manage"},
-                {"section": "compliance-programs", "label": "Rental & Fire Compliance", "permission": "permits.manage"},
+                {"section": "properties", "label": "Property 360° Lookup", "permission": "permits.manage", "feature": "property_360"},
+                {"section": "permits-reports", "label": "Reports & Revenue", "permission": "permits.manage", "feature": "reports"},
+                {"section": "contractors", "label": "Contractors & Licenses", "permission": "permits.manage", "feature": "contractors"},
+                {"section": "compliance-programs", "label": "Rental & Fire Compliance", "permission": "permits.manage", "feature": "compliance_programs"},
                 {"section": "preferences-permits", "label": "Permit Preferences", "permission": "permits.manage"},
             ],
         },
