@@ -133,6 +133,20 @@ ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS minutes_motion_by TEXT NOT NUL
 ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS minutes_second_by TEXT NOT NULL DEFAULT '';
 ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS minutes_vote TEXT NOT NULL DEFAULT '';
 ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS minutes_notes TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS video_timestamp TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS agenda_public_comments (
+    id              BIGSERIAL PRIMARY KEY,
+    agenda_id       BIGINT NOT NULL REFERENCES agendas(id) ON DELETE CASCADE,
+    agenda_item_id  BIGINT REFERENCES agenda_items(id) ON DELETE SET NULL,
+    author_user_id  BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    author_name     TEXT NOT NULL,
+    author_email    TEXT NOT NULL DEFAULT '',
+    author_address  TEXT NOT NULL DEFAULT '',
+    body            TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'approved',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS agenda_comments_agenda_idx ON agenda_public_comments(agenda_id, id DESC);
 CREATE INDEX IF NOT EXISTS agenda_items_agenda_idx ON agenda_items(agenda_id, position);
 CREATE TABLE IF NOT EXISTS agenda_status_log (
     id              BIGSERIAL PRIMARY KEY,
@@ -454,7 +468,7 @@ def _load_agenda(conn, agenda_id: int) -> dict | None:
     item_rows = conn.execute(
         "SELECT id, position, title, description, section, presenter, "
         "       recommended_motion, fiscal_impact, revision_status, "
-        "       minutes_action, minutes_motion_by, minutes_second_by, minutes_vote, minutes_notes "
+        "       minutes_action, minutes_motion_by, minutes_second_by, minutes_vote, minutes_notes, video_timestamp "
         "FROM agenda_items WHERE agenda_id = %s ORDER BY position, id",
         (agenda_id,),
     ).fetchall()
@@ -521,6 +535,7 @@ def _load_agenda(conn, agenda_id: int) -> dict | None:
             "minutes_second_by": it[11],
             "minutes_vote": it[12],
             "minutes_notes": it[13],
+            "video_timestamp": it[14],
             "documents": docs_by_item.get(it[0], []),
         }
         for it in item_rows
@@ -679,6 +694,7 @@ class ItemPatch(BaseModel):
     minutes_second_by: str | None = None
     minutes_vote: str | None = None
     minutes_notes: str | None = None
+    video_timestamp: str | None = None
     direction: str | None = None  # "up" | "down"
     position: int | None = None
 
@@ -2625,7 +2641,8 @@ def update_item(
                 "minutes_motion_by = COALESCE(%s, minutes_motion_by), "
                 "minutes_second_by = COALESCE(%s, minutes_second_by), "
                 "minutes_vote = COALESCE(%s, minutes_vote), "
-                "minutes_notes = COALESCE(%s, minutes_notes) "
+                "minutes_notes = COALESCE(%s, minutes_notes), "
+                "video_timestamp = COALESCE(%s, video_timestamp) "
                 "WHERE id = %s",
                 (
                     body.title.strip() if body.title is not None else None,
@@ -2640,6 +2657,7 @@ def update_item(
                     body.minutes_second_by.strip() if body.minutes_second_by is not None else None,
                     body.minutes_vote.strip() if body.minutes_vote is not None else None,
                     body.minutes_notes.strip() if body.minutes_notes is not None else None,
+                    body.video_timestamp.strip() if body.video_timestamp is not None else None,
                     item_id,
                 ),
             )
@@ -3344,6 +3362,175 @@ def check_agenda_minutes_pdf_compliance(
         prefs = _load_preferences(conn)
     resp = _build_minutes_response(agenda, prefs, agenda_id, False)
     return check_pdf_compliance(resp.body, f"{agenda['title']} (Minutes).pdf")
+
+
+class PublicCommentIn(BaseModel):
+    agenda_item_id: int | None = None
+    author_name: str = ""
+    author_address: str = ""
+    body: str
+
+
+class CommentStatusPatch(BaseModel):
+    status: Literal["approved", "hidden"]
+
+
+@router.get("/public/{agenda_id}")
+def get_public_agenda_detail(agenda_id: int):
+    with pool.connection() as conn:
+        if not _is_council_finalized(conn, agenda_id):
+            raise HTTPException(status_code=404, detail="Published agenda not found")
+        agenda = _load_agenda(conn, agenda_id)
+        if not agenda:
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        c_rows = conn.execute(
+            "SELECT c.id, c.agenda_item_id, i.position, i.title, c.author_name, c.body, c.created_at "
+            "FROM agenda_public_comments c "
+            "LEFT JOIN agenda_items i ON i.id = c.agenda_item_id "
+            "WHERE c.agenda_id = %s AND c.status = 'approved' "
+            "ORDER BY c.id DESC",
+            (agenda_id,),
+        ).fetchall()
+    return {
+        "id": agenda["id"],
+        "title": agenda["title"],
+        "body": agenda["body"],
+        "meeting_date": agenda["meeting_date"],
+        "meeting_time": agenda["meeting_time"],
+        "media_url": agenda["media_url"],
+        "media_type": agenda["media_type"],
+        "minutes_status": agenda["minutes_status"],
+        "items": [
+            {
+                "id": it["id"],
+                "position": it["position"],
+                "title": it["title"],
+                "description": it["description"],
+                "section": it["section"],
+                "presenter": it["presenter"],
+                "recommended_motion": it["recommended_motion"],
+                "video_timestamp": it.get("video_timestamp", ""),
+            }
+            for it in agenda["items"]
+        ],
+        "public_comments": [
+            {
+                "id": r[0],
+                "agenda_item_id": r[1],
+                "item_position": r[2],
+                "item_title": r[3] or "",
+                "author_name": r[4],
+                "body": r[5],
+                "created_at": r[6].isoformat() if r[6] else None,
+            }
+            for r in c_rows
+        ],
+    }
+
+
+@router.post("/public/{agenda_id}/comments", status_code=201)
+def submit_public_comment(
+    agenda_id: int,
+    body: PublicCommentIn,
+    request: Request,
+):
+    user = current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Please sign in to submit an online public comment")
+    comment_text = body.body.strip()
+    if len(comment_text) < 3:
+        raise HTTPException(status_code=400, detail="Please enter a comment of at least 3 characters")
+    author_name = body.author_name.strip() or user["username"]
+    with pool.connection() as conn:
+        if not _is_council_finalized(conn, agenda_id):
+            raise HTTPException(status_code=404, detail="Published agenda not found")
+        if body.agenda_item_id is not None:
+            ok = conn.execute(
+                "SELECT 1 FROM agenda_items WHERE id = %s AND agenda_id = %s",
+                (body.agenda_item_id, agenda_id),
+            ).fetchone()
+            if not ok:
+                raise HTTPException(status_code=400, detail="Invalid agenda item selected")
+        row = conn.execute(
+            "INSERT INTO agenda_public_comments "
+            "(agenda_id, agenda_item_id, author_user_id, author_name, author_email, author_address, body) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+            "RETURNING id, created_at",
+            (
+                agenda_id,
+                body.agenda_item_id,
+                user["id"],
+                author_name,
+                user.get("email", ""),
+                body.author_address.strip(),
+                comment_text,
+            ),
+        ).fetchone()
+    record_audit(user["username"], "agenda.public_comment_submitted", "agendas", agenda_id, f"Submitted public comment #{row[0]}")
+    return {"id": row[0], "created_at": row[1].isoformat() if row[1] else None, "status": "approved"}
+
+
+@router.get("/{agenda_id}/comments")
+def list_agenda_comments_staff(agenda_id: int, _: dict = Depends(get_staff_user)):
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT c.id, c.agenda_item_id, i.position, i.title, c.author_name, c.author_email, "
+            "c.author_address, c.body, c.status, c.created_at "
+            "FROM agenda_public_comments c "
+            "LEFT JOIN agenda_items i ON i.id = c.agenda_item_id "
+            "WHERE c.agenda_id = %s ORDER BY c.id DESC",
+            (agenda_id,),
+        ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "agenda_item_id": r[1],
+            "item_position": r[2],
+            "item_title": r[3] or "",
+            "author_name": r[4],
+            "author_email": r[5],
+            "author_address": r[6],
+            "body": r[7],
+            "status": r[8],
+            "created_at": r[9].isoformat() if r[9] else None,
+        }
+        for r in rows
+    ]
+
+
+@router.patch("/{agenda_id}/comments/{comment_id}")
+def update_agenda_comment_status(
+    agenda_id: int,
+    comment_id: int,
+    body: CommentStatusPatch,
+    user: dict = Depends(get_staff_user),
+):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "UPDATE agenda_public_comments SET status = %s WHERE id = %s AND agenda_id = %s RETURNING id",
+            (body.status, comment_id, agenda_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Comment not found")
+    record_audit(user["username"], "agenda.comment_moderated", "agendas", agenda_id, f"Comment #{comment_id} -> {body.status}")
+    return {"id": comment_id, "status": body.status}
+
+
+@router.delete("/{agenda_id}/comments/{comment_id}")
+def delete_agenda_comment(
+    agenda_id: int,
+    comment_id: int,
+    user: dict = Depends(get_staff_user),
+):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "DELETE FROM agenda_public_comments WHERE id = %s AND agenda_id = %s RETURNING id",
+            (comment_id, agenda_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Comment not found")
+    record_audit(user["username"], "agenda.comment_deleted", "agendas", agenda_id, f"Deleted comment #{comment_id}")
+    return {"deleted": True}
 
 
 @router.get("/{agenda_id}/documents/{doc_id}/compliance")

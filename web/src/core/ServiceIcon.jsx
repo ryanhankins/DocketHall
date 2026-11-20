@@ -28,6 +28,7 @@ const SERVICE_STYLES = {
   directory: { color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc' },
   forms: { color: '#db2777', bg: '#fdf2f8', border: '#fbcfe8' },
   pages: { color: '#6366f1', bg: '#eef2ff', border: '#c7d2fe' },
+  pay: { color: '#047857', bg: '#ecfdf5', border: '#a7f3d0' },
   alerts: { color: '#4f46e5', bg: '#eef2ff', border: '#c7d2fe' },
 };
 
@@ -102,6 +103,14 @@ function renderGlyph(id, size) {
         <svg {...props}>
           <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
           <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+        </svg>
+      );
+    case 'pay':
+      // Credit card / utility payment
+      return (
+        <svg {...props}>
+          <rect x="2" y="5" width="20" height="14" rx="2" />
+          <path d="M2 10h20M6 15h4" />
         </svg>
       );
     case 'notices':

@@ -37,7 +37,7 @@ AGENDAS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
             "target_body", "target_date", "created_at", "todo_status", "assigned_to",
             "recurrence", "recurrence_month", "source_agenda_id", "source_item_id", "folder",
             "completed_at", "minutes_action", "minutes_motion_by", "minutes_second_by",
-            "minutes_vote", "minutes_notes",
+            "minutes_vote", "minutes_notes", "video_timestamp",
         ],
         set(),
         True,
@@ -68,6 +68,15 @@ AGENDAS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         "agenda_templates",
         ["id", "name", "body", "meeting_time", "items", "created_at", "updated_at"],
         {"items"},
+        True,
+    ),
+    (
+        "agenda_public_comments",
+        [
+            "id", "agenda_id", "agenda_item_id", "author_user_id", "author_name",
+            "author_email", "author_address", "body", "status", "created_at",
+        ],
+        set(),
         True,
     ),
     (

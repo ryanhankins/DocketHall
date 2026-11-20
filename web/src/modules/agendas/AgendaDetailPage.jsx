@@ -26,6 +26,90 @@ import AgendaContentsTab from './AgendaContentsTab.jsx';
 import AgendaMinutesTab from './AgendaMinutesTab.jsx';
 import ImportAgendaDialog from './ImportAgendaDialog.jsx';
 
+function AgendaCommentsPanel({ agendaId }) {
+  const [comments, setComments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const toast = useToast();
+
+  const loadComments = useCallback(async () => {
+    setLoading(true);
+    try {
+      const d = await api(`/api/agendas/${agendaId}/comments`);
+      setComments(d.items || []);
+    } catch {
+      setComments([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [agendaId]);
+
+  useEffect(() => {
+    loadComments();
+  }, [loadComments]);
+
+  async function setStatus(commentId, status) {
+    try {
+      await api(`/api/agendas/${agendaId}/comments/${commentId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      });
+      toast(`Comment ${status}`);
+      loadComments();
+    } catch (e) {
+      toast(e.message || 'Update failed', 'error');
+    }
+  }
+
+  async function removeComment(commentId) {
+    try {
+      await api(`/api/agendas/${agendaId}/comments/${commentId}`, { method: 'DELETE' });
+      toast('Comment deleted');
+      loadComments();
+    } catch (e) {
+      toast(e.message || 'Delete failed', 'error');
+    }
+  }
+
+  return (
+    <div className="card" style={{ marginTop: '1rem' }}>
+      <div className="between" style={{ marginBottom: '.65rem' }}>
+        <h3 style={{ margin: 0 }}>Online Public Comments ({comments.length})</h3>
+        <button type="button" className="btn sm" onClick={loadComments}>Refresh</button>
+      </div>
+      {loading ? (
+        <p className="muted">Loading comments…</p>
+      ) : !comments.length ? (
+        <p className="muted" style={{ margin: 0 }}>No online public comments have been submitted for this meeting.</p>
+      ) : (
+        <div style={{ display: 'grid', gap: '.5rem' }}>
+          {comments.map((c) => (
+            <div key={c.id} style={{ padding: '.65rem .75rem', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+              <div className="between" style={{ gap: '.5rem', flexWrap: 'wrap', marginBottom: '.25rem' }}>
+                <div>
+                  <strong>{c.author_name || c.author_email || 'Resident'}</strong>
+                  {c.item_title && <span className="muted" style={{ marginLeft: '.5rem', fontSize: '.84rem' }}>Re: {c.item_title}</span>}
+                  <span className={`badge ${c.status === 'hidden' ? 'draft' : 'final'}`} style={{ marginLeft: '.5rem' }}>
+                    {c.status}
+                  </span>
+                </div>
+                <div className="actions">
+                  {c.status === 'approved' ? (
+                    <button type="button" className="btn sm" onClick={() => setStatus(c.id, 'hidden')}>Hide</button>
+                  ) : (
+                    <button type="button" className="btn sm" onClick={() => setStatus(c.id, 'approved')}>Approve</button>
+                  )}
+                  <button type="button" className="btn sm" onClick={() => removeComment(c.id)}>Delete</button>
+                </div>
+              </div>
+              <div style={{ whiteSpace: 'pre-wrap', fontSize: '.92rem' }}>{c.body}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, onBacklogCount }) {
   const [agenda, setAgenda] = useState(null);
   const [agendasList, setAgendasList] = useState([]);
@@ -381,6 +465,8 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
       {activeTab === 'minutes' && (
         <AgendaMinutesTab agenda={agenda} onAgendaUpdated={(updated) => applyAgendaState(updated)} />
       )}
+
+      <AgendaCommentsPanel agendaId={agenda.id} />
 
       <ImportAgendaDialog
         open={importOpen}

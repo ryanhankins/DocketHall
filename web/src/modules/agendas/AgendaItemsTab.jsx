@@ -295,6 +295,16 @@ function ItemCard({
                     {itemMeta.join(' · ')}
                   </div>
                 )}
+                <div className="muted" style={{ fontSize: '.8rem', marginTop: '.25rem', display: 'flex', alignItems: 'center', gap: '.35rem' }}>
+                  <span>Video timestamp:</span>
+                  <InlineEditable
+                    value={item.video_timestamp || ''}
+                    placeholder="e.g. 12:30"
+                    onSave={async (next) => onAgendaUpdated(await api(`/api/agendas/${agenda.id}/items/${item.id}`, {
+                      method: 'PATCH', body: JSON.stringify({ video_timestamp: next }),
+                    }))}
+                  />
+                </div>
                 {!item.section && (
                   <InlineEditable
                     as="div"

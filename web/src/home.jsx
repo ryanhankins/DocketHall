@@ -1117,23 +1117,97 @@ function AuthModal({ open, initialRegister, initialResetToken, nextUrl, reason, 
   );
 }
 
-function toEmbedUrl(raw) {
+function parseTimestampSeconds(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return 0;
+  if (/^\d+$/.test(s)) return Number(s);
+  const parts = s.split(':').map((p) => Number(p));
+  if (parts.some((n) => Number.isNaN(n) || n < 0)) return 0;
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return 0;
+}
+
+function toEmbedUrl(raw, startSeconds = 0) {
   const url = String(raw || '').trim();
   if (!url) return null;
+  const sec = Number(startSeconds) > 0 ? Math.floor(Number(startSeconds)) : 0;
   const yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([A-Za-z0-9_-]{6,})/);
-  if (yt) return `https://www.youtube.com/embed/${yt[1]}`;
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}${sec ? `?start=${sec}&autoplay=1` : ''}`;
   const vm = url.match(/vimeo\.com\/(?:video\/)?(\d+)/);
-  if (vm) return `https://player.vimeo.com/video/${vm[1]}`;
+  if (vm) return `https://player.vimeo.com/video/${vm[1]}${sec ? `#t=${sec}s` : ''}`;
   return null;
 }
 
-function AgendasPublicTab() {
+function AgendasPublicTab({ me, onRequireAuth }) {
   const [activeMedia, setActiveMedia] = useState(null);
+  const [mediaStartSec, setMediaStartSec] = useState(0);
   const [agendas, setAgendas] = useState([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
   const [bodyFilter, setBodyFilter] = useState('');
   const [yearFilter, setYearFilter] = useState('');
+  const [selectedAgendaId, setSelectedAgendaId] = useState(null);
+  const [agendaDetail, setAgendaDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [commentItemId, setCommentItemId] = useState('');
+  const [commentBody, setCommentBody] = useState('');
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [commentMsg, setCommentMsg] = useState('');
+  const [commentErr, setCommentErr] = useState('');
+
+  async function openAgendaDetail(agendaId) {
+    setSelectedAgendaId(agendaId);
+    setDetailLoading(true);
+    setCommentErr('');
+    setCommentMsg('');
+    try {
+      const d = await api(`/api/agendas/public/${agendaId}`);
+      setAgendaDetail(d);
+    } catch (e) {
+      setAgendaDetail(null);
+      setCommentErr(e.message || 'Unable to load agenda items and comments.');
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  function jumpToTimestamp(agendaObj, tsRaw) {
+    setMediaStartSec(parseTimestampSeconds(tsRaw));
+    setActiveMedia(agendaObj);
+  }
+
+  async function submitPublicComment(e) {
+    e.preventDefault();
+    if (!me) {
+      onRequireAuth?.('Sign in to submit an online public comment.');
+      return;
+    }
+    const text = commentBody.trim();
+    if (!text || !selectedAgendaId) return;
+    setCommentSubmitting(true);
+    setCommentErr('');
+    setCommentMsg('');
+    try {
+      const created = await api(`/api/agendas/public/${selectedAgendaId}/comments`, {
+        method: 'POST',
+        body: JSON.stringify({
+          item_id: commentItemId ? Number(commentItemId) : null,
+          body: text,
+        }),
+      });
+      setCommentBody('');
+      setCommentMsg('Your public comment has been submitted.');
+      setAgendaDetail((prev) => (prev ? {
+        ...prev,
+        public_comments: [...(prev.public_comments || []), created],
+      } : prev));
+    } catch (err) {
+      setCommentErr(err.message || 'Failed to submit comment.');
+    } finally {
+      setCommentSubmitting(false);
+    }
+  }
 
   useEffect(() => {
     fetch('/api/agendas/public')
@@ -1231,11 +1305,21 @@ function AgendasPublicTab() {
                       <button
                         type="button"
                         className="btn sm"
-                        onClick={() => setActiveMedia(activeMedia?.id === a.id ? null : a)}
+                        onClick={() => {
+                          setMediaStartSec(0);
+                          setActiveMedia(activeMedia?.id === a.id ? null : a);
+                        }}
                       >
                         {a.media_type === 'audio' ? 'Listen Audio' : 'Watch Video'}
                       </button>
                     )}
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={() => (selectedAgendaId === a.id ? setSelectedAgendaId(null) : openAgendaDetail(a.id))}
+                    >
+                      {selectedAgendaId === a.id ? 'Hide Items' : 'Items & Comments'}
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -1256,10 +1340,11 @@ function AgendasPublicTab() {
           {activeMedia.media_type === 'audio' ? (
             <audio controls style={{ width: '100%' }} src={activeMedia.media_url} />
           ) : (() => {
-            const embed = toEmbedUrl(activeMedia.media_url);
+            const embed = toEmbedUrl(activeMedia.media_url, mediaStartSec);
             return embed ? (
               <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 6 }}>
                 <iframe
+                  key={embed}
                   title={activeMedia.title}
                   src={embed}
                   style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 0 }}
@@ -1273,6 +1358,121 @@ function AgendasPublicTab() {
               </p>
             );
           })()}
+        </div>
+      )}
+
+      {selectedAgendaId && (
+        <div style={{ marginTop: '1rem', padding: '1rem', border: '1px solid #cbd5e1', borderRadius: 8, background: '#fff' }}>
+          <div className="between" style={{ marginBottom: '.75rem', flexWrap: 'wrap', gap: '.5rem' }}>
+            <strong>{agendaDetail ? `${agendaDetail.title} — Agenda Items & Public Comment` : 'Agenda Details'}</strong>
+            <button type="button" className="btn sm" onClick={() => setSelectedAgendaId(null)}>Close</button>
+          </div>
+          {detailLoading ? (
+            <p className="muted">Loading agenda items…</p>
+          ) : !agendaDetail ? (
+            <p className="muted">{commentErr || 'Unable to load agenda.'}</p>
+          ) : (
+            <div style={{ display: 'grid', gap: '1rem' }}>
+              <div>
+                <h3 style={{ margin: '0 0 .5rem', fontSize: '1rem' }}>Agenda Items</h3>
+                {!(agendaDetail.items || []).length ? (
+                  <p className="muted" style={{ margin: 0 }}>No agenda items listed.</p>
+                ) : (
+                  <ul style={{ margin: 0, paddingLeft: '1.25rem', display: 'grid', gap: '.45rem' }}>
+                    {(agendaDetail.items || []).map((it) => (
+                      <li key={it.id}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap' }}>
+                          <div>
+                            {it.section && <span className="badge" style={{ marginRight: '.4rem' }}>{it.section}</span>}
+                            <strong>{it.title}</strong>
+                            {it.description && <div className="muted" style={{ fontSize: '.86rem' }}>{it.description}</div>}
+                          </div>
+                          {it.video_timestamp && agendaDetail.media_url && (
+                            <button
+                              type="button"
+                              className="btn sm"
+                              onClick={() => jumpToTimestamp(agendaDetail, it.video_timestamp)}
+                              title={`Jump video to ${it.video_timestamp}`}
+                            >
+                              ▶ {it.video_timestamp}
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '.85rem' }}>
+                <h3 style={{ margin: '0 0 .5rem', fontSize: '1rem' }}>
+                  Online Public Comments ({(agendaDetail.public_comments || []).length})
+                </h3>
+                {!(agendaDetail.public_comments || []).length ? (
+                  <p className="muted" style={{ margin: '0 0 .75rem' }}>No public comments submitted yet.</p>
+                ) : (
+                  <div style={{ display: 'grid', gap: '.5rem', marginBottom: '.85rem' }}>
+                    {(agendaDetail.public_comments || []).map((c) => (
+                      <div key={c.id} style={{ padding: '.6rem .75rem', border: '1px solid #e2e8f0', borderRadius: 6, background: '#f8fafc' }}>
+                        <div className="between" style={{ fontSize: '.82rem', marginBottom: '.25rem', gap: '.5rem', flexWrap: 'wrap' }}>
+                          <strong>{c.author_name || 'Resident'}</strong>
+                          <span className="muted">
+                            {c.item_title ? `Re: ${c.item_title} · ` : ''}
+                            {formatDate(c.created_at)}
+                          </span>
+                        </div>
+                        <div style={{ whiteSpace: 'pre-wrap', fontSize: '.92rem' }}>{c.body}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {!me ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', flexWrap: 'wrap' }}>
+                    <span className="muted" style={{ fontSize: '.9rem' }}>Sign in as a verified resident to submit an online public comment.</span>
+                    <button
+                      type="button"
+                      className="btn sm primary"
+                      onClick={() => onRequireAuth?.('Sign in to submit an online public comment.')}
+                    >
+                      Sign In to Comment
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={submitPublicComment} style={{ display: 'grid', gap: '.5rem' }}>
+                    <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <label htmlFor="public-comment-item" className="muted" style={{ fontSize: '.86rem' }}>Agenda Item:</label>
+                      <select
+                        id="public-comment-item"
+                        value={commentItemId}
+                        onChange={(e) => setCommentItemId(e.target.value)}
+                        style={{ width: 'auto', maxWidth: '100%' }}
+                      >
+                        <option value="">General Meeting Comment</option>
+                        {(agendaDetail.items || []).map((it) => (
+                          <option key={it.id} value={it.id}>{it.title}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <textarea
+                      rows={3}
+                      placeholder="Write your public comment for the record…"
+                      value={commentBody}
+                      onChange={(e) => setCommentBody(e.target.value)}
+                      required
+                    />
+                    {commentErr && <div style={{ color: '#b91c1c', fontSize: '.86rem' }}>{commentErr}</div>}
+                    {commentMsg && <div style={{ color: '#15803d', fontSize: '.86rem' }}>{commentMsg}</div>}
+                    <div>
+                      <button type="submit" className="btn sm primary" disabled={commentSubmitting || !commentBody.trim()}>
+                        {commentSubmitting ? 'Submitting…' : 'Submit Public Comment'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -2747,7 +2947,10 @@ function PayBillsPublicTab() {
 
   return (
     <div className="card">
-      <h2 style={{ marginTop: 0 }}>Pay Utility Bill, Citation or Municipal Fee</h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', marginBottom: '.5rem' }}>
+        <ServiceIcon id="pay" size={20} badge />
+        <h2 style={{ margin: 0 }}>Pay Utility Bill, Citation or Municipal Fee</h2>
+      </div>
       <p className="muted" style={{ marginTop: 0 }}>
         Look up water/sewer utility statements, municipal or parking citations, license renewals, or other city fees by your exact Account # or Reference / Citation #.
       </p>
@@ -3084,7 +3287,7 @@ function PublicHomePage() {
                 ← All Public Services
               </a>
             </div>
-            {activeTab === 'agendas' && <AgendasPublicTab />}
+            {activeTab === 'agendas' && <AgendasPublicTab me={me} onRequireAuth={openAuth} />}
             {activeTab === 'permits' && <PermitsPublicTab me={me} onRequireAuth={openAuth} />}
             {activeTab === 'codification' && <CodePublicTab />}
             {activeTab === 'records' && <RecordsPublicTab features={publicFeatures.records || {}} />}
