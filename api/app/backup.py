@@ -26,14 +26,17 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from minio import Minio
 from pydantic import BaseModel, Field
 from psycopg.types.json import Jsonb
 from starlette.background import BackgroundTask
 
 from .agendas import _bucket, _minio, get_staff_user
+from .audit import record_audit
+from .auth import require_permission
 from .db import pool
 from .registry import get_module_backup_tables
-from .tenancy import strip_tenant_prefix, tenant_object_key
+from .tenancy import get_current_tenant_slug, strip_tenant_prefix, tenant_object_key
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
 
@@ -228,10 +231,7 @@ def update_backup_settings(body: BackupSettingsIn, _: dict = Depends(get_staff_u
         return _load_backup_status(conn)
 
 
-@router.get("/export")
-def export_archive(user: dict = Depends(get_staff_user)):
-    """Export all DocketHall data in a human-readable and machine-reconstructible .zip archive."""
-    include_users = user["role"] == "admin"
+def _build_backup_zip(include_users: bool, exported_by: str) -> str:
     table_data: dict[str, list[dict]] = {}
     with pool.connection() as conn:
         for tname, cols, _, _ in _get_export_tables():
@@ -367,7 +367,7 @@ def export_archive(user: dict = Depends(get_staff_user)):
             manifest = {
                 "format": BACKUP_FORMAT,
                 "exported_at": datetime.now(timezone.utc).isoformat(),
-                "exported_by": user["username"],
+                "exported_by": exported_by,
                 "includes_users": include_users,
                 "row_counts": {k: len(v) for k, v in table_data.items()},
                 "file_checksums": file_checksums,
@@ -390,6 +390,13 @@ def export_archive(user: dict = Depends(get_staff_user)):
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
         raise
+    return tmp_path
+
+
+@router.get("/export")
+def export_archive(user: dict = Depends(get_staff_user)):
+    """Export all DocketHall data in a human-readable and machine-reconstructible .zip archive."""
+    tmp_path = _build_backup_zip(include_users=(user["role"] == "admin"), exported_by=user["username"])
 
     with pool.connection() as conn:
         conn.execute("UPDATE agenda_preferences SET last_backup_at = now() WHERE id = 1")
@@ -520,3 +527,268 @@ async def import_archive(
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+_DEFAULT_BACKUP_POLICY = {
+    "enabled": False,
+    "schedule_frequency": "daily",
+    "target_type": "minio_offsite",
+    "s3_endpoint": "",
+    "s3_bucket": "",
+    "s3_prefix": "backups/",
+    "s3_access_key": "",
+    "s3_secure": True,
+    "retain_backups_count": 30,
+    "retention_enabled": False,
+    "retention_complaints_years": 0,
+    "retention_foia_years": 0,
+    "retention_audit_years": 0,
+    "last_offsite_backup_at": None,
+    "last_offsite_key": "",
+    "last_retention_run_at": None,
+}
+
+
+def _load_backup_policy(conn) -> tuple[dict, str]:
+    row = conn.execute(
+        "SELECT enabled, api_key, config FROM core_integrations WHERE provider = 'offsite_backup_policy'"
+    ).fetchone()
+    cfg = dict(_DEFAULT_BACKUP_POLICY)
+    secret = ""
+    if row:
+        cfg["enabled"] = bool(row[0])
+        secret = (row[1] or "").strip()
+        if isinstance(row[2], dict):
+            cfg.update(row[2])
+    cfg["has_s3_secret"] = bool(secret)
+    return cfg, secret
+
+
+def _get_offsite_s3_client(cfg: dict, secret: str) -> tuple[Minio, str, str]:
+    prefix = (cfg.get("s3_prefix") or "backups/").strip().lstrip("/")
+    if prefix and not prefix.endswith("/"):
+        prefix += "/"
+    tenant = get_current_tenant_slug() or "default"
+    full_prefix = f"{prefix}{tenant}/"
+    if cfg.get("target_type") == "s3_compatible" and (cfg.get("s3_endpoint") or "").strip():
+        bucket = (cfg.get("s3_bucket") or "").strip() or _bucket()
+        client = Minio(
+            cfg["s3_endpoint"].strip(),
+            access_key=(cfg.get("s3_access_key") or "").strip(),
+            secret_key=secret,
+            secure=bool(cfg.get("s3_secure", True)),
+        )
+        return client, bucket, full_prefix
+    return _minio(), (cfg.get("s3_bucket") or "").strip() or _bucket(), full_prefix
+
+
+class BackupPolicyIn(BaseModel):
+    enabled: bool = False
+    schedule_frequency: str = "daily"
+    target_type: str = "minio_offsite"
+    s3_endpoint: str = ""
+    s3_bucket: str = ""
+    s3_prefix: str = "backups/"
+    s3_access_key: str = ""
+    s3_secret_key: str | None = None
+    s3_secure: bool = True
+    retain_backups_count: int = Field(default=30, ge=1, le=3650)
+    retention_enabled: bool = False
+    retention_complaints_years: int = Field(default=0, ge=0, le=100)
+    retention_foia_years: int = Field(default=0, ge=0, le=100)
+    retention_audit_years: int = Field(default=0, ge=0, le=100)
+
+
+@router.get("/policy")
+def get_backup_policy(_: dict = Depends(require_permission("settings.manage"))):
+    with pool.connection() as conn:
+        cfg, secret = _load_backup_policy(conn)
+    snapshots: list[dict] = []
+    try:
+        client, bucket, full_prefix = _get_offsite_s3_client(cfg, secret)
+        if client.bucket_exists(bucket):
+            objs = sorted(
+                client.list_objects(bucket, prefix=full_prefix, recursive=True),
+                key=lambda o: o.last_modified or datetime.min.replace(tzinfo=timezone.utc),
+                reverse=True,
+            )
+            for o in objs[:25]:
+                snapshots.append({
+                    "object_key": o.object_name,
+                    "size_bytes": o.size,
+                    "last_modified": o.last_modified.isoformat() if o.last_modified else None,
+                })
+    except Exception:
+        pass
+    return {"policy": cfg, "snapshots": snapshots}
+
+
+@router.put("/policy")
+def update_backup_policy(
+    body: BackupPolicyIn,
+    user: dict = Depends(require_permission("settings.manage")),
+):
+    freq = body.schedule_frequency if body.schedule_frequency in ("daily", "weekly") else "daily"
+    ttype = body.target_type if body.target_type in ("minio_offsite", "s3_compatible") else "minio_offsite"
+    with pool.connection() as conn:
+        cur_cfg, cur_secret = _load_backup_policy(conn)
+        next_secret = body.s3_secret_key.strip() if body.s3_secret_key is not None and body.s3_secret_key.strip() else cur_secret
+        next_cfg = {
+            **cur_cfg,
+            "enabled": bool(body.enabled),
+            "schedule_frequency": freq,
+            "target_type": ttype,
+            "s3_endpoint": body.s3_endpoint.strip(),
+            "s3_bucket": body.s3_bucket.strip(),
+            "s3_prefix": body.s3_prefix.strip() or "backups/",
+            "s3_access_key": body.s3_access_key.strip(),
+            "s3_secure": bool(body.s3_secure),
+            "retain_backups_count": body.retain_backups_count,
+            "retention_enabled": bool(body.retention_enabled),
+            "retention_complaints_years": body.retention_complaints_years,
+            "retention_foia_years": body.retention_foia_years,
+            "retention_audit_years": body.retention_audit_years,
+        }
+        next_cfg.pop("has_s3_secret", None)
+        conn.execute(
+            "INSERT INTO core_integrations (provider, enabled, api_key, config, updated_by, updated_at) "
+            "VALUES ('offsite_backup_policy', %s, %s, %s, %s, now()) "
+            "ON CONFLICT (provider) DO UPDATE SET "
+            "enabled = EXCLUDED.enabled, api_key = EXCLUDED.api_key, config = EXCLUDED.config, "
+            "updated_by = EXCLUDED.updated_by, updated_at = now()",
+            (bool(body.enabled), next_secret, Jsonb(next_cfg), user["username"]),
+        )
+        saved_cfg, _ = _load_backup_policy(conn)
+    record_audit(user["username"], "backup.update_policy", f"Scheduled={body.enabled}, retention={body.retention_enabled}")
+    return {"policy": saved_cfg}
+
+
+def run_scheduled_offsite_backup(actor_username: str = "system", force: bool = False) -> dict:
+    with pool.connection() as conn:
+        cfg, secret = _load_backup_policy(conn)
+    if not force and not cfg.get("enabled"):
+        return {"ran": False, "reason": "disabled"}
+    if not force and cfg.get("last_offsite_backup_at"):
+        try:
+            last_dt = datetime.fromisoformat(cfg["last_offsite_backup_at"])
+            min_gap = timedelta(days=6, hours=23) if cfg.get("schedule_frequency") == "weekly" else timedelta(hours=23)
+            if datetime.now(timezone.utc) - last_dt < min_gap:
+                return {"ran": False, "reason": "not_due"}
+        except Exception:
+            pass
+
+    tmp_path = _build_backup_zip(include_users=True, exported_by=actor_username)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    try:
+        client, bucket, full_prefix = _get_offsite_s3_client(cfg, secret)
+        if not client.bucket_exists(bucket):
+            client.make_bucket(bucket)
+        obj_key = f"{full_prefix}dockethall_backup_{stamp}.zip"
+        size_bytes = os.path.getsize(tmp_path)
+        with open(tmp_path, "rb") as fh:
+            client.put_object(bucket, obj_key, fh, length=size_bytes, content_type="application/zip")
+
+        keep = max(1, int(cfg.get("retain_backups_count") or 30))
+        objs = sorted(
+            client.list_objects(bucket, prefix=full_prefix, recursive=True),
+            key=lambda o: o.last_modified or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+        pruned = 0
+        for old_obj in objs[keep:]:
+            client.remove_object(bucket, old_obj.object_name)
+            pruned += 1
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with pool.connection() as conn:
+        conn.execute("UPDATE agenda_preferences SET last_backup_at = now() WHERE id = 1")
+        cur_cfg, cur_secret = _load_backup_policy(conn)
+        cur_cfg.pop("has_s3_secret", None)
+        cur_cfg["last_offsite_backup_at"] = now_iso
+        cur_cfg["last_offsite_key"] = obj_key
+        conn.execute(
+            "INSERT INTO core_integrations (provider, enabled, api_key, config, updated_by, updated_at) "
+            "VALUES ('offsite_backup_policy', %s, %s, %s, %s, now()) "
+            "ON CONFLICT (provider) DO UPDATE SET config = EXCLUDED.config, updated_at = now()",
+            (bool(cur_cfg.get("enabled")), cur_secret, Jsonb(cur_cfg), actor_username),
+        )
+    return {"ran": True, "object_key": obj_key, "size_bytes": size_bytes, "pruned_snapshots": pruned}
+
+
+def run_retention_policies(actor_username: str = "system", force: bool = False) -> dict:
+    with pool.connection() as conn:
+        cfg, secret = _load_backup_policy(conn)
+        if not force and not cfg.get("retention_enabled"):
+            return {"ran": False, "reason": "disabled"}
+
+        def _table_ok(name: str) -> bool:
+            r = conn.execute("SELECT to_regclass(%s)", (name,)).fetchone()
+            return bool(r and r[0])
+
+        c_pruned = 0
+        f_pruned = 0
+        a_pruned = 0
+
+        c_yrs = int(cfg.get("retention_complaints_years") or 0)
+        if c_yrs > 0 and _table_ok("complaints"):
+            res = conn.execute(
+                "DELETE FROM complaints "
+                "WHERE status IN ('resolved', 'dismissed') "
+                "AND updated_at < now() - make_interval(years => %s)",
+                (c_yrs,),
+            )
+            c_pruned = res.rowcount or 0
+
+        f_yrs = int(cfg.get("retention_foia_years") or 0)
+        if f_yrs > 0 and _table_ok("public_records_requests"):
+            res = conn.execute(
+                "DELETE FROM public_records_requests "
+                "WHERE status IN ('fulfilled', 'closed', 'denied') "
+                "AND updated_at < now() - make_interval(years => %s)",
+                (f_yrs,),
+            )
+            f_pruned = res.rowcount or 0
+
+        a_yrs = int(cfg.get("retention_audit_years") or 0)
+        if a_yrs > 0 and _table_ok("core_audit_log"):
+            res = conn.execute(
+                "DELETE FROM core_audit_log WHERE created_at < now() - make_interval(years => %s)",
+                (a_yrs,),
+            )
+            a_pruned = res.rowcount or 0
+
+        cfg.pop("has_s3_secret", None)
+        cfg["last_retention_run_at"] = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT INTO core_integrations (provider, enabled, api_key, config, updated_by, updated_at) "
+            "VALUES ('offsite_backup_policy', %s, %s, %s, %s, now()) "
+            "ON CONFLICT (provider) DO UPDATE SET config = EXCLUDED.config, updated_at = now()",
+            (bool(cfg.get("enabled")), secret, Jsonb(cfg), actor_username),
+        )
+    return {
+        "ran": True,
+        "complaints_pruned": c_pruned,
+        "foia_pruned": f_pruned,
+        "audit_pruned": a_pruned,
+    }
+
+
+@router.post("/run-offsite")
+def trigger_offsite_backup(user: dict = Depends(require_permission("settings.manage"))):
+    res = run_scheduled_offsite_backup(actor_username=user["username"], force=True)
+    record_audit(user["username"], "backup.run_offsite", f"Uploaded {res.get('object_key')}")
+    return res
+
+
+@router.post("/run-retention")
+def trigger_retention_policies(user: dict = Depends(require_permission("settings.manage"))):
+    res = run_retention_policies(actor_username=user["username"], force=True)
+    record_audit(
+        user["username"],
+        "backup.run_retention",
+        f"Pruned complaints={res['complaints_pruned']}, foia={res['foia_pruned']}, audit={res['audit_pruned']}",
+    )
+    return res

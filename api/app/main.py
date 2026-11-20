@@ -68,6 +68,11 @@ async def lifespan(app: FastAPI):
                     permits.run_recurring_renewals(days_ahead=60, send_emails=True)
                 except Exception:
                     pass
+                try:
+                    backup.run_scheduled_offsite_backup()
+                    backup.run_retention_policies()
+                except Exception:
+                    pass
         digest_task = asyncio.create_task(_digest_loop())
     yield
     if digest_task:

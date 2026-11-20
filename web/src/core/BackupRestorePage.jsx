@@ -15,19 +15,56 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, downloadBackupArchive } from './api.js';
 import { useToast } from './toast.jsx';
 
 export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner, onRestored }) {
   const [days, setDays] = useState(String(reminderDays ?? 0));
   const [msg, setMsg] = useState({ text: '', isError: false });
+  const [policy, setPolicy] = useState({
+    enabled: false,
+    schedule_frequency: 'daily',
+    target_type: 'minio_offsite',
+    s3_endpoint: '',
+    s3_bucket: '',
+    s3_prefix: 'backups/',
+    s3_access_key: '',
+    s3_secret_key: '',
+    s3_secure: true,
+    retain_backups_count: 30,
+    retention_enabled: false,
+    retention_complaints_years: 0,
+    retention_foia_years: 0,
+    retention_audit_years: 0,
+    has_s3_secret: false,
+    last_offsite_backup_at: null,
+    last_retention_run_at: null,
+  });
+  const [snapshots, setSnapshots] = useState([]);
+  const [savingPolicy, setSavingPolicy] = useState(false);
+  const [runningOffsite, setRunningOffsite] = useState(false);
+  const [runningRetention, setRunningRetention] = useState(false);
   const fileRef = useRef(null);
   const showToast = useToast();
 
   useEffect(() => {
     setDays(String(reminderDays ?? 0));
   }, [reminderDays]);
+
+  const loadPolicy = useCallback(async () => {
+    try {
+      const d = await api('/api/backup/policy');
+      if (d?.policy) {
+        setPolicy((prev) => ({ ...prev, ...d.policy, s3_secret_key: '' }));
+      }
+      setSnapshots(d?.snapshots || []);
+    } catch {
+      // Ignore if insufficient perms
+    }
+  }, []);
+
+  useEffect(() => { loadPolicy(); }, [loadPolicy]);
 
   const handleReminderSave = async (e) => {
     e.preventDefault();
@@ -70,10 +107,60 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
     }
   };
 
+  async function savePolicy(e) {
+    e?.preventDefault?.();
+    setSavingPolicy(true);
+    try {
+      const payload = {
+        ...policy,
+        retain_backups_count: Number(policy.retain_backups_count || 30),
+        retention_complaints_years: Number(policy.retention_complaints_years || 0),
+        retention_foia_years: Number(policy.retention_foia_years || 0),
+        retention_audit_years: Number(policy.retention_audit_years || 0),
+      };
+      if (!payload.s3_secret_key) delete payload.s3_secret_key;
+      await api('/api/backup/policy', { method: 'PUT', body: JSON.stringify(payload) });
+      showToast('Backup & retention policy saved', 'ok');
+      await loadPolicy();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSavingPolicy(false);
+    }
+  }
+
+  async function runOffsiteNow() {
+    setRunningOffsite(true);
+    try {
+      const res = await api('/api/backup/run-offsite', { method: 'POST' });
+      showToast(`Uploaded offsite snapshot (${res.object_key})`, 'ok');
+      await onRefreshBackupBanner?.();
+      await loadPolicy();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setRunningOffsite(false);
+    }
+  }
+
+  async function runRetentionNow() {
+    if (!confirm('Run record retention cleanup now? Closed records older than the configured retention years will be permanently removed.')) return;
+    setRunningRetention(true);
+    try {
+      const res = await api('/api/backup/run-retention', { method: 'POST' });
+      showToast(`Retention cleanup complete (Complaints: ${res.complaints_pruned}, FOIA: ${res.foia_pruned}, Audit: ${res.audit_pruned})`, 'ok');
+      await loadPolicy();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setRunningRetention(false);
+    }
+  }
+
   return (
     <section id="section-preferences-backup">
       <h1>Backup &amp; Restore</h1>
-      <div className="card">
+      <div className="card" style={{ marginBottom: '1rem' }}>
         <p className="muted" style={{ marginTop: 0 }}>
           Download a full archive (.zip) containing human-readable agendas, CSVs, database JSON, users, preferences, templates, and uploaded attachments, or restore onto an instance.
         </p>
@@ -112,6 +199,205 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
         {msg.text && (
           <div id="backup-msg" className={msg.isError ? 'error-msg' : 'ok-msg'} role="status">{msg.text}</div>
         )}
+      </div>
+
+      <div className="card" style={{ marginBottom: '1rem' }}>
+        <div className="between" style={{ marginBottom: '.65rem', flexWrap: 'wrap', gap: '.5rem' }}>
+          <div>
+            <h2 style={{ margin: 0 }}>Automated Scheduled Backups (S3 / Offsite Storage)</h2>
+            <p className="muted" style={{ margin: '.2rem 0 0', fontSize: '.88rem' }}>
+              Schedule automatic encrypted snapshots to MinIO or an external S3-compatible bucket.
+            </p>
+          </div>
+          <button type="button" className="btn sm primary" onClick={runOffsiteNow} disabled={runningOffsite}>
+            {runningOffsite ? 'Uploading…' : 'Run Offsite Backup Now'}
+          </button>
+        </div>
+        <form onSubmit={savePolicy} style={{ display: 'grid', gap: '.75rem' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', fontWeight: 600 }}>
+            <input
+              type="checkbox"
+              checked={!!policy.enabled}
+              onChange={(e) => setPolicy((p) => ({ ...p, enabled: e.target.checked }))}
+            />
+            Enable Scheduled Offsite Backups
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '.65rem' }}>
+            <div>
+              <label className="muted" style={{ fontSize: '.8rem', display: 'block' }}>Schedule Frequency</label>
+              <select
+                value={policy.schedule_frequency}
+                onChange={(e) => setPolicy((p) => ({ ...p, schedule_frequency: e.target.value }))}
+              >
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+            </div>
+            <div>
+              <label className="muted" style={{ fontSize: '.8rem', display: 'block' }}>Destination</label>
+              <select
+                value={policy.target_type}
+                onChange={(e) => setPolicy((p) => ({ ...p, target_type: e.target.value }))}
+              >
+                <option value="minio_offsite">Managed MinIO Object Bucket</option>
+                <option value="s3_compatible">External S3-Compatible Endpoint</option>
+              </select>
+            </div>
+            <div>
+              <label className="muted" style={{ fontSize: '.8rem', display: 'block' }}>Object Prefix</label>
+              <input
+                value={policy.s3_prefix}
+                onChange={(e) => setPolicy((p) => ({ ...p, s3_prefix: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="muted" style={{ fontSize: '.8rem', display: 'block' }}>Snapshots to Retain</label>
+              <input
+                type="number"
+                min={1}
+                max={3650}
+                value={policy.retain_backups_count}
+                onChange={(e) => setPolicy((p) => ({ ...p, retain_backups_count: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          {policy.target_type === 's3_compatible' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '.65rem' }}>
+              <div>
+                <label className="muted" style={{ fontSize: '.8rem', display: 'block' }}>S3 Endpoint Host</label>
+                <input
+                  placeholder="s3.amazonaws.com"
+                  value={policy.s3_endpoint}
+                  onChange={(e) => setPolicy((p) => ({ ...p, s3_endpoint: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="muted" style={{ fontSize: '.8rem', display: 'block' }}>S3 Bucket</label>
+                <input
+                  placeholder="city-backups"
+                  value={policy.s3_bucket}
+                  onChange={(e) => setPolicy((p) => ({ ...p, s3_bucket: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="muted" style={{ fontSize: '.8rem', display: 'block' }}>Access Key</label>
+                <input
+                  value={policy.s3_access_key}
+                  onChange={(e) => setPolicy((p) => ({ ...p, s3_access_key: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="muted" style={{ fontSize: '.8rem', display: 'block' }}>
+                  Secret Key {policy.has_s3_secret ? '(saved)' : ''}
+                </label>
+                <input
+                  type="password"
+                  placeholder={policy.has_s3_secret ? '••••••••' : 'Enter secret key'}
+                  value={policy.s3_secret_key}
+                  onChange={(e) => setPolicy((p) => ({ ...p, s3_secret_key: e.target.value }))}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="actions">
+            <button type="submit" className="btn sm primary" disabled={savingPolicy}>
+              {savingPolicy ? 'Saving…' : 'Save Offsite Policy'}
+            </button>
+            {policy.last_offsite_backup_at && (
+              <span className="muted" style={{ fontSize: '.84rem' }}>
+                Last snapshot: {policy.last_offsite_backup_at}
+              </span>
+            )}
+          </div>
+        </form>
+
+        {snapshots.length > 0 && (
+          <div style={{ marginTop: '.85rem' }}>
+            <h3 style={{ fontSize: '.95rem', marginBottom: '.4rem' }}>Recent Offsite Snapshots ({snapshots.length})</h3>
+            <table>
+              <thead>
+                <tr><th>Object Key</th><th>Size</th><th>Timestamp</th></tr>
+              </thead>
+              <tbody>
+                {snapshots.map((s) => (
+                  <tr key={s.object_key}>
+                    <td><code>{s.object_key}</code></td>
+                    <td>{((s.size_bytes || 0) / 1024).toFixed(1)} KB</td>
+                    <td>{s.last_modified || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="between" style={{ marginBottom: '.65rem', flexWrap: 'wrap', gap: '.5rem' }}>
+          <div>
+            <h2 style={{ margin: 0 }}>Record Retention &amp; Auto-Archival Policies</h2>
+            <p className="muted" style={{ margin: '.2rem 0 0', fontSize: '.88rem' }}>
+              Configure statutory retention windows (0 years = keep indefinitely). Applies only to closed/resolved records.
+            </p>
+          </div>
+          <button type="button" className="btn sm" onClick={runRetentionNow} disabled={runningRetention}>
+            {runningRetention ? 'Running…' : 'Run Retention Cleanup Now'}
+          </button>
+        </div>
+        <form onSubmit={savePolicy} style={{ display: 'grid', gap: '.75rem' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', fontWeight: 600 }}>
+            <input
+              type="checkbox"
+              checked={!!policy.retention_enabled}
+              onChange={(e) => setPolicy((p) => ({ ...p, retention_enabled: e.target.checked }))}
+            />
+            Enable Automated Retention Policy Enforcement
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '.65rem' }}>
+            <div>
+              <label className="muted" style={{ fontSize: '.8rem', display: 'block' }}>Closed 311 / Complaints (Years)</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={policy.retention_complaints_years}
+                onChange={(e) => setPolicy((p) => ({ ...p, retention_complaints_years: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="muted" style={{ fontSize: '.8rem', display: 'block' }}>Fulfilled FOIA Requests (Years)</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={policy.retention_foia_years}
+                onChange={(e) => setPolicy((p) => ({ ...p, retention_foia_years: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="muted" style={{ fontSize: '.8rem', display: 'block' }}>Audit Log Entries (Years)</label>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={policy.retention_audit_years}
+                onChange={(e) => setPolicy((p) => ({ ...p, retention_audit_years: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="actions">
+            <button type="submit" className="btn sm primary" disabled={savingPolicy}>
+              {savingPolicy ? 'Saving…' : 'Save Retention Policies'}
+            </button>
+            {policy.last_retention_run_at && (
+              <span className="muted" style={{ fontSize: '.84rem' }}>
+                Last retention run: {policy.last_retention_run_at}
+              </span>
+            )}
+          </div>
+        </form>
       </div>
     </section>
   );
