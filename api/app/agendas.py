@@ -3317,7 +3317,17 @@ def check_agenda_packet_pdf_compliance(
         prefs = _load_preferences(conn)
     resp = _build_packet_response(agenda, prefs, agenda_id, summary, False)
     suffix = "Summary" if summary else "Packet"
-    return check_pdf_compliance(resp.body, f"{agenda['title']} ({suffix}).pdf")
+    has_merged_binary = (not summary) and any(
+        d.get("doc_type") in ("PDF", "XLSX", "PPTX")
+        for item in agenda.get("items", [])
+        for d in item.get("documents", [])
+    )
+    note = (
+        "Reason: This combined packet merges external PDF, XLSX, or PPTX attachments, which strips PDF/UA tags during page merging. "
+        "For 100% tagged output, publish the Summary PDF (or HTML agenda) and check individual attachments separately."
+        if has_merged_binary else ""
+    )
+    return check_pdf_compliance(resp.body, f"{agenda['title']} ({suffix}).pdf", context_note=note)
 
 
 @router.get("/{agenda_id}/minutes.pdf/compliance")

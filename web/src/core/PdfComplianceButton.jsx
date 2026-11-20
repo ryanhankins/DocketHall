@@ -85,23 +85,28 @@ export default function PdfComplianceButton({
               <strong>{result.filename || title}</strong> &middot; {result.page_count} page(s)
             </div>
             <div style={{ display: 'grid', gap: '.5rem', maxHeight: '55vh', overflowY: 'auto' }}>
-              {(result.checks || []).map((c) => (
-                <div
-                  key={c.id}
-                  style={{
-                    border: '1px solid #d9e2ec',
-                    borderRadius: 6,
-                    padding: '.55rem .7rem',
-                    background: '#f8fafc',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.5rem', marginBottom: '.2rem' }}>
-                    <strong style={{ fontSize: '.88rem' }}>{c.label}</strong>
-                    {statusBadge(c.status)}
+              {(result.checks || []).map((c) => {
+                const borderLeft = c.status === 'fail' ? '4px solid #dc2626' : (c.status === 'warn' ? '4px solid #d97706' : '4px solid #16a34a');
+                const bg = c.status === 'fail' ? '#fef2f2' : (c.status === 'warn' ? '#fffbeb' : '#f8fafc');
+                return (
+                  <div
+                    key={c.id}
+                    style={{
+                      border: '1px solid #d9e2ec',
+                      borderLeft,
+                      borderRadius: 6,
+                      padding: '.55rem .7rem',
+                      background: bg,
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '.5rem', marginBottom: '.2rem' }}>
+                      <strong style={{ fontSize: '.88rem' }}>{c.label}</strong>
+                      {statusBadge(c.status)}
+                    </div>
+                    <div style={{ fontSize: '.83rem', color: '#334155', lineHeight: 1.4 }}>{c.detail}</div>
                   </div>
-                  <div className="muted" style={{ fontSize: '.83rem' }}>{c.detail}</div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <div className="dialog-actions">
               <button type="button" className="btn primary" onClick={() => setResult(null)}>

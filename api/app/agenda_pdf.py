@@ -628,6 +628,110 @@ def render_single_document_pdf(item: dict, doc: dict, data: bytes) -> bytes:
     return _render_docx_pdf(item, doc, data)
 
 
+def _render_full_html_packet(
+    agenda: dict,
+    prefs: dict,
+    logo_bytes: bytes | None,
+    fetch_doc_bytes: Callable[[str], bytes],
+    include_item_cover_sheets: bool = True,
+    include_page_numbers: bool = True,
+) -> bytes:
+    """Render an entire Agenda Packet (TOC + item covers + non-PDF attachments) as a single Tagged PDF/UA."""
+    parts = [_agenda_header_html(agenda, prefs, logo_bytes)]
+    items = agenda.get("items", [])
+
+    parts.append("<h2>Table of Contents</h2>")
+    if not items:
+        parts.append("<p>No agenda items.</p>")
+    else:
+        parts.append("<ul>")
+        for item in items:
+            sec = f" [{_esc(item['section'])}]" if item.get("section") else ""
+            parts.append(
+                f'<li><a href="#item-{item["position"]}">{item["position"]}. {_esc(item["title"])}{sec}</a>'
+            )
+            docs = item.get("documents", [])
+            if docs:
+                parts.append("<ul>")
+                for d in docs:
+                    parts.append(
+                        f'<li><a href="#doc-{item["position"]}-{d["position"]}">'
+                        f'{item["position"]}.{d["position"]} {_esc(d["title"])} [{_esc(d["doc_type"])}]</a></li>'
+                    )
+                parts.append("</ul>")
+            parts.append("</li>")
+        parts.append("</ul>")
+
+    if prefs.get("footer_disclosures"):
+        parts.append("<h2>Additional Notes &amp; Disclosures</h2>")
+        parts.append(f'<p class="notes">{_esc_multiline(prefs["footer_disclosures"])}</p>')
+
+    for item in items:
+        docs = item.get("documents", [])
+        if include_item_cover_sheets:
+            prefix_parts = [p for p in [prefs.get("city_name"), agenda.get("body")] if p]
+            if item.get("section"):
+                prefix_parts.append(item["section"])
+            prefix = " — ".join(_esc(p) for p in prefix_parts)
+            kicker = f"{prefix} — AGENDA ITEM {item['position']}" if prefix else f"AGENDA ITEM {item['position']}"
+            parts.append(f'<section id="item-{item["position"]}" style="page-break-before: always;">')
+            parts.append(f'<p class="kicker">{kicker}</p>')
+            parts.append(f'<h2>{item["position"]}. {_esc(item["title"])}</h2>')
+            if item.get("description"):
+                parts.append(f'<p>{_esc(item["description"])}</p>')
+            for lbl, key in (
+                ("Presenter", "presenter"),
+                ("Recommended Motion", "recommended_motion"),
+                ("Fiscal Impact", "fiscal_impact"),
+            ):
+                if item.get(key):
+                    parts.append(f'<p><strong>{lbl}:</strong> {_esc(item[key])}</p>')
+            parts.append("</section>")
+
+        for doc in docs:
+            parts.append(f'<section id="doc-{item["position"]}-{doc["position"]}" style="page-break-before: always;">')
+            parts.append(f'<h3>{item["position"]}.{doc["position"]} {_esc(doc["title"])}</h3>')
+            try:
+                raw = fetch_doc_bytes(doc["object_key"])
+                dtype = doc["doc_type"]
+                if dtype == "TEXT":
+                    txt = raw.decode("utf-8", errors="replace")
+                    for blk in [b.strip() for b in txt.split("\n\n") if b.strip()] or ["(Empty text attachment)"]:
+                        parts.append(f"<p>{_esc_multiline(blk)}</p>")
+                elif dtype in ("PNG", "JPG"):
+                    with PILImage.open(io.BytesIO(raw)) as im:
+                        buf = io.BytesIO()
+                        im.convert("RGBA").save(buf, format="PNG")
+                        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                    parts.append(
+                        f'<p><img src="data:image/png;base64,{b64}" alt="{_esc(doc["title"] or doc["filename"])}" '
+                        'style="max-width: 100%; max-height: 8in;" /></p>'
+                    )
+                elif dtype == "CSV":
+                    txt = raw.decode("utf-8", errors="replace")
+                    rows = list(csv.reader(io.StringIO(txt)))
+                    if rows:
+                        parts.append('<table style="width: 100%; border-collapse: collapse; font-size: 8.5pt;">')
+                        for r_idx, row in enumerate(rows[:200]):
+                            tag = "th" if r_idx == 0 else "td"
+                            cells = "".join(f'<{tag} style="border: 1px solid #cbd5e1; padding: 3pt 4pt; text-align: left;">{_esc(str(c))}</{tag}>' for c in row[:10])
+                            parts.append(f"<tr>{cells}</tr>")
+                        parts.append("</table>")
+                else:
+                    paras = _extract_docx_paragraphs(raw) if dtype == "DOCX" else []
+                    if paras:
+                        for p in paras:
+                            parts.append(f"<p>{_esc(p)}</p>")
+                    else:
+                        parts.append(f'<p class="meta">Attachment: {_esc(doc["filename"])} ({_esc(dtype)})</p>')
+            except Exception as exc:
+                parts.append(f'<p class="meta">Could not embed {_esc(doc["doc_type"])} ({_esc(doc["filename"])}): {_esc(str(exc))}</p>')
+            parts.append("</section>")
+
+    pkt_title = f"{agenda.get('title') or 'Meeting Agenda'} — Packet"
+    return _html_to_pdf_bytes("\n".join(parts), title=pkt_title, include_page_numbers=include_page_numbers)
+
+
 def build_agenda_packet_pdf(
     agenda: dict,
     fetch_doc_bytes: Callable[[str], bytes],
@@ -650,6 +754,21 @@ def build_agenda_packet_pdf(
             agenda,
             prefs,
             logo_bytes,
+            include_page_numbers=include_page_numbers,
+        )
+
+    has_external_pdf = any(
+        d.get("doc_type") in ("PDF", "XLSX", "PPTX")
+        for item in agenda.get("items", [])
+        for d in item.get("documents", [])
+    )
+    if not has_external_pdf:
+        return _render_full_html_packet(
+            agenda,
+            prefs,
+            logo_bytes,
+            fetch_doc_bytes,
+            include_item_cover_sheets=include_item_cover_sheets,
             include_page_numbers=include_page_numbers,
         )
 

@@ -41,7 +41,7 @@ def _resolve(obj: Any) -> Any:
         return obj
 
 
-def check_pdf_compliance(pdf_bytes: bytes, filename: str = "") -> dict[str, Any]:
+def check_pdf_compliance(pdf_bytes: bytes, filename: str = "", context_note: str = "") -> dict[str, Any]:
     """Inspect PDF bytes for WCAG 2.1 AA / PDF/UA accessibility signals."""
     if not pdf_bytes or not pdf_bytes.lstrip()[:8].startswith(b"%PDF-"):
         raise HTTPException(status_code=400, detail="File is not a valid PDF document")
@@ -135,11 +135,17 @@ def check_pdf_compliance(pdf_bytes: bytes, filename: str = "") -> dict[str, Any]
             "detail": "Partial tag metadata found; export with full Tagged PDF / accessibility tags enabled.",
         })
     else:
+        detail = (
+            "PDF is untagged (no MarkInfo/StructTreeRoot). Without tags, screen readers cannot reliably "
+            "navigate headings, lists, or tables. Re-export from Word/InDesign/Acrobat with 'Tagged PDF' enabled."
+        )
+        if context_note:
+            detail = f"{detail} {context_note}"
         checks.append({
             "id": "tagged",
             "label": "Tagged PDF & Reading Order Structure (WCAG 1.3.1)",
             "status": "fail",
-            "detail": "PDF is untagged (no MarkInfo/StructTreeRoot). Re-export with Tagged PDF enabled so screen readers can navigate headings and tables.",
+            "detail": detail,
         })
 
     # 4. Selectable Text / OCR Check (WCAG 1.1.1 / 1.4.5)
