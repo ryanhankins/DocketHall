@@ -31,7 +31,9 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
   const [inspQueue, setInspQueue] = useState([]);
   const [parcels, setParcels] = useState([]);
   const [parcelQuery, setParcelQuery] = useState('');
-  const [newParcel, setNewParcel] = useState({ parcel_id: '', address: '', building_name: '', suite_name: '', owner_name: '' });
+  const [newParcel, setNewParcel] = useState({
+    parcel_id: '', address: '', building_name: '', suite_name: '', owner_name: '', zoning_district: '', latitude: '', longitude: '',
+  });
   const showToast = useToast();
 
   const loadAll = useCallback(async () => {
@@ -189,8 +191,15 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
             style={{ marginBottom: '.85rem', alignItems: 'flex-end' }}
             onSubmit={async (e) => {
               e.preventDefault();
-              await api('/api/permits/parcels', { method: 'POST', body: JSON.stringify(newParcel) });
-              setNewParcel({ parcel_id: '', address: '', building_name: '', suite_name: '', owner_name: '' });
+              await api('/api/permits/parcels', {
+                method: 'POST',
+                body: JSON.stringify({
+                  ...newParcel,
+                  latitude: newParcel.latitude !== '' ? Number(newParcel.latitude) : null,
+                  longitude: newParcel.longitude !== '' ? Number(newParcel.longitude) : null,
+                }),
+              });
+              setNewParcel({ parcel_id: '', address: '', building_name: '', suite_name: '', owner_name: '', zoning_district: '', latitude: '', longitude: '' });
               showToast('Parcel saved', 'ok');
               await loadParcels(parcelQuery);
             }}
@@ -214,6 +223,18 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
             <div className="field" style={{ minWidth: '90px' }}>
               <label>Suite/Unit</label>
               <input value={newParcel.suite_name} onChange={(e) => setNewParcel(p => ({ ...p, suite_name: e.target.value }))} />
+            </div>
+            <div className="field" style={{ minWidth: '120px' }}>
+              <label>Zoning</label>
+              <input placeholder="e.g. R-1" value={newParcel.zoning_district} onChange={(e) => setNewParcel(p => ({ ...p, zoning_district: e.target.value }))} />
+            </div>
+            <div className="field" style={{ width: '95px' }}>
+              <label>Lat</label>
+              <input type="number" step="any" placeholder="45.0" value={newParcel.latitude} onChange={(e) => setNewParcel(p => ({ ...p, latitude: e.target.value }))} />
+            </div>
+            <div className="field" style={{ width: '95px' }}>
+              <label>Lon</label>
+              <input type="number" step="any" placeholder="-92.9" value={newParcel.longitude} onChange={(e) => setNewParcel(p => ({ ...p, longitude: e.target.value }))} />
             </div>
             <button type="submit" className="btn sm primary">Save Parcel</button>
           </form>

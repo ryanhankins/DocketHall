@@ -954,6 +954,32 @@ def submit_public_311_request(body: WorkOrderIn):
         return _create_work_order_row(conn, body)
 
 
+@router.get("/work-orders/public-lookup")
+def lookup_public_311_request(work_order_number: str = ""):
+    num = work_order_number.strip().upper()
+    if not num:
+        raise HTTPException(status_code=400, detail="Work order number is required")
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT work_order_number, category, location, priority, status, assigned_crew, completion_notes, completed_at, created_at "
+            "FROM public_works_orders WHERE UPPER(work_order_number) = %s",
+            (num,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Work order not found")
+    return {
+        "work_order_number": row[0],
+        "category": row[1],
+        "location": row[2],
+        "priority": row[3],
+        "status": row[4],
+        "assigned_crew": row[5],
+        "completion_notes": row[6],
+        "completed_at": _iso(row[7]),
+        "created_at": _iso(row[8]),
+    }
+
+
 @router.get("/work-orders")
 def list_work_orders(
     status: str = "",

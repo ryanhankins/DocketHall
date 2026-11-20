@@ -43,7 +43,8 @@ RECORDS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         [
             "id", "request_number", "requester_name", "requester_email", "requester_phone",
             "subject", "description", "department", "status", "due_date", "assigned_to",
-            "fee_estimate", "response_notes", "fulfilled_at", "created_at", "updated_at",
+            "fee_estimate", "response_notes", "fulfillment_object_key", "fulfillment_filename",
+            "fulfilled_at", "created_at", "updated_at",
         ],
         set(),
         True,

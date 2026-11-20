@@ -1666,7 +1666,14 @@ function RecordsPublicTab() {
             </button>
             {foiaLookupRes && (
               <span style={{ fontSize: '.88rem' }}>
-                {foiaLookupRes.error ? foiaLookupRes.error : `${foiaLookupRes.request_number}: ${foiaLookupRes.status.replace('_', ' ')} (Due ${foiaLookupRes.due_date || '—'})`}
+                {foiaLookupRes.error ? foiaLookupRes.error : (
+                  <>
+                    {foiaLookupRes.request_number}: {foiaLookupRes.status.replace('_', ' ')} (Due {foiaLookupRes.due_date || '—'})
+                    {foiaLookupRes.fulfillment_filename && (foiaLookupRes.status === 'ready' || foiaLookupRes.status === 'fulfilled') && (
+                      <> · <a href={`/api/records/requests/public-download/${encodeURIComponent(foiaLookupRes.request_number)}`} target="_blank" rel="noreferrer">Download {foiaLookupRes.fulfillment_filename}</a></>
+                    )}
+                  </>
+                )}
               </span>
             )}
           </div>
@@ -1717,6 +1724,8 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
   const [subView, setSubView] = useState('log'); // 'log' | 'file' | '311'
   const [woForm, setWoForm] = useState({ category: 'Pothole / Street', location: '', description: '', reporter_name: '', reporter_email: '' });
   const [woDone, setWoDone] = useState(null);
+  const [woLookupNum, setWoLookupNum] = useState('');
+  const [woLookupRes, setWoLookupRes] = useState(null);
   const [items, setItems] = useState([]);
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -1880,6 +1889,25 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
               Submitted Work Order <strong>{woDone.work_order_number}</strong> ({woDone.category}).
             </div>
           )}
+          <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '.65rem', display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input placeholder="Track 311 Work Order # (e.g. WO-2026-0001)" value={woLookupNum} onChange={(e) => setWoLookupNum(e.target.value)} style={{ minWidth: 240 }} />
+            <button
+              type="button"
+              className="btn sm"
+              onClick={async () => {
+                if (!woLookupNum.trim()) return;
+                const r = await fetch(`/api/complaints/work-orders/public-lookup?work_order_number=${encodeURIComponent(woLookupNum.trim())}`);
+                setWoLookupRes(r.ok ? await r.json() : { error: 'Work order not found' });
+              }}
+            >
+              Check 311 Status
+            </button>
+            {woLookupRes && (
+              <span style={{ fontSize: '.88rem' }}>
+                {woLookupRes.error ? woLookupRes.error : `${woLookupRes.work_order_number}: ${woLookupRes.status.replace('_', ' ')} (${woLookupRes.category}${woLookupRes.assigned_crew ? ` · ${woLookupRes.assigned_crew}` : ''})`}
+              </span>
+            )}
+          </div>
         </form>
       ) : subView === 'file' ? (
         <form className="card" onSubmit={handleFileComplaint} style={{ display: 'grid', gap: 12 }}>

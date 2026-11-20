@@ -915,6 +915,9 @@ class ParcelIn(BaseModel):
     block: str = ""
     section: str = ""
     notes: str = ""
+    zoning_district: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class WorkflowStepIn(BaseModel):
@@ -1541,7 +1544,7 @@ def list_parcels(
     with pool.connection() as conn:
         if q.strip():
             rows = conn.execute(
-                "SELECT id, parcel_id, address, building_name, suite_name, owner_name, lot, block, section, notes "
+                "SELECT id, parcel_id, address, building_name, suite_name, owner_name, lot, block, section, notes, zoning_district, latitude, longitude "
                 "FROM permit_parcels "
                 "WHERE parcel_id ILIKE %s OR address ILIKE %s OR owner_name ILIKE %s OR building_name ILIKE %s "
                 "ORDER BY parcel_id ASC LIMIT 100",
@@ -1549,14 +1552,15 @@ def list_parcels(
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, parcel_id, address, building_name, suite_name, owner_name, lot, block, section, notes "
+                "SELECT id, parcel_id, address, building_name, suite_name, owner_name, lot, block, section, notes, zoning_district, latitude, longitude "
                 "FROM permit_parcels ORDER BY parcel_id ASC LIMIT 100"
             ).fetchall()
     return [
         {
             "id": r[0], "parcel_id": r[1], "address": r[2], "building_name": r[3],
             "suite_name": r[4], "owner_name": r[5], "lot": r[6], "block": r[7],
-            "section": r[8], "notes": r[9],
+            "section": r[8], "notes": r[9], "zoning_district": r[10] or "",
+            "latitude": r[11], "longitude": r[12],
         }
         for r in rows
     ]
@@ -1569,20 +1573,24 @@ def create_or_update_parcel(body: ParcelIn, _: dict = Depends(require_permission
         raise HTTPException(status_code=400, detail="Parcel ID is required")
     with pool.connection() as conn:
         row = conn.execute(
-            "INSERT INTO permit_parcels (parcel_id, address, building_name, suite_name, owner_name, lot, block, section, notes) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "INSERT INTO permit_parcels (parcel_id, address, building_name, suite_name, owner_name, lot, block, section, notes, zoning_district, latitude, longitude) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (parcel_id) DO UPDATE SET "
             "address = EXCLUDED.address, building_name = EXCLUDED.building_name, "
             "suite_name = EXCLUDED.suite_name, owner_name = EXCLUDED.owner_name, "
-            "lot = EXCLUDED.lot, block = EXCLUDED.block, section = EXCLUDED.section, notes = EXCLUDED.notes "
-            "RETURNING id, parcel_id, address, building_name, suite_name, owner_name, lot, block, section, notes",
+            "lot = EXCLUDED.lot, block = EXCLUDED.block, section = EXCLUDED.section, notes = EXCLUDED.notes, "
+            "zoning_district = EXCLUDED.zoning_district, latitude = COALESCE(EXCLUDED.latitude, permit_parcels.latitude), "
+            "longitude = COALESCE(EXCLUDED.longitude, permit_parcels.longitude) "
+            "RETURNING id, parcel_id, address, building_name, suite_name, owner_name, lot, block, section, notes, zoning_district, latitude, longitude",
             (pid, body.address.strip(), body.building_name.strip(), body.suite_name.strip(),
-             body.owner_name.strip(), body.lot.strip(), body.block.strip(), body.section.strip(), body.notes.strip()),
+             body.owner_name.strip(), body.lot.strip(), body.block.strip(), body.section.strip(), body.notes.strip(),
+             body.zoning_district.strip(), body.latitude, body.longitude),
         ).fetchone()
     return {
         "id": row[0], "parcel_id": row[1], "address": row[2], "building_name": row[3],
         "suite_name": row[4], "owner_name": row[5], "lot": row[6], "block": row[7],
-        "section": row[8], "notes": row[9],
+        "section": row[8], "notes": row[9], "zoning_district": row[10] or "",
+        "latitude": row[11], "longitude": row[12],
     }
 
 
@@ -2671,6 +2679,55 @@ def get_parcels_map(_: dict = Depends(require_permission("permits.manage"))):
     return out
 
 
+@router.get("/link-candidates")
+def list_link_candidates(
+    q: str = "",
+    user: dict = Depends(require_permission("permits.submit", "permits.manage")),
+):
+    is_mgr = has_permission(user, "permits.manage")
+    ql = f"%{q.strip()}%"
+    with pool.connection() as conn:
+        if is_mgr:
+            if q.strip():
+                rows = conn.execute(
+                    "SELECT id, permit_number, permit_type_name, permit_use_name, property_address, project_name, status "
+                    "FROM permits WHERE permit_number ILIKE %s OR property_address ILIKE %s OR project_name ILIKE %s OR permit_type_name ILIKE %s "
+                    "ORDER BY id DESC LIMIT 50",
+                    (ql, ql, ql, ql),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, permit_number, permit_type_name, permit_use_name, property_address, project_name, status "
+                    "FROM permits ORDER BY id DESC LIMIT 50"
+                ).fetchall()
+        else:
+            if q.strip():
+                rows = conn.execute(
+                    "SELECT id, permit_number, permit_type_name, permit_use_name, property_address, project_name, status "
+                    "FROM permits WHERE applicant_user_id = %s AND (permit_number ILIKE %s OR property_address ILIKE %s OR project_name ILIKE %s OR permit_type_name ILIKE %s) "
+                    "ORDER BY id DESC LIMIT 50",
+                    (user["id"], ql, ql, ql, ql),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, permit_number, permit_type_name, permit_use_name, property_address, project_name, status "
+                    "FROM permits WHERE applicant_user_id = %s ORDER BY id DESC LIMIT 50",
+                    (user["id"],),
+                ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "permit_number": r[1],
+            "permit_type_name": r[2],
+            "permit_use_name": r[3],
+            "property_address": r[4],
+            "project_name": r[5],
+            "status": r[6],
+        }
+        for r in rows
+    ]
+
+
 @router.get("/{permit_id}")
 def get_permit(
     permit_id: int,
@@ -3601,55 +3658,6 @@ def update_portal_settings(
             ),
         )
         return _load_settings(conn)
-
-
-@router.get("/link-candidates")
-def list_link_candidates(
-    q: str = "",
-    user: dict = Depends(require_permission("permits.submit", "permits.manage")),
-):
-    is_mgr = has_permission(user, "permits.manage")
-    ql = f"%{q.strip()}%"
-    with pool.connection() as conn:
-        if is_mgr:
-            if q.strip():
-                rows = conn.execute(
-                    "SELECT id, permit_number, permit_type_name, permit_use_name, property_address, project_name, status "
-                    "FROM permits WHERE permit_number ILIKE %s OR property_address ILIKE %s OR project_name ILIKE %s OR permit_type_name ILIKE %s "
-                    "ORDER BY id DESC LIMIT 50",
-                    (ql, ql, ql, ql),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT id, permit_number, permit_type_name, permit_use_name, property_address, project_name, status "
-                    "FROM permits ORDER BY id DESC LIMIT 50"
-                ).fetchall()
-        else:
-            if q.strip():
-                rows = conn.execute(
-                    "SELECT id, permit_number, permit_type_name, permit_use_name, property_address, project_name, status "
-                    "FROM permits WHERE applicant_user_id = %s AND (permit_number ILIKE %s OR property_address ILIKE %s OR project_name ILIKE %s OR permit_type_name ILIKE %s) "
-                    "ORDER BY id DESC LIMIT 50",
-                    (user["id"], ql, ql, ql, ql),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT id, permit_number, permit_type_name, permit_use_name, property_address, project_name, status "
-                    "FROM permits WHERE applicant_user_id = %s ORDER BY id DESC LIMIT 50",
-                    (user["id"],),
-                ).fetchall()
-    return [
-        {
-            "id": r[0],
-            "permit_number": r[1],
-            "permit_type_name": r[2],
-            "permit_use_name": r[3],
-            "property_address": r[4],
-            "project_name": r[5],
-            "status": r[6],
-        }
-        for r in rows
-    ]
 
 
 @router.post("/{permit_id}/links")

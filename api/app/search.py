@@ -135,6 +135,19 @@ def global_public_search(q: str = ""):
                     "subtitle": " · ".join(x for x in (r[1], r[2]) if x),
                     "tab": "directory",
                 })
+            for r in conn.execute(
+                "SELECT board_name, seat_name, member_name, is_vacant FROM city_board_members "
+                "WHERE is_public = TRUE AND (board_name ILIKE %s OR seat_name ILIKE %s OR member_name ILIKE %s) "
+                "ORDER BY board_name ASC, sort_order ASC LIMIT 5",
+                (like, like, like),
+            ).fetchall():
+                results.append({
+                    "module_id": "directory",
+                    "module_label": "Board / Commission",
+                    "title": f"{r[0]}{f' — {r[1]}' if r[1] else ''}",
+                    "subtitle": "Vacant Seat (Open)" if r[3] else (r[2] or "Appointed Seat"),
+                    "tab": "directory",
+                })
 
         if "agendas" in enabled:
             for r in conn.execute(

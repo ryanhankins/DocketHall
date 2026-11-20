@@ -48,6 +48,9 @@ class LiveSmokeTest(unittest.TestCase):
             "/api/permits/public/catalog",
             "/api/complaints/public-log",
             "/api/records/public",
+            "/api/directory/public",
+            "/api/public/search?q=water",
+            "/api/public/transparency",
         ):
             st, ct, _ = self._get(path)
             self.assertEqual(st, 200, path)
@@ -81,6 +84,17 @@ class LiveSmokeTest(unittest.TestCase):
             data = json.loads(r.read().decode())
             ids = {m["id"] for m in data["modules"]}
             self.assertTrue({"agendas", "permits", "codification", "records", "complaints"}.issubset(ids))
+        for admin_path in (
+            "/api/permits/contractors",
+            "/api/permits/link-candidates",
+            "/api/permits/compliance-programs",
+            "/api/permits/reports/summary",
+            "/api/permits/parcels/map",
+            "/api/records/requests",
+            "/api/complaints/work-orders",
+        ):
+            with opener.open(BASE + admin_path, timeout=10) as r:
+                self.assertEqual(r.status, 200, admin_path)
 
 
 if __name__ == "__main__":

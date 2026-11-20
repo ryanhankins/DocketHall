@@ -298,6 +298,7 @@ export default function RecordsPage({ me }) {
                   <th style={{ padding: 6 }}>Requester</th>
                   <th style={{ padding: 6 }}>Subject</th>
                   <th style={{ padding: 6 }}>Due Date</th>
+                  <th style={{ padding: 6 }}>Fulfillment File</th>
                   <th style={{ padding: 6 }}>Status</th>
                 </tr>
               </thead>
@@ -308,6 +309,31 @@ export default function RecordsPage({ me }) {
                     <td style={{ padding: 6 }}>{fr.requester_name}<div className="muted" style={{ fontSize: 11 }}>{fr.requester_email || fr.requester_phone}</div></td>
                     <td style={{ padding: 6 }}>{fr.subject}{fr.description && <div className="muted" style={{ fontSize: 11 }}>{fr.description}</div>}</td>
                     <td style={{ padding: 6 }}>{fr.due_date || '—'}</td>
+                    <td style={{ padding: 6 }}>
+                      {fr.fulfillment_filename && (
+                        <div style={{ fontSize: 11, marginBottom: 3 }}>
+                          <a href={`/api/records/requests/public-download/${encodeURIComponent(fr.request_number)}`} target="_blank" rel="noreferrer">{fr.fulfillment_filename}</a>
+                        </div>
+                      )}
+                      {canManage && (
+                        <label className="btn sm" style={{ cursor: 'pointer' }}>
+                          {fr.fulfillment_filename ? 'Replace' : 'Upload Packet'}
+                          <input
+                            type="file"
+                            style={{ display: 'none' }}
+                            onChange={async (e) => {
+                              const f = e.target.files?.[0];
+                              if (!f) return;
+                              const fd = new FormData();
+                              fd.append('file', f);
+                              const updated = await api(`/api/records/requests/${fr.id}/fulfillment-file`, { method: 'POST', body: fd });
+                              setFoiaItems((prev) => prev.map((x) => (x.id === fr.id ? updated : x)));
+                              showToast('Fulfillment packet uploaded', 'ok');
+                            }}
+                          />
+                        </label>
+                      )}
+                    </td>
                     <td style={{ padding: 6 }}>
                       <select
                         className="input"

@@ -84,10 +84,14 @@ CREATE TABLE IF NOT EXISTS public_records_requests (
     assigned_to     TEXT NOT NULL DEFAULT '',
     fee_estimate    TEXT NOT NULL DEFAULT '',
     response_notes  TEXT NOT NULL DEFAULT '',
+    fulfillment_object_key TEXT NOT NULL DEFAULT '',
+    fulfillment_filename   TEXT NOT NULL DEFAULT '',
     fulfilled_at    TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE public_records_requests ADD COLUMN IF NOT EXISTS fulfillment_object_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE public_records_requests ADD COLUMN IF NOT EXISTS fulfillment_filename TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS prr_status_idx ON public_records_requests(status, id DESC);
 """
 
@@ -312,16 +316,17 @@ def _row_to_foia(r) -> dict:
         "assigned_to": r[10],
         "fee_estimate": r[11],
         "response_notes": r[12],
-        "fulfilled_at": r[13].isoformat() if r[13] else None,
-        "created_at": r[14].isoformat() if r[14] else None,
-        "updated_at": r[15].isoformat() if r[15] else None,
+        "fulfillment_filename": r[13] or "",
+        "fulfilled_at": r[14].isoformat() if r[14] else None,
+        "created_at": r[15].isoformat() if r[15] else None,
+        "updated_at": r[16].isoformat() if r[16] else None,
     }
 
 
 _FOIA_COLS = (
     "id, request_number, requester_name, requester_email, requester_phone, "
     "subject, description, department, status, due_date, assigned_to, "
-    "fee_estimate, response_notes, fulfilled_at, created_at, updated_at"
+    "fee_estimate, response_notes, fulfillment_filename, fulfilled_at, created_at, updated_at"
 )
 
 
@@ -362,7 +367,7 @@ def lookup_public_foia_request(request_number: str = ""):
         raise HTTPException(status_code=400, detail="Request number is required")
     with pool.connection() as conn:
         row = conn.execute(
-            "SELECT request_number, subject, department, status, due_date, fee_estimate, response_notes, fulfilled_at, created_at "
+            "SELECT request_number, subject, department, status, due_date, fee_estimate, response_notes, fulfillment_filename, fulfilled_at, created_at "
             "FROM public_records_requests WHERE UPPER(request_number) = %s",
             (num,),
         ).fetchone()
@@ -376,9 +381,56 @@ def lookup_public_foia_request(request_number: str = ""):
         "due_date": row[4],
         "fee_estimate": row[5],
         "response_notes": row[6],
-        "fulfilled_at": row[7].isoformat() if row[7] else None,
-        "created_at": row[8].isoformat() if row[8] else None,
+        "fulfillment_filename": row[7] or "",
+        "fulfilled_at": row[8].isoformat() if row[8] else None,
+        "created_at": row[9].isoformat() if row[9] else None,
     }
+
+
+@router.post("/requests/{req_id}/fulfillment-file")
+async def upload_foia_fulfillment_file(
+    req_id: int,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_permission("records.manage")),
+):
+    raw = await file.read()
+    if not raw or len(raw) > MAX_REPO_FILE_BYTES:
+        raise HTTPException(status_code=400, detail="File empty or too large")
+    orig_name = (file.filename or "fulfillment.pdf").strip() or "fulfillment.pdf"
+    safe_name = _SAFE_FILENAME_RE.sub("_", orig_name).strip("._") or "fulfillment"
+    obj_key = tenant_object_key(f"foia/{req_id}/{uuid.uuid4().hex[:12]}_{safe_name}")
+    _minio().put_object(_bucket(), obj_key, io.BytesIO(raw), length=len(raw), content_type=file.content_type or "application/octet-stream")
+    with pool.connection() as conn:
+        row = conn.execute(
+            f"UPDATE public_records_requests SET fulfillment_object_key = %s, fulfillment_filename = %s, "
+            f"status = CASE WHEN status IN ('submitted','in_review') THEN 'ready' ELSE status END, updated_at = now() "
+            f"WHERE id = %s RETURNING {_FOIA_COLS}",
+            (obj_key, orig_name, req_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Records request not found")
+    record_audit(user["username"], "records.foia_upload", f"{row[1]}: {orig_name}")
+    return _row_to_foia(row)
+
+
+@router.get("/requests/public-download/{request_number}")
+def download_foia_fulfillment_file(request_number: str):
+    num = request_number.strip().upper()
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT fulfillment_object_key, fulfillment_filename, status FROM public_records_requests WHERE UPPER(request_number) = %s",
+            (num,),
+        ).fetchone()
+    if not row or not row[0] or row[2] not in ("ready", "fulfilled"):
+        raise HTTPException(status_code=404, detail="Fulfillment file not available")
+    obj = _minio().get_object(_bucket(), row[0])
+    try:
+        data = obj.read()
+    finally:
+        obj.close()
+        obj.release_conn()
+    safe_fn = _SAFE_FILENAME_RE.sub("_", row[1] or "records").strip("._") or "records"
+    return Response(content=data, media_type="application/octet-stream", headers={"Content-Disposition": f'attachment; filename="{safe_fn}"'})
 
 
 @router.get("/requests")
