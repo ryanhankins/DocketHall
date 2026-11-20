@@ -25,6 +25,7 @@ from openpyxl import load_workbook
 from PIL import Image as PILImage
 from pypdf import PdfReader, PdfWriter
 from pypdf.annotations import Link
+from pypdf.generic import BooleanObject, DictionaryObject, NameObject, TextStringObject
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
@@ -68,11 +69,24 @@ def _format_time(val: str | None) -> str:
     return s
 
 
-def _render_flowables(flowables: list) -> bytes:
+def apply_pdf_accessibility_metadata(writer: PdfWriter, title: str, lang: str = "en-US") -> None:
+    """Attach PDF /Title, /DisplayDocTitle, and /Lang metadata for WCAG 2.4.2 & 3.1.1."""
+    clean_title = (title or "CivicDesk Document").strip()
+    writer.add_metadata({"/Title": clean_title})
+    writer._root_object.update({
+        NameObject("/Lang"): TextStringObject(lang),
+        NameObject("/ViewerPreferences"): DictionaryObject({
+            NameObject("/DisplayDocTitle"): BooleanObject(True),
+        }),
+    })
+
+
+def _render_flowables(flowables: list, title: str = "CivicDesk Document") -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,
         pagesize=letter,
+        title=title,
         leftMargin=0.75 * inch,
         rightMargin=0.75 * inch,
         topMargin=0.75 * inch,
@@ -581,6 +595,10 @@ def build_agenda_packet_pdf(
             total_pages = len(final_writer.pages)
             for idx, page in enumerate(final_writer.pages, start=1):
                 _stamp_page_number(page, idx, total_pages)
+        sum_title = f"{agenda.get('title') or 'Meeting Agenda'} — Summary"
+        if len(final_writer.pages) > 1:
+            final_writer.add_outline_item(sum_title, 0)
+        apply_pdf_accessibility_metadata(final_writer, sum_title)
         out = io.BytesIO()
         final_writer.write(out)
         return out.getvalue()
@@ -723,6 +741,7 @@ def build_agenda_packet_pdf(
         else:
             final_writer.add_outline_item(e["label"], page_idx, parent=parent_bookmark)
 
+    apply_pdf_accessibility_metadata(final_writer, f"{agenda.get('title') or 'Meeting Agenda'} — Packet")
     out = io.BytesIO()
     final_writer.write(out)
     return out.getvalue()
@@ -794,9 +813,8 @@ def build_minutes_pdf(
             elif not parts:
                 flow.append(Paragraph("<i>No action or notes recorded.</i>", body_p))
 
-    pdf_bytes = _render_flowables(flow)
-    if not include_page_numbers and not watermark_draft:
-        return pdf_bytes
+    min_title = f"{agenda.get('title') or 'Meeting'} — Minutes"
+    pdf_bytes = _render_flowables(flow, title=min_title)
     reader = PdfReader(io.BytesIO(pdf_bytes))
     writer = PdfWriter()
     for page in reader.pages:
@@ -807,6 +825,9 @@ def build_minutes_pdf(
             _stamp_page_number(page, idx, total)
         if watermark_draft:
             _stamp_draft_watermark(page)
+    if total > 1:
+        writer.add_outline_item(min_title, 0)
+    apply_pdf_accessibility_metadata(writer, min_title)
     out = io.BytesIO()
     writer.write(out)
     return out.getvalue()

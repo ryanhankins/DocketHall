@@ -28,6 +28,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
 
+from .agenda_pdf import apply_pdf_accessibility_metadata
 from .agendas import _bucket, _minio, _remove_minio_objects
 from .auth import require_permission
 from .db import pool
@@ -415,6 +416,15 @@ def get_full_code_pdf(download: bool = False):
                     writer.add_page(page)
             except Exception:
                 pass
+        apply_pdf_accessibility_metadata(writer, f"{city_title} — Municipal Code")
+        out = io.BytesIO()
+        writer.write(out)
+        main_bytes = out.getvalue()
+    else:
+        writer = PdfWriter()
+        for page in PdfReader(io.BytesIO(main_bytes)).pages:
+            writer.add_page(page)
+        apply_pdf_accessibility_metadata(writer, f"{city_title} — Municipal Code")
         out = io.BytesIO()
         writer.write(out)
         main_bytes = out.getvalue()
