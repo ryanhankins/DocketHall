@@ -26,7 +26,6 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from minio import Minio
 from pydantic import BaseModel, Field
 from psycopg.types.json import Jsonb
 from starlette.background import BackgroundTask
@@ -36,6 +35,7 @@ from .audit import record_audit
 from .auth import require_permission
 from .db import pool
 from .registry import get_module_backup_tables
+from .storage import BotoS3StorageClient
 from .tenancy import get_current_tenant_slug, strip_tenant_prefix, tenant_object_key
 
 router = APIRouter(prefix="/api/backup", tags=["backup"])
@@ -564,7 +564,7 @@ def _load_backup_policy(conn) -> tuple[dict, str]:
     return cfg, secret
 
 
-def _get_offsite_s3_client(cfg: dict, secret: str) -> tuple[Minio, str, str]:
+def _get_offsite_s3_client(cfg: dict, secret: str) -> tuple[object, str, str]:
     prefix = (cfg.get("s3_prefix") or "backups/").strip().lstrip("/")
     if prefix and not prefix.endswith("/"):
         prefix += "/"
@@ -572,7 +572,7 @@ def _get_offsite_s3_client(cfg: dict, secret: str) -> tuple[Minio, str, str]:
     full_prefix = f"{prefix}{tenant}/"
     if cfg.get("target_type") == "s3_compatible" and (cfg.get("s3_endpoint") or "").strip():
         bucket = (cfg.get("s3_bucket") or "").strip() or _bucket()
-        client = Minio(
+        client = BotoS3StorageClient(
             cfg["s3_endpoint"].strip(),
             access_key=(cfg.get("s3_access_key") or "").strip(),
             secret_key=secret,

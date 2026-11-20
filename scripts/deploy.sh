@@ -39,8 +39,8 @@ if [ -z "${CIVICDESK_SECRET_PREFIX+x}" ]; then
 fi
 export CIVICDESK_SECRET_PREFIX
 export CIVICDESK_PORT="${CIVICDESK_PORT:-8080}"
-export MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-9001}"
-export MINIO_REPLICAS="${MINIO_REPLICAS:-1}"
+export SEAWEEDFS_CONSOLE_PORT="${SEAWEEDFS_CONSOLE_PORT:-8888}"
+export S3_REPLICAS="${S3_REPLICAS:-1}"
 export CIVICDESK_TAG="${CIVICDESK_TAG:-latest}"
 export CIVICDESK_REGISTRY="${CIVICDESK_REGISTRY:-}"
 CIVICDESK_PULL_ONLY="${CIVICDESK_PULL_ONLY:-false}"
@@ -64,16 +64,11 @@ rand() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32; }
 
 echo "==> Secrets"
 create_secret "${CIVICDESK_SECRET_PREFIX}postgres_password"   "${POSTGRES_PASSWORD:-$(rand)}"
-create_secret "${CIVICDESK_SECRET_PREFIX}minio_root_user"     "${MINIO_ROOT_USER:-civicdesk}"
-create_secret "${CIVICDESK_SECRET_PREFIX}minio_root_password" "${MINIO_ROOT_PASSWORD:-$(rand)}"
 
 # 3. Images
 if [ "$CIVICDESK_PULL_ONLY" = "true" ]; then
   echo "==> Pulling pre-built images (${CIVICDESK_REGISTRY:-local})"
   PULL_LIST="api web"
-  if [ "$MINIO_REPLICAS" != "0" ]; then
-    PULL_LIST="$PULL_LIST minio minio-init"
-  fi
   for name in $PULL_LIST; do
     docker pull "${CIVICDESK_REGISTRY}civicdesk-${name}:${CIVICDESK_TAG}"
   done
@@ -89,7 +84,7 @@ else
 
   echo "==> Building images"
   COMMIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-  IMAGES="api:api web:web minio:minio minio-init:minio/init"
+  IMAGES="api:api web:web"
   for pair in $IMAGES; do
     name="${pair%%:*}"; ctx="${pair#*:}"
     if [ "$name" = "api" ]; then
@@ -107,9 +102,6 @@ docker stack deploy --detach=true -c docker-stack.yml "$STACK_NAME"
 
 # Force services onto freshly built/pulled images
 UPDATE_SVCS="api web"
-if [ "$MINIO_REPLICAS" != "0" ]; then
-  UPDATE_SVCS="$UPDATE_SVCS minio"
-fi
 for svc in $UPDATE_SVCS; do
   docker service update --detach=true --force --quiet \
     --image "${CIVICDESK_REGISTRY}civicdesk-${svc}:${CIVICDESK_TAG}" \
@@ -117,6 +109,6 @@ for svc in $UPDATE_SVCS; do
 done
 
 echo
-echo "Dashboard:     http://localhost:${CIVICDESK_PORT}"
-echo "MinIO console: http://localhost:${MINIO_CONSOLE_PORT}  (user: docker secret ${CIVICDESK_SECRET_PREFIX}minio_root_user)"
+echo "Dashboard:       http://localhost:${CIVICDESK_PORT}"
+echo "SeaweedFS Filer: http://localhost:${SEAWEEDFS_CONSOLE_PORT}"
 echo "Status:        docker stack services $STACK_NAME"

@@ -64,19 +64,15 @@ services:
       SMTP_PORT: "${SMTP_PORT:-587}"
       SMTP_SENDER_EMAIL: "${SMTP_SENDER_EMAIL:-}"
       SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
-      # Object storage: "minio" (default) or "local" (uses LOCAL_RECORDS_DIR without MinIO)
-      STORAGE_BACKEND: "${STORAGE_BACKEND:-minio}"
-      MINIO_ENDPOINT: minio:9000
-      MINIO_SECURE: "false"
-      MINIO_BUCKET: records
-      MINIO_ACCESS_KEY_FILE: /run/secrets/minio_root_user
-      MINIO_SECRET_KEY_FILE: /run/secrets/minio_root_password
+      # Object storage: "s3" (SeaweedFS default) or "local" (uses LOCAL_RECORDS_DIR)
+      STORAGE_BACKEND: "${STORAGE_BACKEND:-s3}"
+      S3_ENDPOINT: seaweedfs:8333
+      S3_SECURE: "false"
+      S3_BUCKET: records
       CIVICDESK_UPGRADE_DIR: /upgrade
       CIVICDESK_GITHUB_REPO: "${CIVICDESK_GITHUB_REPO:-ryanhankins/CivicDesk}"
     secrets:
       - postgres_password
-      - minio_root_user
-      - minio_root_password
     volumes:
       - records_data:/data/records
       - ${CIVICDESK_UPGRADE_SOURCE:-upgrade_data}:/upgrade
@@ -120,44 +116,24 @@ services:
       placement:
         constraints: [node.role == manager]   # pin to the node holding the volume
 
-  # ---------------------------------------------------------------------- minio
-  minio:
-    image: ${CIVICDESK_REGISTRY:-}civicdesk-minio:${CIVICDESK_TAG:-latest}   # built from ./minio
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER_FILE: /run/secrets/minio_root_user
-      MINIO_ROOT_PASSWORD_FILE: /run/secrets/minio_root_password
-    secrets:
-      - minio_root_user
-      - minio_root_password
+  # ----------------------------------------------------------------- seaweedfs
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    command: "server -dir=/data -s3 -s3.port=8333 -filer -filer.port=8888 -master.volumeSizeLimitMB=1024"
     ports:
-      # Web console only. The S3 API (9000) stays internal to the overlay network.
-      - target: 9001
-        published: ${MINIO_CONSOLE_PORT:-9001}
+      # Filer web UI only. The S3 API (8333) stays internal to the overlay network.
+      - target: 8888
+        published: ${SEAWEEDFS_CONSOLE_PORT:-8888}
         protocol: tcp
-        mode: host        # host mode so Colima/Docker Desktop forwards it to the Mac
+        mode: host
     volumes:
-      - minio_data:/data
+      - seaweedfs_data:/data
     networks: [civicdesk]
     deploy:
-      replicas: ${MINIO_REPLICAS:-1}
+      replicas: ${S3_REPLICAS:-1}
       restart_policy: { condition: any }
       placement:
         constraints: [node.role == manager]
-
-  # One-shot job: creates the "records" bucket (with object lock / versioning).
-  minio-init:
-    image: ${CIVICDESK_REGISTRY:-}civicdesk-minio-init:${CIVICDESK_TAG:-latest}   # built from ./minio/init
-    environment:
-      MINIO_ENDPOINT: http://minio:9000
-      MINIO_BUCKET: records
-    secrets:
-      - minio_root_user
-      - minio_root_password
-    networks: [civicdesk]
-    deploy:
-      replicas: ${MINIO_REPLICAS:-1}
-      restart_policy: { condition: on-failure, delay: 5s, max_attempts: 10 }
 
 networks:
   civicdesk:
@@ -167,7 +143,7 @@ networks:
 volumes:
   records_data:
   pgdata:
-  minio_data:
+  seaweedfs_data:
   upgrade_data:
 
 configs:

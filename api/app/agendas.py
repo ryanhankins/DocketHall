@@ -24,13 +24,18 @@ import uuid
 from datetime import date
 from typing import Literal
 
+from dataclasses import dataclass
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response, StreamingResponse
-from minio import Minio
-from minio.commonconfig import CopySource
 from PIL import Image as PILImage
 from pydantic import BaseModel
+
+
+@dataclass
+class CopySource:
+    bucket_name: str
+    object_name: str
 
 from .agenda_pdf import build_agenda_packet_pdf, build_minutes_pdf, render_single_document_pdf
 from .audit import record_audit
@@ -276,7 +281,7 @@ def _minio():
 
 
 def _bucket() -> str:
-    return os.environ.get("MINIO_BUCKET", "records")
+    return os.environ.get("S3_BUCKET") or os.environ.get("MINIO_BUCKET") or "records"
 
 
 def _remove_minio_objects(keys: list[str]) -> None:
