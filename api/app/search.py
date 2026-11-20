@@ -122,6 +122,19 @@ def global_public_search(q: str = ""):
                     "subtitle": r[1],
                     "tab": "directory",
                 })
+            for r in conn.execute(
+                "SELECT name, category, address FROM city_community_resources "
+                "WHERE is_public = TRUE AND (name ILIKE %s OR category ILIKE %s OR description ILIKE %s OR address ILIKE %s) "
+                "ORDER BY is_featured DESC, sort_order ASC, name ASC LIMIT 5",
+                (like, like, like, like),
+            ).fetchall():
+                results.append({
+                    "module_id": "directory",
+                    "module_label": "Community Resource",
+                    "title": r[0],
+                    "subtitle": " · ".join(x for x in (r[1], r[2]) if x),
+                    "tab": "directory",
+                })
 
         if "agendas" in enabled:
             for r in conn.execute(

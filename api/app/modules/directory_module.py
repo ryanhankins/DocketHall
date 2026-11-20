@@ -33,12 +33,22 @@ DIRECTORY_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         set(),
         True,
     ),
+    (
+        "city_community_resources",
+        [
+            "id", "name", "category", "description", "address", "phone", "email",
+            "website_url", "hours", "is_featured", "sort_order", "is_public",
+            "created_at", "updated_at",
+        ],
+        set(),
+        True,
+    ),
 ]
 
 MODULE = CivicModule(
     id="directory",
     name="Directory & FAQs",
-    description="Publish City Council & staff contact directory and self-service FAQs.",
+    description="Publish City Council & staff contact directory, local business & community resources, and self-service FAQs.",
     routers=[directory.router],
     bootstrap=directory.bootstrap,
     permissions=[

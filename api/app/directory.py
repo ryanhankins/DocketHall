@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Staff & Council Directory and Self-Service FAQs module."""
+"""Staff & Council Directory, Local Business / Community Resources, and Self-Service FAQs module."""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -46,13 +46,88 @@ CREATE TABLE IF NOT EXISTS city_faqs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS city_community_resources (
+    id          BIGSERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    category    TEXT NOT NULL DEFAULT 'Local Business',
+    description TEXT NOT NULL DEFAULT '',
+    address     TEXT NOT NULL DEFAULT '',
+    phone       TEXT NOT NULL DEFAULT '',
+    email       TEXT NOT NULL DEFAULT '',
+    website_url TEXT NOT NULL DEFAULT '',
+    hours       TEXT NOT NULL DEFAULT '',
+    is_featured BOOLEAN NOT NULL DEFAULT FALSE,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    is_public   BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
+
+_SEED_RESOURCES = [
+    (
+        "Lakeview Hardware & Supply",
+        "Local Business",
+        "Full-service neighborhood hardware store, lumber, seasonal lawn & garden supplies, and tool rentals.",
+        "214 Main Street",
+        "(555) 234-1120",
+        "info@lakeviewhardware.example",
+        "https://example.com/lakeview-hardware",
+        "Mon–Sat 7:30am–6pm, Sun 9am–4pm",
+        True,
+        1,
+    ),
+    (
+        "Lakeside Food Shelf & Community Pantry",
+        "Nonprofit & Civic",
+        "Free weekly groceries, senior meal delivery coordination, and emergency household assistance for residents.",
+        "408 Oak Avenue",
+        "(555) 234-4490",
+        "pantry@lakesidecares.example",
+        "https://example.com/lakeside-pantry",
+        "Tue & Thu 10am–6pm, Sat 9am–1pm",
+        True,
+        2,
+    ),
+    (
+        "Regional Water & Electric Utility",
+        "Utilities & Emergency",
+        "24/7 outage reporting, utility locates, and residential service connections.",
+        "890 Industrial Parkway",
+        "(555) 234-9000",
+        "support@regionalutility.example",
+        "https://example.com/regional-utility",
+        "24/7 Emergency Dispatch",
+        False,
+        3,
+    ),
+    (
+        "Lakeside Public Library",
+        "Schools & Youth",
+        "Public computers, Wi-Fi hotspots, children's storytime, and community meeting rooms.",
+        "105 Civic Plaza",
+        "(555) 234-7750",
+        "library@lakesidelibrary.example",
+        "https://example.com/lakeside-library",
+        "Mon–Thu 9am–8pm, Fri–Sat 9am–5pm",
+        False,
+        4,
+    ),
+]
 
 
 def bootstrap() -> None:
     with pool.connection() as conn:
         conn.execute("SELECT pg_advisory_xact_lock(424248)")
         conn.execute(SCHEMA)
+        if conn.execute("SELECT COUNT(*) FROM city_community_resources").fetchone()[0] == 0:
+            for item in _SEED_RESOURCES:
+                conn.execute(
+                    "INSERT INTO city_community_resources "
+                    "(name, category, description, address, phone, email, website_url, hours, is_featured, sort_order, is_public) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)",
+                    item,
+                )
 
 
 router = APIRouter(prefix="/api/directory", tags=["directory"])
@@ -100,6 +175,41 @@ class FaqPatch(BaseModel):
     is_public: bool | None = None
 
 
+class ResourceIn(BaseModel):
+    name: str
+    category: str = "Local Business"
+    description: str = ""
+    address: str = ""
+    phone: str = ""
+    email: str = ""
+    website_url: str = ""
+    hours: str = ""
+    is_featured: bool = False
+    sort_order: int = 0
+    is_public: bool = True
+
+
+class ResourcePatch(BaseModel):
+    name: str | None = None
+    category: str | None = None
+    description: str | None = None
+    address: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    website_url: str | None = None
+    hours: str | None = None
+    is_featured: bool | None = None
+    sort_order: int | None = None
+    is_public: bool | None = None
+
+
+def _clean_optional_url(raw: str) -> str:
+    val = raw.strip()
+    if val and not (val.startswith("http://") or val.startswith("https://")):
+        raise HTTPException(status_code=400, detail="Website URL must start with http:// or https://")
+    return val
+
+
 def _row_to_contact(r) -> dict:
     return {
         "id": r[0],
@@ -130,9 +240,29 @@ def _row_to_faq(r) -> dict:
     }
 
 
+def _row_to_resource(r) -> dict:
+    return {
+        "id": r[0],
+        "name": r[1],
+        "category": r[2],
+        "description": r[3],
+        "address": r[4],
+        "phone": r[5],
+        "email": r[6],
+        "website_url": r[7],
+        "hours": r[8],
+        "is_featured": bool(r[9]),
+        "sort_order": r[10],
+        "is_public": bool(r[11]),
+        "created_at": r[12].isoformat() if r[12] else None,
+        "updated_at": r[13].isoformat() if r[13] else None,
+    }
+
+
 @router.get("/public")
-def get_public_directory(q: str = ""):
+def get_public_directory(q: str = "", resource_category: str = ""):
     ql = f"%{q.strip()}%"
+    rc_filter = resource_category.strip()
     with pool.connection() as conn:
         if q.strip():
             c_rows = conn.execute(
@@ -150,6 +280,15 @@ def get_public_directory(q: str = ""):
                 "ORDER BY category ASC, sort_order ASC, id ASC",
                 (ql, ql, ql),
             ).fetchall()
+            r_rows = conn.execute(
+                "SELECT id, name, category, description, address, phone, email, website_url, hours, "
+                "       is_featured, sort_order, is_public, created_at, updated_at "
+                "FROM city_community_resources "
+                "WHERE is_public = TRUE AND (%s = '' OR category = %s) "
+                "AND (name ILIKE %s OR category ILIKE %s OR description ILIKE %s OR address ILIKE %s) "
+                "ORDER BY is_featured DESC, sort_order ASC, name ASC",
+                (rc_filter, rc_filter, ql, ql, ql, ql),
+            ).fetchall()
         else:
             c_rows = conn.execute(
                 "SELECT id, name, title_role, department, email, phone, office_hours, notes, "
@@ -162,9 +301,18 @@ def get_public_directory(q: str = ""):
                 "FROM city_faqs WHERE is_public = TRUE "
                 "ORDER BY category ASC, sort_order ASC, id ASC"
             ).fetchall()
+            r_rows = conn.execute(
+                "SELECT id, name, category, description, address, phone, email, website_url, hours, "
+                "       is_featured, sort_order, is_public, created_at, updated_at "
+                "FROM city_community_resources "
+                "WHERE is_public = TRUE AND (%s = '' OR category = %s) "
+                "ORDER BY is_featured DESC, sort_order ASC, name ASC",
+                (rc_filter, rc_filter),
+            ).fetchall()
     return {
         "contacts": [_row_to_contact(r) for r in c_rows],
         "faqs": [_row_to_faq(r) for r in f_rows],
+        "resources": [_row_to_resource(r) for r in r_rows],
     }
 
 
@@ -316,3 +464,98 @@ def delete_faq(faq_id: int, user: dict = Depends(require_permission("directory.m
             raise HTTPException(status_code=404, detail="FAQ not found")
     record_audit(user["username"], "directory.faq_delete", f"Deleted FAQ #{faq_id}")
     return {"deleted": True, "id": faq_id}
+
+
+@router.get("/resources")
+def list_resources(_: dict = Depends(require_permission("directory.manage"))):
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT id, name, category, description, address, phone, email, website_url, hours, "
+            "       is_featured, sort_order, is_public, created_at, updated_at "
+            "FROM city_community_resources "
+            "ORDER BY is_featured DESC, sort_order ASC, name ASC"
+        ).fetchall()
+    return [_row_to_resource(r) for r in rows]
+
+
+@router.post("/resources", status_code=201)
+def create_resource(body: ResourceIn, user: dict = Depends(require_permission("directory.manage"))):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Resource name is required")
+    website_url = _clean_optional_url(body.website_url)
+    with pool.connection() as conn:
+        row = conn.execute(
+            "INSERT INTO city_community_resources "
+            "(name, category, description, address, phone, email, website_url, hours, is_featured, sort_order, is_public) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "RETURNING id, name, category, description, address, phone, email, website_url, hours, "
+            "          is_featured, sort_order, is_public, created_at, updated_at",
+            (
+                name,
+                body.category.strip() or "Local Business",
+                body.description.strip(),
+                body.address.strip(),
+                body.phone.strip(),
+                body.email.strip(),
+                website_url,
+                body.hours.strip(),
+                body.is_featured,
+                body.sort_order,
+                body.is_public,
+            ),
+        ).fetchone()
+    record_audit(user["username"], "directory.resource_create", name)
+    return _row_to_resource(row)
+
+
+@router.patch("/resources/{resource_id}")
+def update_resource(resource_id: int, body: ResourcePatch, user: dict = Depends(require_permission("directory.manage"))):
+    website_url = _clean_optional_url(body.website_url) if body.website_url is not None else None
+    with pool.connection() as conn:
+        row = conn.execute(
+            "UPDATE city_community_resources SET "
+            "name = COALESCE(%s, name), "
+            "category = COALESCE(%s, category), "
+            "description = COALESCE(%s, description), "
+            "address = COALESCE(%s, address), "
+            "phone = COALESCE(%s, phone), "
+            "email = COALESCE(%s, email), "
+            "website_url = COALESCE(%s, website_url), "
+            "hours = COALESCE(%s, hours), "
+            "is_featured = COALESCE(%s, is_featured), "
+            "sort_order = COALESCE(%s, sort_order), "
+            "is_public = COALESCE(%s, is_public), "
+            "updated_at = now() "
+            "WHERE id = %s "
+            "RETURNING id, name, category, description, address, phone, email, website_url, hours, "
+            "          is_featured, sort_order, is_public, created_at, updated_at",
+            (
+                body.name.strip() if body.name is not None else None,
+                body.category.strip() if body.category is not None else None,
+                body.description.strip() if body.description is not None else None,
+                body.address.strip() if body.address is not None else None,
+                body.phone.strip() if body.phone is not None else None,
+                body.email.strip() if body.email is not None else None,
+                website_url,
+                body.hours.strip() if body.hours is not None else None,
+                body.is_featured,
+                body.sort_order,
+                body.is_public,
+                resource_id,
+            ),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Community resource not found")
+    record_audit(user["username"], "directory.resource_update", f"Updated resource #{resource_id}")
+    return _row_to_resource(row)
+
+
+@router.delete("/resources/{resource_id}")
+def delete_resource(resource_id: int, user: dict = Depends(require_permission("directory.manage"))):
+    with pool.connection() as conn:
+        row = conn.execute("DELETE FROM city_community_resources WHERE id = %s RETURNING id, name", (resource_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Community resource not found")
+    record_audit(user["username"], "directory.resource_delete", f"Deleted resource #{resource_id}: {row[1]}")
+    return {"deleted": True, "id": resource_id}

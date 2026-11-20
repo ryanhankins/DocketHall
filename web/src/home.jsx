@@ -71,9 +71,9 @@ const TAB_DEFS = [
   },
   {
     id: 'directory',
-    label: 'Staff, Council & FAQs',
-    description: 'Find City Council & staff contact info and answers to frequently asked questions.',
-    actionLabel: 'View Directory & FAQs →',
+    label: 'Directory, Resources & FAQs',
+    description: 'Find City Council & staff contacts, local businesses, community resources, and FAQs.',
+    actionLabel: 'View Directory & Resources →',
   },
   {
     id: 'forms',
@@ -114,19 +114,50 @@ function GlobalSearchBar({ onSelectTab }) {
   return (
     <div className="card" style={{ marginBottom: 0 }}>
       <form onSubmit={runSearch} className="row" style={{ alignItems: 'center', gap: '.5rem' }}>
-        <input
-          type="search"
-          aria-label="Search all public services"
-          placeholder="Search everything: agendas, City Code, permits, trash, directory, notices…"
-          value={q}
-          onChange={(e) => {
-            setQ(e.target.value);
-            if (!e.target.value.trim()) setResults(null);
-          }}
-          style={{ flex: 1, minWidth: 240 }}
-        />
-        <button type="submit" className="btn primary" disabled={busy || q.trim().length < 2}>
-          {busy ? 'Searching…' : 'Search'}
+        <div style={{ position: 'relative', flex: 1, minWidth: 240, display: 'flex', alignItems: 'center' }}>
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            width="16"
+            height="16"
+            fill="none"
+            stroke="#64748b"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ position: 'absolute', left: '.7rem', pointerEvents: 'none' }}
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="M21 21l-4.35-4.35" />
+          </svg>
+          <input
+            type="search"
+            aria-label="Search all public services"
+            placeholder="Search everything: agendas, City Code, permits, trash, directory, notices…"
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
+              if (!e.target.value.trim()) setResults(null);
+            }}
+            style={{ width: '100%', paddingLeft: '2.15rem' }}
+          />
+        </div>
+        <button type="submit" className="btn primary" disabled={busy || q.trim().length < 2} style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 24 24"
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="11" cy="11" r="7" />
+            <path d="M21 21l-4.35-4.35" />
+          </svg>
+          <span>{busy ? 'Searching…' : 'Search'}</span>
         </button>
         {results !== null && (
           <button type="button" className="btn" onClick={() => { setQ(''); setResults(null); }}>
@@ -459,23 +490,35 @@ function FormsPublicTab() {
 }
 
 function DirectoryPublicTab() {
-  const [data, setData] = useState({ contacts: [], faqs: [] });
+  const [data, setData] = useState({ contacts: [], faqs: [], resources: [] });
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
+  const [subTab, setSubTab] = useState('all');
+  const [resourceCat, setResourceCat] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
-    const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
+    const params = new URLSearchParams();
+    if (q.trim()) params.set('q', q.trim());
+    if (resourceCat) params.set('resource_category', resourceCat);
+    const qs = params.toString() ? `?${params.toString()}` : '';
     fetch(`/api/directory/public${qs}`)
-      .then((r) => (r.ok ? r.json() : { contacts: [], faqs: [] }))
-      .then((d) => { setData({ contacts: d.contacts || [], faqs: d.faqs || [] }); setLoading(false); })
-      .catch(() => { setData({ contacts: [], faqs: [] }); setLoading(false); });
-  }, [q]);
+      .then((r) => (r.ok ? r.json() : { contacts: [], faqs: [], resources: [] }))
+      .then((d) => {
+        setData({ contacts: d.contacts || [], faqs: d.faqs || [], resources: d.resources || [] });
+        setLoading(false);
+      })
+      .catch(() => {
+        setData({ contacts: [], faqs: [], resources: [] });
+        setLoading(false);
+      });
+  }, [q, resourceCat]);
 
   useEffect(() => { load(); }, [load]);
 
   const elected = data.contacts.filter((c) => c.is_elected);
   const staff = data.contacts.filter((c) => !c.is_elected);
+  const resourceCategories = Array.from(new Set(data.resources.map((r) => r.category).filter(Boolean)));
   const faqGroups = [];
   const groupMap = new Map();
   for (const fq of data.faqs) {
@@ -488,27 +531,49 @@ function DirectoryPublicTab() {
     groupMap.get(cat).items.push(fq);
   }
 
+  const showContacts = subTab === 'all' || subTab === 'contacts';
+  const showResources = subTab === 'all' || subTab === 'resources';
+  const showFaqs = subTab === 'all' || subTab === 'faqs';
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       <div className="card">
         <div className="between" style={{ marginBottom: '.75rem', flexWrap: 'wrap', gap: '.5rem' }}>
           <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
             <ServiceIcon id="directory" size={20} badge />
-            <span>Staff &amp; Council Directory + FAQs</span>
+            <span>Directory, Local Resources &amp; FAQs</span>
           </h2>
           <input
-            placeholder="Search contacts or FAQs…"
+            placeholder="Search contacts, businesses, resources, or FAQs…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            style={{ minWidth: 220 }}
+            style={{ minWidth: 240 }}
           />
         </div>
 
+        <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap', marginBottom: '.9rem' }}>
+          {[
+            { id: 'all', label: 'All' },
+            { id: 'contacts', label: `Staff & Council (${data.contacts.length})` },
+            { id: 'resources', label: `Local Business & Resources (${data.resources.length})` },
+            { id: 'faqs', label: `FAQs (${data.faqs.length})` },
+          ].map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`btn sm${subTab === t.id ? ' primary' : ''}`}
+              onClick={() => setSubTab(t.id)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
         {loading ? (
-          <p className="muted">Loading directory &amp; FAQs…</p>
+          <p className="muted">Loading directory, resources &amp; FAQs…</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            {elected.length > 0 && (
+            {showContacts && elected.length > 0 && (
               <div>
                 <h3 style={{ margin: '0 0 .5rem', fontSize: '1rem' }}>City Council &amp; Elected Officials</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '.65rem' }}>
@@ -524,7 +589,7 @@ function DirectoryPublicTab() {
               </div>
             )}
 
-            {staff.length > 0 && (
+            {showContacts && staff.length > 0 && (
               <div>
                 <h3 style={{ margin: '0 0 .5rem', fontSize: '1rem' }}>City Staff &amp; Departments</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '.65rem' }}>
@@ -545,7 +610,68 @@ function DirectoryPublicTab() {
               </div>
             )}
 
-            {faqGroups.length > 0 && (
+            {showResources && (data.resources.length > 0 || resourceCat) && (
+              <div>
+                <div className="between" style={{ marginBottom: '.5rem', flexWrap: 'wrap', gap: '.5rem' }}>
+                  <h3 style={{ margin: 0, fontSize: '1rem' }}>Local Business &amp; Community Resource Directory</h3>
+                  {(resourceCategories.length > 1 || resourceCat) && (
+                    <div style={{ display: 'flex', gap: '.35rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className={`btn sm${resourceCat === '' ? ' primary' : ''}`}
+                        onClick={() => setResourceCat('')}
+                      >
+                        All Categories
+                      </button>
+                      {resourceCategories.map((cat) => (
+                        <button
+                          key={cat}
+                          type="button"
+                          className={`btn sm${resourceCat === cat ? ' primary' : ''}`}
+                          onClick={() => setResourceCat(cat)}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {data.resources.length === 0 ? (
+                  <p className="muted">No matching resources in this category.</p>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '.65rem' }}>
+                    {data.resources.map((r) => (
+                      <div
+                        key={r.id}
+                        style={{
+                          border: r.is_featured ? '1.5px solid #0891b2' : '1px solid #e2e8f0',
+                          borderRadius: 8,
+                          padding: '.8rem',
+                          background: r.is_featured ? '#f0fdfa' : '#fff',
+                        }}
+                      >
+                        <div className="between" style={{ gap: '.4rem', alignItems: 'flex-start' }}>
+                          <strong>{r.name}</strong>
+                          <span className="badge draft" style={{ fontSize: '.72rem' }}>{r.category}</span>
+                        </div>
+                        {r.description && (
+                          <p style={{ margin: '.35rem 0 .4rem', fontSize: '.86rem', color: '#334e68' }}>{r.description}</p>
+                        )}
+                        {r.address && <div className="muted" style={{ fontSize: '.82rem' }}>{r.address}</div>}
+                        {r.hours && <div className="muted" style={{ fontSize: '.8rem', marginTop: 2 }}>Hours: {r.hours}</div>}
+                        <div style={{ display: 'flex', gap: '.65rem', flexWrap: 'wrap', marginTop: '.4rem', fontSize: '.83rem' }}>
+                          {r.phone && <a href={`tel:${r.phone}`}>{r.phone}</a>}
+                          {r.email && <a href={`mailto:${r.email}`}>{r.email}</a>}
+                          {r.website_url && <a href={r.website_url} target="_blank" rel="noreferrer">Visit Website ↗</a>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {showFaqs && faqGroups.length > 0 && (
               <div>
                 <h3 style={{ margin: '0 0 .5rem', fontSize: '1rem' }}>Frequently Asked Questions</h3>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '.65rem' }}>
@@ -566,8 +692,8 @@ function DirectoryPublicTab() {
               </div>
             )}
 
-            {data.contacts.length === 0 && data.faqs.length === 0 && (
-              <p className="muted">No directory entries or FAQs published yet.</p>
+            {data.contacts.length === 0 && data.faqs.length === 0 && data.resources.length === 0 && (
+              <p className="muted">No directory entries, community resources, or FAQs published yet.</p>
             )}
           </div>
         )}

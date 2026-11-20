@@ -40,10 +40,36 @@ const EMPTY_FAQ = {
   is_public: true,
 };
 
+const EMPTY_RESOURCE = {
+  name: '',
+  category: 'Local Business',
+  description: '',
+  address: '',
+  phone: '',
+  email: '',
+  website_url: '',
+  hours: '',
+  is_featured: false,
+  sort_order: 0,
+  is_public: true,
+};
+
+const RESOURCE_CATEGORIES = [
+  'Local Business',
+  'Nonprofit & Civic',
+  'Utilities & Emergency',
+  'Healthcare & Senior Services',
+  'Schools & Youth',
+  'Parks & Recreation',
+  'Dining & Hospitality',
+  'Other',
+];
+
 export default function DirectoryManagePage() {
   const [tab, setTab] = useState('contacts');
   const [contacts, setContacts] = useState([]);
   const [faqs, setFaqs] = useState([]);
+  const [resources, setResources] = useState([]);
 
   const [contactForm, setContactForm] = useState({ ...EMPTY_CONTACT });
   const [editContactId, setEditContactId] = useState(null);
@@ -51,16 +77,21 @@ export default function DirectoryManagePage() {
   const [faqForm, setFaqForm] = useState({ ...EMPTY_FAQ });
   const [editFaqId, setEditFaqId] = useState(null);
 
+  const [resourceForm, setResourceForm] = useState({ ...EMPTY_RESOURCE });
+  const [editResourceId, setEditResourceId] = useState(null);
+
   const [busy, setBusy] = useState(false);
   const showToast = useToast();
 
   const loadAll = useCallback(async () => {
-    const [cRows, fRows] = await Promise.all([
+    const [cRows, fRows, rRows] = await Promise.all([
       api('/api/directory/contacts'),
       api('/api/directory/faqs'),
+      api('/api/directory/resources'),
     ]);
     setContacts(Array.isArray(cRows) ? cRows : []);
     setFaqs(Array.isArray(fRows) ? fRows : []);
+    setResources(Array.isArray(rRows) ? rRows : []);
   }, []);
 
   useEffect(() => {
@@ -129,16 +160,53 @@ export default function DirectoryManagePage() {
     }
   };
 
+  const saveResource = async (e) => {
+    e.preventDefault();
+    if (!resourceForm.name.trim()) return;
+    setBusy(true);
+    try {
+      const payload = {
+        ...resourceForm,
+        name: resourceForm.name.trim(),
+        category: resourceForm.category.trim() || 'Local Business',
+        description: resourceForm.description.trim(),
+        address: resourceForm.address.trim(),
+        phone: resourceForm.phone.trim(),
+        email: resourceForm.email.trim(),
+        website_url: resourceForm.website_url.trim(),
+        hours: resourceForm.hours.trim(),
+        sort_order: Number(resourceForm.sort_order) || 0,
+      };
+      if (editResourceId) {
+        await api(`/api/directory/resources/${editResourceId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+        showToast('Resource updated', 'ok');
+      } else {
+        await api('/api/directory/resources', { method: 'POST', body: JSON.stringify(payload) });
+        showToast('Resource added', 'ok');
+      }
+      setResourceForm({ ...EMPTY_RESOURCE });
+      setEditResourceId(null);
+      await loadAll();
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section id="section-directory-manage">
       <div className="between" style={{ marginBottom: '1rem' }}>
-        <h1 style={{ margin: 0 }}>Staff &amp; Council Directory + FAQs</h1>
-        <a href="/#directory" target="_blank" rel="noreferrer" className="btn sm">View Public Directory &amp; FAQs</a>
+        <h1 style={{ margin: 0 }}>Directory, Local Resources &amp; FAQs</h1>
+        <a href="/#directory" target="_blank" rel="noreferrer" className="btn sm">View Public Directory</a>
       </div>
 
       <div className="tabs">
         <button type="button" className={`btn sm${tab === 'contacts' ? ' active' : ''}`} onClick={() => setTab('contacts')}>
           Staff &amp; Council ({contacts.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'resources' ? ' active' : ''}`} onClick={() => setTab('resources')}>
+          Local Business &amp; Resources ({resources.length})
         </button>
         <button type="button" className={`btn sm${tab === 'faqs' ? ' active' : ''}`} onClick={() => setTab('faqs')}>
           Self-Service FAQs ({faqs.length})
@@ -237,6 +305,130 @@ export default function DirectoryManagePage() {
                             onClick={async () => {
                               if (!window.confirm(`Remove "${c.name}"?`)) return;
                               await api(`/api/directory/contacts/${c.id}`, { method: 'DELETE' });
+                              await loadAll();
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
+
+      {tab === 'resources' && (
+        <>
+          <div className="card">
+            <h2>{editResourceId ? 'Edit Local Business / Community Resource' : 'Add Local Business or Community Resource'}</h2>
+            <form onSubmit={saveResource}>
+              <div className="row" style={{ marginBottom: '.75rem' }}>
+                <div className="field" style={{ flex: 2, minWidth: 200 }}>
+                  <label htmlFor="res-name">Business or Organization Name *</label>
+                  <input id="res-name" required placeholder="e.g. Lakeview Hardware & Supply" value={resourceForm.name} onChange={(e) => setResourceForm((f) => ({ ...f, name: e.target.value }))} />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                  <label htmlFor="res-cat">Category</label>
+                  <select id="res-cat" value={resourceForm.category} onChange={(e) => setResourceForm((f) => ({ ...f, category: e.target.value }))}>
+                    {RESOURCE_CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field" style={{ width: 90 }}>
+                  <label htmlFor="res-sort">Order</label>
+                  <input id="res-sort" type="number" value={resourceForm.sort_order} onChange={(e) => setResourceForm((f) => ({ ...f, sort_order: e.target.value }))} />
+                </div>
+              </div>
+              <div className="field" style={{ marginBottom: '.75rem' }}>
+                <label htmlFor="res-desc">Description</label>
+                <textarea id="res-desc" rows={2} placeholder="Services offered, who they serve, or helpful notes..." value={resourceForm.description} onChange={(e) => setResourceForm((f) => ({ ...f, description: e.target.value }))} />
+              </div>
+              <div className="row" style={{ marginBottom: '.75rem' }}>
+                <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                  <label htmlFor="res-addr">Street Address</label>
+                  <input id="res-addr" placeholder="e.g. 214 Main Street" value={resourceForm.address} onChange={(e) => setResourceForm((f) => ({ ...f, address: e.target.value }))} />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 150 }}>
+                  <label htmlFor="res-phone">Phone</label>
+                  <input id="res-phone" value={resourceForm.phone} onChange={(e) => setResourceForm((f) => ({ ...f, phone: e.target.value }))} />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 170 }}>
+                  <label htmlFor="res-email">Email</label>
+                  <input id="res-email" type="email" value={resourceForm.email} onChange={(e) => setResourceForm((f) => ({ ...f, email: e.target.value }))} />
+                </div>
+              </div>
+              <div className="row" style={{ marginBottom: '.75rem' }}>
+                <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                  <label htmlFor="res-url">Website URL (https://...)</label>
+                  <input id="res-url" placeholder="https://example.com" value={resourceForm.website_url} onChange={(e) => setResourceForm((f) => ({ ...f, website_url: e.target.value }))} />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                  <label htmlFor="res-hours">Hours</label>
+                  <input id="res-hours" placeholder="e.g. Mon–Sat 8am–6pm" value={resourceForm.hours} onChange={(e) => setResourceForm((f) => ({ ...f, hours: e.target.value }))} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', marginBottom: '.85rem' }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', cursor: 'pointer', fontSize: '.9rem' }}>
+                  <input type="checkbox" style={{ width: 'auto', flexShrink: 0 }} checked={resourceForm.is_featured} onChange={(e) => setResourceForm((f) => ({ ...f, is_featured: e.target.checked }))} />
+                  <span>Featured on Public Portal</span>
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', cursor: 'pointer', fontSize: '.9rem' }}>
+                  <input type="checkbox" style={{ width: 'auto', flexShrink: 0 }} checked={resourceForm.is_public} onChange={(e) => setResourceForm((f) => ({ ...f, is_public: e.target.checked }))} />
+                  <span>Visible on Public Portal</span>
+                </label>
+              </div>
+              <div className="actions">
+                <button type="submit" className="btn primary" disabled={busy}>
+                  {busy ? 'Saving…' : (editResourceId ? 'Save Resource' : 'Add Resource')}
+                </button>
+                {editResourceId && (
+                  <button type="button" className="btn" onClick={() => { setEditResourceId(null); setResourceForm({ ...EMPTY_RESOURCE }); }}>
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+
+          <div className="card">
+            <h2>Local Businesses &amp; Community Resources ({resources.length})</h2>
+            {resources.length === 0 ? (
+              <p className="muted">No local businesses or community resources added yet.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr><th>Name &amp; Details</th><th>Category</th><th>Contact</th><th>Visibility</th><th style={{ width: 150 }}>Actions</th></tr>
+                </thead>
+                <tbody>
+                  {resources.map((r) => (
+                    <tr key={r.id}>
+                      <td>
+                        <strong>{r.name}</strong>
+                        {r.is_featured && <span className="badge draft" style={{ marginLeft: '.4rem' }}>Featured</span>}
+                        {r.description && <div className="muted" style={{ fontSize: '.82rem' }}>{r.description}</div>}
+                        {r.address && <div className="muted" style={{ fontSize: '.8rem' }}>{r.address}</div>}
+                      </td>
+                      <td><span className="badge draft">{r.category}</span></td>
+                      <td style={{ fontSize: '.84rem' }}>
+                        {r.phone && <div>{r.phone}</div>}
+                        {r.email && <div>{r.email}</div>}
+                        {r.website_url && <div><a href={r.website_url} target="_blank" rel="noreferrer">Website</a></div>}
+                      </td>
+                      <td><span className={`badge ${r.is_public ? 'active' : 'disabled'}`}>{r.is_public ? 'Public' : 'Hidden'}</span></td>
+                      <td>
+                        <div className="actions">
+                          <button type="button" className="btn sm" onClick={() => { setEditResourceId(r.id); setResourceForm({ ...r }); }}>Edit</button>
+                          <button
+                            type="button"
+                            className="btn sm danger"
+                            onClick={async () => {
+                              if (!window.confirm(`Remove "${r.name}"?`)) return;
+                              await api(`/api/directory/resources/${r.id}`, { method: 'DELETE' });
                               await loadAll();
                             }}
                           >
