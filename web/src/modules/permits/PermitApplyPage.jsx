@@ -34,6 +34,7 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
   const [ownerName, setOwnerName] = useState('');
   const [contractorName, setContractorName] = useState('');
   const [contractorLicense, setContractorLicense] = useState('');
+  const [contractorCheck, setContractorCheck] = useState(null);
   const [projectDesc, setProjectDesc] = useState('');
   const [estValue, setEstValue] = useState('');
   const [projectName, setProjectName] = useState('');
@@ -327,7 +328,39 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
                 </div>
                 <div className="field" style={{ flex: 1, minWidth: '180px' }}>
                   <label htmlFor="perm-license">Contractor State License #{isReq('contractor_license') ? ' *' : ''}</label>
-                  <input id="perm-license" required={isReq('contractor_license')} value={contractorLicense} onChange={(e) => setContractorLicense(e.target.value)} />
+                  <input
+                    id="perm-license"
+                    required={isReq('contractor_license')}
+                    placeholder="e.g. MN-GC-40821"
+                    value={contractorLicense}
+                    onChange={(e) => {
+                      setContractorLicense(e.target.value);
+                      if (!e.target.value.trim()) setContractorCheck(null);
+                    }}
+                    onBlur={async () => {
+                      const lic = contractorLicense.trim();
+                      if (!lic) { setContractorCheck(null); return; }
+                      try {
+                        const res = await api(`/api/permits/contractors/check?license=${encodeURIComponent(lic)}`);
+                        setContractorCheck(res);
+                        if (res?.matched && res.contractor?.business_name && !contractorName.trim()) {
+                          setContractorName(res.contractor.business_name);
+                        }
+                      } catch {
+                        setContractorCheck(null);
+                      }
+                    }}
+                  />
+                  {contractorCheck?.matched && contractorCheck.compliant && (
+                    <div style={{ fontSize: '.8rem', color: '#15803d', marginTop: 4 }}>
+                      Verified Active: {contractorCheck.contractor?.business_name} (COI Exp: {contractorCheck.contractor?.insurance_expires_at || 'On file'})
+                    </div>
+                  )}
+                  {contractorCheck?.matched && !contractorCheck.compliant && (
+                    <div style={{ fontSize: '.8rem', color: '#b91c1c', marginTop: 4, fontWeight: 600 }}>
+                      Compliance Gate Blocked: {contractorCheck.issues.join('; ')}
+                    </div>
+                  )}
                 </div>
               </div>
             </>

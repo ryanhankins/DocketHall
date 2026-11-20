@@ -216,6 +216,27 @@ CREATE TABLE IF NOT EXISTS permit_messages (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS permit_messages_permit_idx ON permit_messages(permit_id, id);
+CREATE TABLE IF NOT EXISTS contractor_licenses (
+    id                   BIGSERIAL PRIMARY KEY,
+    license_number       TEXT NOT NULL UNIQUE,
+    business_name        TEXT NOT NULL,
+    license_type         TEXT NOT NULL DEFAULT 'General Contractor',
+    contact_name         TEXT NOT NULL DEFAULT '',
+    email                TEXT NOT NULL DEFAULT '',
+    phone                TEXT NOT NULL DEFAULT '',
+    address              TEXT NOT NULL DEFAULT '',
+    license_expires_at   DATE,
+    insurance_carrier    TEXT NOT NULL DEFAULT '',
+    insurance_policy_no  TEXT NOT NULL DEFAULT '',
+    insurance_expires_at DATE,
+    bond_amount          TEXT NOT NULL DEFAULT '',
+    bond_expires_at      DATE,
+    status               TEXT NOT NULL DEFAULT 'active',
+    notes                TEXT NOT NULL DEFAULT '',
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS contractor_licenses_status_idx ON contractor_licenses(status, business_name);
 """
 
 _DEFAULT_PORTAL_SETTINGS = {
@@ -368,6 +389,44 @@ def bootstrap() -> None:
                 "WHERE name = 'Variance Application' AND (custom_fields IS NULL OR custom_fields = '[]'::jsonb)",
                 (json.dumps(VARIANCE_CUSTOM_FIELDS),),
             )
+
+        if conn.execute("SELECT COUNT(*) FROM contractor_licenses").fetchone()[0] == 0:
+            today = date.today()
+            next_year = (today + timedelta(days=365)).isoformat()
+            six_mos = (today + timedelta(days=180)).isoformat()
+            past_exp = (today - timedelta(days=30)).isoformat()
+            for row in (
+                (
+                    "MN-GC-40821", "Northshore Builders LLC", "General Contractor",
+                    "Alex Jensen", "permits@northshorebuilders.example", "(555) 234-5501",
+                    "1200 County Road 12", next_year,
+                    "Northland Mutual", "GL-884920", next_year, "$50,000", next_year, "active",
+                    "Preferred residential & shoreline general contractor.",
+                ),
+                (
+                    "MN-EL-21904", "Birchwood Electric Co.", "Electrical",
+                    "Samira Patel", "dispatch@birchwoodelectric.example", "(555) 234-5502",
+                    "445 Commerce Blvd", six_mos,
+                    "Civic Shield Insurance", "EL-441022", six_mos, "$25,000", six_mos, "active",
+                    "Master electrical license on file.",
+                ),
+                (
+                    "MN-PL-10482", "Lakeside Plumbing & Heating", "Plumbing",
+                    "Greg Miller", "office@lakesideplumbing.example", "(555) 234-5503",
+                    "78 Riverview Dr", past_exp,
+                    "Harbor Casualty", "PL-100931", past_exp, "$25,000", next_year, "expired",
+                    "License & liability COI expired — requires renewal before permit issuance.",
+                ),
+            ):
+                conn.execute(
+                    "INSERT INTO contractor_licenses "
+                    "(license_number, business_name, license_type, contact_name, email, phone, address, "
+                    " license_expires_at, insurance_carrier, insurance_policy_no, insurance_expires_at, "
+                    " bond_amount, bond_expires_at, status, notes) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    "ON CONFLICT (license_number) DO NOTHING",
+                    row,
+                )
 
         # Clean up initial pre-expansion sample uses if no permits reference them
         conn.execute(
@@ -713,6 +772,46 @@ class PermitPatchIn(BaseModel):
     estimated_value: str | None = None
     project_name: str | None = None
     custom_data: dict[str, Any] | None = None
+    override_compliance: bool = False
+
+
+CONTRACTOR_STATUSES = ("active", "pending", "suspended", "expired")
+
+
+class ContractorIn(BaseModel):
+    license_number: str
+    business_name: str
+    license_type: str = "General Contractor"
+    contact_name: str = ""
+    email: str = ""
+    phone: str = ""
+    address: str = ""
+    license_expires_at: str = ""
+    insurance_carrier: str = ""
+    insurance_policy_no: str = ""
+    insurance_expires_at: str = ""
+    bond_amount: str = ""
+    bond_expires_at: str = ""
+    status: str = "active"
+    notes: str = ""
+
+
+class ContractorPatch(BaseModel):
+    license_number: str | None = None
+    business_name: str | None = None
+    license_type: str | None = None
+    contact_name: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    address: str | None = None
+    license_expires_at: str | None = None
+    insurance_carrier: str | None = None
+    insurance_policy_no: str | None = None
+    insurance_expires_at: str | None = None
+    bond_amount: str | None = None
+    bond_expires_at: str | None = None
+    status: str | None = None
+    notes: str | None = None
 
 
 class ParcelIn(BaseModel):
@@ -1202,6 +1301,13 @@ def create_permit(
             raise HTTPException(status_code=400, detail="Selected permit use not found")
 
         project_name = body.project_name.strip()
+        if body.contractor_license.strip():
+            comp = _check_contractor_compliance(conn, body.contractor_license.strip())
+            if comp["matched"] and not comp["compliant"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Contractor Compliance Gate failed: " + "; ".join(comp["issues"]),
+                )
         is_mgr = has_permission(user, "permits.manage")
         for ref_id in (body.prerequisite_permit_id, body.related_permit_id):
             if ref_id is not None:
@@ -1611,6 +1717,18 @@ def update_permit(
         cur = _get_permit_or_404(conn, permit_id)
         applicant_email = _resolve_applicant_email(conn, cur)
         next_status = body.status if body.status is not None else cur["status"]
+        eff_license = (
+            body.contractor_license.strip()
+            if body.contractor_license is not None
+            else (cur.get("contractor_license") or "").strip()
+        )
+        if next_status == "issued" and eff_license and not body.override_compliance:
+            comp = _check_contractor_compliance(conn, eff_license)
+            if comp["matched"] and not comp["compliant"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Contractor Compliance Gate failed before issuance: " + "; ".join(comp["issues"]),
+                )
         issued_clause = ", issued_at = COALESCE(issued_at, now())" if next_status == "issued" else ""
         closed_clause = ", closed_at = COALESCE(closed_at, now())" if next_status == "closed" else ""
         exp_clause = ""
@@ -2357,3 +2475,243 @@ def delete_permit_use(use_id: int, _: dict = Depends(require_permission("permits
         if not row:
             raise HTTPException(status_code=404, detail="Permit use not found")
     return {"deleted": True, "id": use_id}
+
+
+# ------------------------------------------------------------------ contractor & business licensing + compliance gate
+
+_CONTRACTOR_COLS = (
+    "id, license_number, business_name, license_type, contact_name, email, phone, address, "
+    "license_expires_at, insurance_carrier, insurance_policy_no, insurance_expires_at, "
+    "bond_amount, bond_expires_at, status, notes, created_at, updated_at"
+)
+
+
+def _parse_optional_date(raw: str | None, label: str) -> date | None:
+    if raw is None:
+        return None
+    val = raw.strip()
+    if not val:
+        return None
+    try:
+        return date.fromisoformat(val)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"{label} must be YYYY-MM-DD")
+
+
+def _row_to_contractor(r) -> dict:
+    today = date.today()
+    issues: list[str] = []
+    status = r[14] or "active"
+    lic_exp = r[8]
+    ins_exp = r[11]
+    bond_exp = r[13]
+    if status != "active":
+        issues.append(f"License status is '{status}'")
+    if lic_exp is not None and lic_exp < today:
+        issues.append(f"License expired on {lic_exp.isoformat()}")
+    if ins_exp is not None and ins_exp < today:
+        issues.append(f"Liability insurance expired on {ins_exp.isoformat()}")
+    if bond_exp is not None and bond_exp < today:
+        issues.append(f"Surety bond expired on {bond_exp.isoformat()}")
+    expiring_soon = False
+    for d in (lic_exp, ins_exp, bond_exp):
+        if d is not None and today <= d <= today + timedelta(days=30):
+            expiring_soon = True
+    return {
+        "id": r[0],
+        "license_number": r[1],
+        "business_name": r[2],
+        "license_type": r[3],
+        "contact_name": r[4],
+        "email": r[5],
+        "phone": r[6],
+        "address": r[7],
+        "license_expires_at": lic_exp.isoformat() if lic_exp else "",
+        "insurance_carrier": r[9],
+        "insurance_policy_no": r[10],
+        "insurance_expires_at": ins_exp.isoformat() if ins_exp else "",
+        "bond_amount": r[12],
+        "bond_expires_at": bond_exp.isoformat() if bond_exp else "",
+        "status": status,
+        "notes": r[15],
+        "compliant": len(issues) == 0,
+        "expiring_soon": expiring_soon,
+        "compliance_issues": issues,
+        "created_at": r[16].isoformat() if r[16] else None,
+        "updated_at": r[17].isoformat() if r[17] else None,
+    }
+
+
+def _check_contractor_compliance(conn, license_number: str) -> dict:
+    lic = license_number.strip()
+    if not lic:
+        return {"matched": False, "compliant": True, "issues": [], "contractor": None}
+    row = conn.execute(
+        f"SELECT {_CONTRACTOR_COLS} FROM contractor_licenses WHERE LOWER(license_number) = LOWER(%s)",
+        (lic,),
+    ).fetchone()
+    if not row:
+        return {
+            "matched": False,
+            "compliant": True,
+            "issues": [],
+            "message": "Not found in local city contractor registry (will be verified by staff during review).",
+            "contractor": None,
+        }
+    c = _row_to_contractor(row)
+    return {
+        "matched": True,
+        "compliant": c["compliant"],
+        "issues": c["compliance_issues"],
+        "contractor": c,
+    }
+
+
+@router.get("/contractors/check")
+def check_contractor_license(
+    license: str = "",
+    _: dict = Depends(require_permission("permits.submit", "permits.manage")),
+):
+    with pool.connection() as conn:
+        return _check_contractor_compliance(conn, license)
+
+
+@router.get("/contractors")
+def list_contractors(
+    q: str = "",
+    status: str = "",
+    _: dict = Depends(require_permission("permits.manage")),
+):
+    ql = f"%{q.strip()}%"
+    st = status.strip().lower()
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"SELECT {_CONTRACTOR_COLS} FROM contractor_licenses "
+            "WHERE (%s = '' OR status = %s) "
+            "AND (%s = '%%' OR license_number ILIKE %s OR business_name ILIKE %s OR contact_name ILIKE %s OR license_type ILIKE %s) "
+            "ORDER BY business_name ASC, id ASC",
+            (st, st, ql, ql, ql, ql, ql),
+        ).fetchall()
+    return [_row_to_contractor(r) for r in rows]
+
+
+@router.post("/contractors", status_code=201)
+def create_contractor(body: ContractorIn, user: dict = Depends(require_permission("permits.manage"))):
+    lic = body.license_number.strip()
+    biz = body.business_name.strip()
+    if not lic or not biz:
+        raise HTTPException(status_code=400, detail="License number and business name are required")
+    status = body.status.strip().lower()
+    if status not in CONTRACTOR_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid contractor status")
+    lic_exp = _parse_optional_date(body.license_expires_at, "License expiration date")
+    ins_exp = _parse_optional_date(body.insurance_expires_at, "Insurance expiration date")
+    bond_exp = _parse_optional_date(body.bond_expires_at, "Bond expiration date")
+    with pool.connection() as conn:
+        exists = conn.execute(
+            "SELECT id FROM contractor_licenses WHERE LOWER(license_number) = LOWER(%s)",
+            (lic,),
+        ).fetchone()
+        if exists:
+            raise HTTPException(status_code=409, detail=f"License number {lic} already exists")
+        row = conn.execute(
+            "INSERT INTO contractor_licenses "
+            "(license_number, business_name, license_type, contact_name, email, phone, address, "
+            " license_expires_at, insurance_carrier, insurance_policy_no, insurance_expires_at, "
+            " bond_amount, bond_expires_at, status, notes) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            f"RETURNING {_CONTRACTOR_COLS}",
+            (
+                lic,
+                biz,
+                body.license_type.strip() or "General Contractor",
+                body.contact_name.strip(),
+                body.email.strip(),
+                body.phone.strip(),
+                body.address.strip(),
+                lic_exp,
+                body.insurance_carrier.strip(),
+                body.insurance_policy_no.strip(),
+                ins_exp,
+                body.bond_amount.strip(),
+                bond_exp,
+                status,
+                body.notes.strip(),
+            ),
+        ).fetchone()
+    record_audit(user["username"], "permits.contractor_create", f"{lic} ({biz})")
+    return _row_to_contractor(row)
+
+
+@router.patch("/contractors/{contractor_id}")
+def update_contractor(
+    contractor_id: int,
+    body: ContractorPatch,
+    user: dict = Depends(require_permission("permits.manage")),
+):
+    if body.status is not None and body.status.strip().lower() not in CONTRACTOR_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid contractor status")
+    with pool.connection() as conn:
+        cur = conn.execute(
+            f"SELECT {_CONTRACTOR_COLS} FROM contractor_licenses WHERE id = %s",
+            (contractor_id,),
+        ).fetchone()
+        if not cur:
+            raise HTTPException(status_code=404, detail="Contractor license not found")
+        lic_exp = _parse_optional_date(body.license_expires_at, "License expiration date") if body.license_expires_at is not None else cur[8]
+        ins_exp = _parse_optional_date(body.insurance_expires_at, "Insurance expiration date") if body.insurance_expires_at is not None else cur[11]
+        bond_exp = _parse_optional_date(body.bond_expires_at, "Bond expiration date") if body.bond_expires_at is not None else cur[13]
+        row = conn.execute(
+            "UPDATE contractor_licenses SET "
+            "license_number = COALESCE(%s, license_number), "
+            "business_name = COALESCE(%s, business_name), "
+            "license_type = COALESCE(%s, license_type), "
+            "contact_name = COALESCE(%s, contact_name), "
+            "email = COALESCE(%s, email), "
+            "phone = COALESCE(%s, phone), "
+            "address = COALESCE(%s, address), "
+            "license_expires_at = %s, "
+            "insurance_carrier = COALESCE(%s, insurance_carrier), "
+            "insurance_policy_no = COALESCE(%s, insurance_policy_no), "
+            "insurance_expires_at = %s, "
+            "bond_amount = COALESCE(%s, bond_amount), "
+            "bond_expires_at = %s, "
+            "status = COALESCE(%s, status), "
+            "notes = COALESCE(%s, notes), "
+            "updated_at = now() "
+            "WHERE id = %s "
+            f"RETURNING {_CONTRACTOR_COLS}",
+            (
+                body.license_number.strip() if body.license_number is not None else None,
+                body.business_name.strip() if body.business_name is not None else None,
+                body.license_type.strip() if body.license_type is not None else None,
+                body.contact_name.strip() if body.contact_name is not None else None,
+                body.email.strip() if body.email is not None else None,
+                body.phone.strip() if body.phone is not None else None,
+                body.address.strip() if body.address is not None else None,
+                lic_exp,
+                body.insurance_carrier.strip() if body.insurance_carrier is not None else None,
+                body.insurance_policy_no.strip() if body.insurance_policy_no is not None else None,
+                ins_exp,
+                body.bond_amount.strip() if body.bond_amount is not None else None,
+                bond_exp,
+                body.status.strip().lower() if body.status is not None else None,
+                body.notes.strip() if body.notes is not None else None,
+                contractor_id,
+            ),
+        ).fetchone()
+    record_audit(user["username"], "permits.contractor_update", f"Updated contractor #{contractor_id}")
+    return _row_to_contractor(row)
+
+
+@router.delete("/contractors/{contractor_id}")
+def delete_contractor(contractor_id: int, user: dict = Depends(require_permission("permits.manage"))):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "DELETE FROM contractor_licenses WHERE id = %s RETURNING id, license_number, business_name",
+            (contractor_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Contractor license not found")
+    record_audit(user["username"], "permits.contractor_delete", f"Deleted {row[1]} ({row[2]})")
+    return {"deleted": True, "id": contractor_id}

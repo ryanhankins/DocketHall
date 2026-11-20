@@ -29,6 +29,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
   const [assignedTo, setAssignedTo] = useState(permit.assigned_to || '');
   const [expiresAt, setExpiresAt] = useState(permit.expires_at || '');
   const [notes, setNotes] = useState(permit.review_notes || '');
+  const [contractorCheck, setContractorCheck] = useState(null);
   const [editingDetails, setEditingDetails] = useState(false);
   const [details, setDetails] = useState({
     applicant_name: permit.applicant_name || '',
@@ -96,6 +97,13 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
     });
     setCustomData(permit.custom_data || {});
     setEditingDetails(false);
+    if ((permit.contractor_license || '').trim()) {
+      api(`/api/permits/contractors/check?license=${encodeURIComponent(permit.contractor_license.trim())}`)
+        .then(setContractorCheck)
+        .catch(() => setContractorCheck(null));
+    } else {
+      setContractorCheck(null);
+    }
   }, [permit]);
 
   useEffect(() => {
@@ -332,7 +340,18 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                     {permit.permit_kind !== 'annual_license' && (
                       <>
                         <div><strong>Parcel / Owner:</strong> {permit.parcel_id || '—'} / {permit.owner_name || '—'}</div>
-                        <div><strong>Contractor:</strong> {permit.contractor_name || '—'} (Lic: {permit.contractor_license || '—'})</div>
+                        <div>
+                          <strong>Contractor:</strong> {permit.contractor_name || '—'} (Lic: {permit.contractor_license || '—'})
+                          {contractorCheck?.matched && (
+                            <span
+                              className={`badge ${contractorCheck.compliant ? 'active' : 'disabled'}`}
+                              style={{ marginLeft: '.45rem' }}
+                              title={contractorCheck.issues?.join('; ') || 'Compliant'}
+                            >
+                              {contractorCheck.compliant ? 'Licensed & Insured' : `Compliance Blocked: ${contractorCheck.issues.join('; ')}`}
+                            </span>
+                          )}
+                        </div>
                         <div><strong>Est. Value:</strong> {permit.estimated_value || '—'}</div>
                       </>
                     )}
