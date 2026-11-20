@@ -66,6 +66,8 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
       if (statusFilter === 'expiring') {
         const exp = permitExpiryInfo(p.expires_at);
         if (!exp || exp.cls === 'muted') return false;
+      } else if (statusFilter === 'statutory_clock') {
+        if (!p.statutory_clock?.started) return false;
       } else if (statusFilter === 'annual_license') {
         if (p.permit_kind !== 'annual_license') return false;
       } else if (statusFilter !== 'all' && p.status !== statusFilter) {
@@ -262,6 +264,7 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
             <label htmlFor="perm-rev-status">Status</label>
             <select id="perm-rev-status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
               <option value="all">All ({permits.length})</option>
+              <option value="statutory_clock">Planning / Statutory Clocks</option>
               <option value="expiring">Expiring Soon / Expired</option>
               <option value="annual_license">Annual Licenses Only</option>
               <option value="submitted">Submitted</option>

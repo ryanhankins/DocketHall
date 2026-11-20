@@ -121,13 +121,15 @@ CREATE TABLE IF NOT EXISTS permits (
     permit_kind         TEXT NOT NULL DEFAULT 'construction',
     renewed_from_id     BIGINT REFERENCES permits(id) ON DELETE SET NULL,
     project_name        TEXT NOT NULL DEFAULT '',
-    custom_data         JSONB NOT NULL DEFAULT '{}'::jsonb
+    custom_data         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    planning_data       JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 ALTER TABLE permits ADD COLUMN IF NOT EXISTS expires_at DATE;
 ALTER TABLE permits ADD COLUMN IF NOT EXISTS permit_kind TEXT NOT NULL DEFAULT 'construction';
 ALTER TABLE permits ADD COLUMN IF NOT EXISTS renewed_from_id BIGINT REFERENCES permits(id) ON DELETE SET NULL;
 ALTER TABLE permits ADD COLUMN IF NOT EXISTS project_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE permits ADD COLUMN IF NOT EXISTS custom_data JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE permits ADD COLUMN IF NOT EXISTS planning_data JSONB NOT NULL DEFAULT '{}'::jsonb;
 CREATE INDEX IF NOT EXISTS permits_user_idx ON permits(applicant_user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS permits_status_idx ON permits(status, created_at DESC);
 CREATE TABLE IF NOT EXISTS permit_documents (
@@ -789,6 +791,7 @@ class PermitPatchIn(BaseModel):
     estimated_value: str | None = None
     project_name: str | None = None
     custom_data: dict[str, Any] | None = None
+    planning_data: dict[str, Any] | None = None
     override_compliance: bool = False
 
 
@@ -1248,6 +1251,8 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
             "renewed_from_id": r[33],
             "project_name": r[34] or "",
             "custom_data": dict(r[35]) if isinstance(r[35], dict) else {},
+            "planning_data": dict(r[36]) if len(r) > 36 and isinstance(r[36], dict) else {},
+            "statutory_clock": _compute_statutory_clock(r[36] if len(r) > 36 else {}, r[21]),
             "linked_permits": permit_links,
             "unmet_prerequisites": unmet_prereqs,
             "documents": docs_by_permit.get(r[0], []),
@@ -1261,6 +1266,61 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
     return out
 
 
+def _compute_statutory_clock(planning_data: dict | None, status: str = "") -> dict:
+    pd = planning_data if isinstance(planning_data, dict) else {}
+    comp_raw = str(pd.get("complete_date") or "").strip()
+    if not comp_raw:
+        return {"started": False, "statutory_days": 60, "deadline_date": "", "days_remaining": None, "urgency": "not_started"}
+    try:
+        comp_d = date.fromisoformat(comp_raw)
+    except ValueError:
+        return {"started": False, "statutory_days": 60, "deadline_date": "", "days_remaining": None, "urgency": "not_started"}
+    extended = bool(pd.get("extended_60_days"))
+    stat_days = 120 if extended else 60
+    deadline = comp_d + timedelta(days=stat_days)
+    is_final = status in ("issued", "denied", "closed")
+    days_rem = (deadline - date.today()).days
+    if is_final:
+        urgency = "completed"
+    elif days_rem < 0:
+        urgency = "overdue"
+    elif days_rem <= 14:
+        urgency = "warning"
+    else:
+        urgency = "ok"
+    return {
+        "started": True,
+        "complete_date": comp_raw,
+        "extended_60_days": extended,
+        "statutory_days": stat_days,
+        "deadline_date": deadline.isoformat(),
+        "days_remaining": days_rem,
+        "urgency": urgency,
+    }
+
+
+def _clean_planning_data(raw: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for k in (
+        "complete_date", "extension_notice_date", "zoning_district",
+        "planning_commission_date", "public_hearing_date",
+        "neighbor_notice_sent_date", "council_hearing_date", "conditions_of_approval",
+    ):
+        v = str(raw.get(k) or "").strip()
+        if k.endswith("_date") and v:
+            try:
+                date.fromisoformat(v)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"{k.replace('_', ' ').title()} must be YYYY-MM-DD")
+        out[k] = v
+    out["extended_60_days"] = bool(raw.get("extended_60_days"))
+    if raw.get("agenda_backlog_id"):
+        out["agenda_backlog_id"] = int(raw["agenda_backlog_id"])
+    return out
+
+
 _PERMIT_COLS = (
     "id, permit_number, applicant_user_id, applicant_username, "
     "permit_type_id, permit_use_id, permit_type_name, permit_use_name, "
@@ -1269,7 +1329,7 @@ _PERMIT_COLS = (
     "contractor_name, contractor_license, project_description, estimated_value, "
     "accepted_terms, status, fee_amount, payment_status, review_notes, reviewed_by, "
     "assigned_to, created_at, updated_at, issued_at, closed_at, expires_at, "
-    "permit_kind, renewed_from_id, project_name, custom_data"
+    "permit_kind, renewed_from_id, project_name, custom_data, planning_data"
 )
 
 
@@ -2151,6 +2211,7 @@ def update_permit(
             f"estimated_value = COALESCE(%s, estimated_value), "
             f"project_name = COALESCE(%s, project_name), "
             f"custom_data = COALESCE(%s::jsonb, custom_data), "
+            f"planning_data = COALESCE(%s::jsonb, planning_data), "
             f"reviewed_by = %s, "
             f"updated_at = now(){issued_clause}{closed_clause}{exp_clause} "
             f"WHERE id = %s",
@@ -2174,6 +2235,7 @@ def update_permit(
                 body.estimated_value.strip() if body.estimated_value is not None else None,
                 body.project_name.strip() if body.project_name is not None else None,
                 json.dumps(_clean_custom_data(body.custom_data)) if body.custom_data is not None else None,
+                json.dumps(_clean_planning_data(body.planning_data)) if body.planning_data is not None else None,
                 user["username"],
                 *exp_params,
                 permit_id,
@@ -3162,3 +3224,45 @@ def get_permit_receipt_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{permit["permit_number"]}-receipt.pdf"'},
     )
+
+
+@router.post("/{permit_id}/push-to-agenda")
+def push_permit_to_agenda_backlog(
+    permit_id: int,
+    user: dict = Depends(require_permission("permits.manage")),
+):
+    """Create a Council/Commission Agenda Backlog item for a Planning & Zoning hearing."""
+    with pool.connection() as conn:
+        permit = _get_permit_or_404(conn, permit_id)
+        pd = dict(permit.get("planning_data") or {})
+        title = f"Public Hearing: {permit['permit_number']} — {permit['permit_type_name']} ({permit['property_address'] or permit['applicant_name']})"
+        desc_parts = [
+            f"Applicant: {permit['applicant_name']}",
+            f"Property: {permit['property_address'] or '—'} (Parcel: {permit['parcel_id'] or '—'})",
+            f"Zoning District: {pd.get('zoning_district') or '—'}",
+            f"Request: {permit['permit_use_name']}",
+        ]
+        if pd.get("conditions_of_approval"):
+            desc_parts.append(f"Proposed Conditions: {pd['conditions_of_approval']}")
+        target_date = pd.get("council_hearing_date") or pd.get("public_hearing_date") or pd.get("planning_commission_date") or None
+        target_body = "City Council" if pd.get("council_hearing_date") else "Planning Commission"
+        try:
+            row = conn.execute(
+                "INSERT INTO agenda_items (agenda_id, position, title, description, section, target_body, target_date) "
+                "VALUES (NULL, COALESCE((SELECT MAX(position) FROM agenda_items WHERE agenda_id IS NULL), 0) + 1, %s, %s, 'Public Hearings', %s, %s) "
+                "RETURNING id",
+                (title, "\n".join(desc_parts), target_body, target_date),
+            ).fetchone()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Agenda backlog unavailable: {exc}")
+        pd["agenda_backlog_id"] = row[0]
+        conn.execute(
+            "UPDATE permits SET planning_data = %s::jsonb, updated_at = now() WHERE id = %s",
+            (json.dumps(pd), permit_id),
+        )
+        conn.execute(
+            "INSERT INTO permit_activity_log (permit_id, action, actor_username, note) "
+            "VALUES (%s, 'Pushed to Agenda Backlog', %s, %s)",
+            (permit_id, user["username"], f"Backlog item #{row[0]} ({target_body})"),
+        )
+        return _get_permit_or_404(conn, permit_id, include_internal=True)

@@ -74,6 +74,19 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
   const [feeMethod, setFeeMethod] = useState('');
   const [feeRef, setFeeRef] = useState('');
 
+  // Planning & Zoning state
+  const [planForm, setPlanForm] = useState({
+    complete_date: permit.planning_data?.complete_date || '',
+    extended_60_days: Boolean(permit.planning_data?.extended_60_days),
+    extension_notice_date: permit.planning_data?.extension_notice_date || '',
+    zoning_district: permit.planning_data?.zoning_district || '',
+    neighbor_notice_sent_date: permit.planning_data?.neighbor_notice_sent_date || '',
+    planning_commission_date: permit.planning_data?.planning_commission_date || '',
+    public_hearing_date: permit.planning_data?.public_hearing_date || '',
+    council_hearing_date: permit.planning_data?.council_hearing_date || '',
+    conditions_of_approval: permit.planning_data?.conditions_of_approval || '',
+  });
+
   // Message form
   const [msgText, setMsgText] = useState('');
   const [msgInternal, setMsgInternal] = useState(false);
@@ -106,6 +119,17 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
       project_name: permit.project_name || '',
     });
     setCustomData(permit.custom_data || {});
+    setPlanForm({
+      complete_date: permit.planning_data?.complete_date || '',
+      extended_60_days: Boolean(permit.planning_data?.extended_60_days),
+      extension_notice_date: permit.planning_data?.extension_notice_date || '',
+      zoning_district: permit.planning_data?.zoning_district || '',
+      neighbor_notice_sent_date: permit.planning_data?.neighbor_notice_sent_date || '',
+      planning_commission_date: permit.planning_data?.planning_commission_date || '',
+      public_hearing_date: permit.planning_data?.public_hearing_date || '',
+      council_hearing_date: permit.planning_data?.council_hearing_date || '',
+      conditions_of_approval: permit.planning_data?.conditions_of_approval || '',
+    });
     setEditingDetails(false);
     if ((permit.contractor_license || '').trim()) {
       api(`/api/permits/contractors/check?license=${encodeURIComponent(permit.contractor_license.trim())}`)
@@ -226,6 +250,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
       <div className="tabs">
         {[
           ['overview', 'Overview & Review'],
+          ['planning', 'Planning & Zoning'],
           ['fees', `Fees & Escrow (${(permit.fee_entries || []).length})`],
           ['workflow', `Workflow (${workflow.length})`],
           ['inspections', `Inspections (${inspections.length})`],
@@ -672,6 +697,158 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
           </div>
         </div>
       )}
+
+      {tab === 'planning' && (() => {
+        const sc = permit.statutory_clock || {};
+        const badgeBg = sc.urgency === 'overdue' ? '#fef2f2' : (sc.urgency === 'warning' ? '#fffbeb' : (sc.urgency === 'completed' || sc.urgency === 'ok' ? '#f0fdf4' : '#f8fafc'));
+        const badgeBorder = sc.urgency === 'overdue' ? '#fca5a5' : (sc.urgency === 'warning' ? '#fcd34d' : '#cbd5e1');
+        return (
+          <div className="card">
+            <div className="between" style={{ marginBottom: '.85rem', flexWrap: 'wrap', gap: '.5rem' }}>
+              <h2 style={{ margin: 0 }}>Planning &amp; Zoning Case Tracking</h2>
+              {isManager && (
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      const updated = await api(`/api/permits/${permit.id}/push-to-agenda`, { method: 'POST' });
+                      onUpdated(updated);
+                      showToast('Hearing item added to Agenda Backlog', 'ok');
+                    } catch (err) {
+                      showToast(err.message, 'error');
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {permit.planning_data?.agenda_backlog_id
+                    ? `In Agenda Backlog (#${permit.planning_data.agenda_backlog_id}) — Push Again`
+                    : 'Send Hearing to Agenda Backlog'}
+                </button>
+              )}
+            </div>
+
+            <div style={{ padding: '.75rem 1rem', borderRadius: 8, border: `1px solid ${badgeBorder}`, background: badgeBg, marginBottom: '1rem' }}>
+              <strong>Statutory Review Clock: </strong>
+              {!sc.started ? (
+                <span className="muted">Not started — set the Application Complete Date below to start the 60-day statutory review clock.</span>
+              ) : (
+                <span>
+                  <strong>{sc.statutory_days}-Day Rule</strong> · Due <strong>{sc.deadline_date}</strong> ·{' '}
+                  {sc.urgency === 'completed'
+                    ? 'Decision Completed'
+                    : sc.days_remaining < 0
+                      ? <span style={{ color: '#b91c1c', fontWeight: 700 }}>OVERDUE by {Math.abs(sc.days_remaining)} day(s)</span>
+                      : `${sc.days_remaining} day(s) remaining`}
+                </span>
+              )}
+            </div>
+
+            {isManager ? (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setBusy(true);
+                  try {
+                    const updated = await api(`/api/permits/${permit.id}`, {
+                      method: 'PATCH',
+                      body: JSON.stringify({
+                        planning_data: {
+                          ...planForm,
+                          agenda_backlog_id: permit.planning_data?.agenda_backlog_id || undefined,
+                        },
+                      }),
+                    });
+                    onUpdated(updated);
+                    showToast('Planning & Zoning details saved', 'ok');
+                  } catch (err) {
+                    showToast(err.message, 'error');
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                <div className="row" style={{ marginBottom: '.75rem' }}>
+                  <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                    <label>Application Complete Date (Starts 60-Day Clock)</label>
+                    <input type="date" value={planForm.complete_date} onChange={(e) => setPlanForm((f) => ({ ...f, complete_date: e.target.value }))} />
+                  </div>
+                  <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                    <label>Zoning District</label>
+                    <input placeholder="e.g. R-1 Shoreland Residential" value={planForm.zoning_district} onChange={(e) => setPlanForm((f) => ({ ...f, zoning_district: e.target.value }))} />
+                  </div>
+                  <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                    <label>Abutting Neighbor Notice Sent</label>
+                    <input type="date" value={planForm.neighbor_notice_sent_date} onChange={(e) => setPlanForm((f) => ({ ...f, neighbor_notice_sent_date: e.target.value }))} />
+                  </div>
+                </div>
+
+                <div className="row" style={{ marginBottom: '.75rem' }}>
+                  <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                    <label>Planning Commission Date</label>
+                    <input type="date" value={planForm.planning_commission_date} onChange={(e) => setPlanForm((f) => ({ ...f, planning_commission_date: e.target.value }))} />
+                  </div>
+                  <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                    <label>Public Hearing Date</label>
+                    <input type="date" value={planForm.public_hearing_date} onChange={(e) => setPlanForm((f) => ({ ...f, public_hearing_date: e.target.value }))} />
+                  </div>
+                  <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                    <label>City Council Action Date</label>
+                    <input type="date" value={planForm.council_hearing_date} onChange={(e) => setPlanForm((f) => ({ ...f, council_hearing_date: e.target.value }))} />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '.75rem' }}>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', cursor: 'pointer', fontSize: '.9rem' }}>
+                    <input
+                      type="checkbox"
+                      style={{ width: 'auto', flexShrink: 0 }}
+                      checked={planForm.extended_60_days}
+                      onChange={(e) => setPlanForm((f) => ({ ...f, extended_60_days: e.target.checked }))}
+                    />
+                    <span>60-Day Statutory Extension Notice Sent (120-Day Total)</span>
+                  </label>
+                  {planForm.extended_60_days && (
+                    <div className="field" style={{ width: 170 }}>
+                      <label>Extension Notice Date</label>
+                      <input type="date" value={planForm.extension_notice_date} onChange={(e) => setPlanForm((f) => ({ ...f, extension_notice_date: e.target.value }))} />
+                    </div>
+                  )}
+                </div>
+
+                <div className="field" style={{ marginBottom: '.75rem' }}>
+                  <label>Conditions of Approval / Findings</label>
+                  <textarea
+                    rows={3}
+                    placeholder="Record conditions attached to Variance, CUP, or Site Plan approval..."
+                    value={planForm.conditions_of_approval}
+                    onChange={(e) => setPlanForm((f) => ({ ...f, conditions_of_approval: e.target.value }))}
+                  />
+                </div>
+
+                <button type="submit" className="btn primary" disabled={busy}>Save Planning &amp; Zoning</button>
+              </form>
+            ) : (
+              <div style={{ fontSize: '.9rem', lineHeight: 1.6 }}>
+                <div><strong>Zoning District:</strong> {planForm.zoning_district || '—'}</div>
+                <div><strong>Application Complete Date:</strong> {planForm.complete_date || '—'}</div>
+                <div><strong>Planning Commission Date:</strong> {planForm.planning_commission_date || '—'}</div>
+                <div><strong>Public Hearing Date:</strong> {planForm.public_hearing_date || '—'}</div>
+                <div><strong>City Council Date:</strong> {planForm.council_hearing_date || '—'}</div>
+                {planForm.conditions_of_approval && (
+                  <div style={{ marginTop: '.5rem' }}>
+                    <strong>Conditions of Approval:</strong>
+                    <p className="muted" style={{ margin: '.25rem 0 0' }}>{planForm.conditions_of_approval}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {tab === 'fees' && (() => {
         const fs = permit.fee_summary || {};

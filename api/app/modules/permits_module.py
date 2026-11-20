@@ -54,10 +54,10 @@ PERMITS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
             "project_description", "estimated_value", "accepted_terms",
             "status", "fee_amount", "payment_status", "review_notes", "reviewed_by",
             "assigned_to", "permit_kind", "expires_at", "renewed_from_id",
-            "project_name", "custom_data",
+            "project_name", "custom_data", "planning_data",
             "created_at", "updated_at", "issued_at", "closed_at",
         ],
-        {"custom_data"},
+        {"custom_data", "planning_data"},
         True,
     ),
     (
