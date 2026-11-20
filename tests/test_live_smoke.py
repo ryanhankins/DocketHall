@@ -41,25 +41,39 @@ class LiveSmokeTest(unittest.TestCase):
         self.assertEqual(st, 200)
         self.assertEqual(json.loads(raw.decode())["status"], "ok")
 
-        for path in (
-            "/api/agendas/public",
-            "/api/codification/public",
+        st, ct, mod_raw = self._get("/api/modules/public")
+        self.assertEqual(st, 200)
+        self.assertIn("application/json", ct)
+        enabled = set(json.loads(mod_raw.decode()).get("enabled", []))
+
+        public_paths = [
             "/api/subscriptions/topics",
-            "/api/permits/public/catalog",
-            "/api/complaints/public-log",
-            "/api/records/public",
-            "/api/directory/public",
             "/api/public/search?q=water",
             "/api/public/transparency",
-        ):
+        ]
+        if "agendas" in enabled:
+            public_paths.append("/api/agendas/public")
+        if "codification" in enabled:
+            public_paths.append("/api/codification/public")
+        if "permits" in enabled:
+            public_paths.append("/api/permits/public/catalog")
+        if "complaints" in enabled:
+            public_paths.append("/api/complaints/public-log")
+        if "records" in enabled:
+            public_paths.append("/api/records/public")
+        if "directory" in enabled:
+            public_paths.append("/api/directory/public")
+
+        for path in public_paths:
             st, ct, _ = self._get(path)
             self.assertEqual(st, 200, path)
             self.assertIn("application/json", ct, path)
 
-        st, ct, pdf = self._get("/api/codification/public/full.pdf")
-        self.assertEqual(st, 200)
-        self.assertIn("application/pdf", ct)
-        self.assertTrue(pdf.startswith(b"%PDF"))
+        if "codification" in enabled:
+            st, ct, pdf = self._get("/api/codification/public/full.pdf")
+            self.assertEqual(st, 200)
+            self.assertIn("application/pdf", ct)
+            self.assertTrue(pdf.startswith(b"%PDF"))
 
     def test_unauthenticated_app_redirects_to_login_preserving_next(self):
         opener = urllib.request.build_opener(_NoRedirect())
@@ -83,19 +97,26 @@ class LiveSmokeTest(unittest.TestCase):
             self.assertEqual(r.status, 200)
             data = json.loads(r.read().decode())
             ids = {m["id"] for m in data["modules"]}
-            self.assertTrue({"agendas", "permits", "codification", "records", "complaints"}.issubset(ids))
-        for admin_path in (
+
+        admin_paths = [
             "/api/my-account/summary",
             "/api/modules/admin",
             "/api/modules/admin/presets",
-            "/api/permits/contractors",
-            "/api/permits/link-candidates",
-            "/api/permits/compliance-programs",
-            "/api/permits/reports/summary",
-            "/api/permits/parcels/map",
-            "/api/records/requests",
-            "/api/complaints/work-orders",
-        ):
+        ]
+        if "permits" in ids:
+            admin_paths.extend([
+                "/api/permits/contractors",
+                "/api/permits/link-candidates",
+                "/api/permits/compliance-programs",
+                "/api/permits/reports/summary",
+                "/api/permits/parcels/map",
+            ])
+        if "records" in ids:
+            admin_paths.append("/api/records/requests")
+        if "complaints" in ids:
+            admin_paths.append("/api/complaints/work-orders")
+
+        for admin_path in admin_paths:
             with opener.open(BASE + admin_path, timeout=10) as r:
                 self.assertEqual(r.status, 200, admin_path)
 

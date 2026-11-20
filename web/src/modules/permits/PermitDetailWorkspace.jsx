@@ -603,8 +603,10 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
             </div>
           )}
 
-          <div style={{ marginTop: '1.25rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>
-            <h3 style={{ margin: '0 0 .5rem', fontSize: '1rem' }}>Linked &amp; Prerequisite Permits</h3>
+          <details open={(permit.linked_permits || []).length > 0} style={{ marginTop: '1.25rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>
+            <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: '1rem', marginBottom: '.5rem' }}>
+              Linked &amp; Prerequisite Permits ({(permit.linked_permits || []).length})
+            </summary>
             {(permit.linked_permits || []).length === 0 ? (
               <p className="muted" style={{ margin: '0 0 .65rem', fontSize: '.88rem' }}>
                 No linked permits yet. Link a prerequisite (e.g., Variance) or a follow-up permit for this project.
@@ -711,7 +713,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                 + Link Permit
               </button>
             </form>
-          </div>
+          </details>
         </div>
       )}
 
