@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """Generate a combined PDF agenda packet (Table of Contents + items + supporting docs)."""
+import base64
 import csv
 import io
 import re
@@ -32,6 +33,7 @@ from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Flowable, Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 from reportlab.lib import colors
+from weasyprint import HTML
 
 _W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
@@ -81,6 +83,110 @@ def apply_pdf_accessibility_metadata(writer: PdfWriter, title: str, lang: str = 
     })
 
 
+def _html_to_pdf_bytes(
+    body_html: str,
+    title: str = "CivicDesk Document",
+    include_page_numbers: bool = True,
+    watermark_draft: bool = False,
+    lang: str = "en-US",
+) -> bytes:
+    """Render semantic HTML to a Tagged PDF/UA-1 document using WeasyPrint."""
+    clean_title = _esc((title or "CivicDesk Document").strip())
+    page_footer = (
+        '@bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt; color: #475569; }'
+        if include_page_numbers else ""
+    )
+    watermark_html = '<div class="draft-watermark">DRAFT — UNAPPROVED MINUTES</div>' if watermark_draft else ""
+    full_html = f"""<!DOCTYPE html>
+<html lang="{_esc(lang)}">
+<head>
+  <meta charset="utf-8" />
+  <title>{clean_title}</title>
+  <style>
+    @page {{
+      size: letter;
+      margin: 0.75in;
+      {page_footer}
+    }}
+    body {{
+      font-family: "Liberation Sans", "DejaVu Sans", Arial, sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.45;
+      color: #1f2933;
+      margin: 0;
+    }}
+    h1 {{ font-size: 18pt; line-height: 1.25; margin: 0 0 6pt; color: #0f172a; }}
+    h2 {{ font-size: 12.5pt; line-height: 1.3; margin: 14pt 0 4pt; color: #1e3a8a; border-bottom: 1px solid #cbd5e1; padding-bottom: 2pt; }}
+    h3 {{ font-size: 11pt; line-height: 1.3; margin: 9pt 0 3pt; color: #0f172a; }}
+    p {{ margin: 0 0 6pt; }}
+    ul {{ margin: 4pt 0 8pt 16pt; padding: 0; }}
+    li {{ margin-bottom: 2pt; }}
+    .kicker {{ font-size: 10.5pt; font-weight: bold; color: #1e293b; margin-bottom: 4pt; }}
+    .meta {{ font-size: 9.5pt; color: #475569; margin-bottom: 10pt; }}
+    .notes {{ font-size: 9.5pt; color: #334155; margin-bottom: 10pt; }}
+    .item-block {{ margin-bottom: 10pt; }}
+    .item-meta {{ margin-left: 12pt; font-size: 9.5pt; color: #334155; }}
+    .doc-list {{ margin-left: 20pt; font-size: 9pt; color: #475569; }}
+    .badge-rev {{ color: #b45309; font-weight: bold; }}
+    .badge-add {{ color: #1d4ed8; font-weight: bold; }}
+    .logo {{ max-width: 2.2in; max-height: 1.1in; margin-bottom: 6pt; }}
+    .draft-watermark {{
+      position: fixed;
+      top: 42%;
+      left: 8%;
+      width: 84%;
+      text-align: center;
+      font-size: 26pt;
+      font-weight: bold;
+      color: rgba(185, 28, 28, 0.22);
+      transform: rotate(-32deg);
+      z-index: -1;
+    }}
+  </style>
+</head>
+<body>
+  {watermark_html}
+  {body_html}
+</body>
+</html>"""
+    return HTML(string=full_html).write_pdf(pdf_variant="pdf/ua-1")
+
+
+def _logo_html(logo_bytes: bytes | None) -> str:
+    if not logo_bytes:
+        return ""
+    try:
+        with PILImage.open(io.BytesIO(logo_bytes)) as im:
+            buf = io.BytesIO()
+            im.convert("RGBA").save(buf, format="PNG")
+            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        return f'<img class="logo" src="data:image/png;base64,{b64}" alt="City Logo" />'
+    except Exception:
+        return ""
+
+
+def _agenda_header_html(agenda: dict, prefs: dict, logo_bytes: bytes | None) -> str:
+    parts = [_logo_html(logo_bytes)]
+    header_parts = [p for p in [prefs.get("city_name"), agenda.get("body")] if p]
+    if header_parts:
+        parts.append(f'<div class="kicker">{_esc(" — ".join(header_parts))}</div>')
+    parts.append(f'<h1>{_esc(agenda["title"])}</h1>')
+    meta_parts = []
+    if agenda.get("meeting_date"):
+        meta_parts.append(f"<strong>Date:</strong> {_esc(agenda['meeting_date'])}")
+    mtime = _format_time(agenda.get("meeting_time") or prefs.get("meeting_time"))
+    if mtime:
+        meta_parts.append(f"<strong>Time:</strong> {_esc(mtime)}")
+    if prefs.get("meeting_location"):
+        meta_parts.append(f"<strong>Location:</strong> {_esc(prefs['meeting_location'])}")
+    if agenda.get("finalized_at"):
+        meta_parts.append(f"<strong>Finalized:</strong> {_esc(agenda['finalized_at'][:10])}")
+    parts.append(f'<p class="meta">{" &nbsp;|&nbsp; ".join(meta_parts) if meta_parts else "Agenda Packet"}</p>')
+    if prefs.get("other_notes"):
+        parts.append(f'<p class="notes">{_esc_multiline(prefs["other_notes"])}</p>')
+    return "\n".join(p for p in parts if p)
+
+
 def _render_flowables(flowables: list, title: str = "CivicDesk Document") -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -97,24 +203,6 @@ def _render_flowables(flowables: list, title: str = "CivicDesk Document") -> byt
 
 
 def _render_item_cover(agenda: dict, item: dict, prefs: dict) -> bytes:
-    styles = getSampleStyleSheet()
-    kicker_style = ParagraphStyle(
-        "ItemKicker",
-        parent=styles["Normal"],
-        fontSize=11,
-        textColor=colors.HexColor("#475569"),
-        spaceAfter=8,
-    )
-    title_style = ParagraphStyle(
-        "ItemTitle", parent=styles["Heading1"], fontSize=22, leading=26, spaceAfter=14
-    )
-    body_style = ParagraphStyle(
-        "ItemBody", parent=styles["Normal"], fontSize=11, leading=15, spaceAfter=12
-    )
-    sub_style = ParagraphStyle(
-        "ItemSub", parent=styles["Heading3"], fontSize=12, leading=16, spaceAfter=6
-    )
-
     prefix_parts = [p for p in [prefs.get("city_name"), agenda.get("body")] if p]
     if item.get("section"):
         prefix_parts.append(item["section"])
@@ -122,90 +210,60 @@ def _render_item_cover(agenda: dict, item: dict, prefs: dict) -> bytes:
     kicker = f"{prefix} — AGENDA ITEM {item['position']}" if prefix else f"AGENDA ITEM {item['position']}"
     rev_tag = ""
     if item.get("revision_status") == "revised":
-        rev_tag = ' <font color="#b45309">[REVISED]</font>'
+        rev_tag = ' <span class="badge-rev">[REVISED]</span>'
     elif item.get("revision_status") == "addendum":
-        rev_tag = ' <font color="#1d4ed8">[ADDENDUM]</font>'
-    flow = [
-        Spacer(1, 0.8 * inch),
-        Paragraph(kicker, kicker_style),
-        Paragraph(_esc(item["title"]) + rev_tag, title_style),
+        rev_tag = ' <span class="badge-add">[ADDENDUM]</span>'
+    parts = [
+        f'<p class="kicker" style="margin-top: 0.6in;">{kicker}</p>',
+        f'<h1>{_esc(item["title"])}{rev_tag}</h1>',
     ]
     if item.get("description"):
-        flow.append(Paragraph(_esc(item["description"]), body_style))
-
-    staff_fields = [
-        ("Presenter", item.get("presenter")),
-        ("Recommended Motion", item.get("recommended_motion")),
-        ("Fiscal Impact", item.get("fiscal_impact")),
-    ]
-    for lbl, val in staff_fields:
-        if val:
-            flow.append(Paragraph(f"<b>{_esc(lbl)}:</b> {_esc(val)}", body_style))
-
+        parts.append(f'<p>{_esc(item["description"])}</p>')
+    for lbl, key in (
+        ("Presenter", "presenter"),
+        ("Recommended Motion", "recommended_motion"),
+        ("Fiscal Impact", "fiscal_impact"),
+    ):
+        if item.get(key):
+            parts.append(f'<p><strong>{_esc(lbl)}:</strong> {_esc(item[key])}</p>')
     docs = item.get("documents", [])
     if docs:
-        flow.append(Spacer(1, 8))
-        flow.append(Paragraph("Supporting Documents", sub_style))
+        parts.append("<h2>Supporting Documents</h2><ul>")
         for d in docs:
-            flow.append(
-                Paragraph(
-                    f"&bull; {item['position']}.{d['position']} {_esc(d['title'])} "
-                    f"[{_esc(d['doc_type'])}]",
-                    body_style,
-                )
-            )
+            parts.append(f'<li>{item["position"]}.{d["position"]} {_esc(d["title"])} [{_esc(d["doc_type"])}]</li>')
+        parts.append("</ul>")
     else:
-        flow.append(Paragraph("No supporting documents attached.", body_style))
-
-    return _render_flowables(flow)
+        parts.append("<p>No supporting documents attached.</p>")
+    return _html_to_pdf_bytes("\n".join(parts), title=f"Item {item['position']}: {item['title']}", include_page_numbers=False)
 
 
 def _render_docx_pdf(item: dict, doc: dict, data: bytes) -> bytes:
-    styles = getSampleStyleSheet()
-    hdr_style = ParagraphStyle(
-        "DocHdr", parent=styles["Heading2"], fontSize=14, leading=18, spaceAfter=4
-    )
-    meta_style = ParagraphStyle(
-        "DocMeta", parent=styles["Normal"], fontSize=9, textColor=colors.grey, spaceAfter=14
-    )
-    p_style = ParagraphStyle(
-        "DocPara", parent=styles["Normal"], fontSize=10.5, leading=14.5, spaceAfter=8
-    )
-
-    flow = [
-        Paragraph(f"{item['position']}.{doc['position']} {_esc(doc['title'])}", hdr_style),
-        Paragraph(f"Source file: {_esc(doc['filename'])}", meta_style),
+    parts = [
+        f'<h1>{item["position"]}.{doc["position"]} {_esc(doc["title"])}</h1>',
+        f'<p class="meta">Source file: {_esc(doc["filename"])}</p>',
     ]
     try:
         paras = _extract_docx_paragraphs(data)
     except Exception as exc:
         paras = [f"[Unable to read DOCX contents: {exc}]"]
-
     if not paras:
-        flow.append(Paragraph("(Empty document)", p_style))
+        parts.append("<p>(Empty document)</p>")
     else:
         for p in paras:
-            flow.append(Paragraph(_esc(p), p_style))
-    return _render_flowables(flow)
+            parts.append(f"<p>{_esc(p)}</p>")
+    return _html_to_pdf_bytes("\n".join(parts), title=doc["title"], include_page_numbers=False)
 
 
 def _render_text_pdf(item: dict, doc: dict, data: bytes) -> bytes:
-    styles = getSampleStyleSheet()
-    hdr_style = ParagraphStyle(
-        "TxtHdr", parent=styles["Heading2"], fontSize=14, leading=18, spaceAfter=10
-    )
-    p_style = ParagraphStyle(
-        "TxtPara", parent=styles["Normal"], fontSize=10.5, leading=14.5, spaceAfter=8
-    )
     text = data.decode("utf-8", errors="replace")
     blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
-    flow = [Paragraph(f"{item['position']}.{doc['position']} {_esc(doc['title'])}", hdr_style)]
+    parts = [f'<h1>{item["position"]}.{doc["position"]} {_esc(doc["title"])}</h1>']
     if not blocks:
-        flow.append(Paragraph("(Empty text attachment)", p_style))
+        parts.append("<p>(Empty text attachment)</p>")
     else:
         for block in blocks:
-            flow.append(Paragraph(_esc_multiline(block), p_style))
-    return _render_flowables(flow)
+            parts.append(f"<p>{_esc_multiline(block)}</p>")
+    return _html_to_pdf_bytes("\n".join(parts), title=doc["title"], include_page_numbers=False)
 
 
 def _render_table_rows(flow: list, rows: list[list[str]], empty_msg: str) -> None:
@@ -474,49 +532,50 @@ def _render_agenda_summary(
     agenda: dict,
     prefs: dict,
     logo_bytes: bytes | None = None,
+    include_page_numbers: bool = True,
 ) -> bytes:
-    """Render an Agenda-Only Summary PDF (cover/header + items + staff fields, no doc pages)."""
-    styles = getSampleStyleSheet()
-    sec_p = ParagraphStyle("SumSec", parent=styles["Normal"], fontSize=11, leading=14, fontName="Helvetica-Bold", textColor=colors.HexColor("#1e3a8a"), spaceBefore=12, spaceAfter=4)
-    item_h = ParagraphStyle("SumItem", parent=styles["Normal"], fontSize=11, leading=15, fontName="Helvetica-Bold", spaceBefore=6, spaceAfter=2)
-    body_p = ParagraphStyle("SumBody", parent=styles["Normal"], fontSize=9.5, leading=13, leftIndent=14, textColor=colors.HexColor("#334155"), spaceAfter=2)
-    doc_p = ParagraphStyle("SumDoc", parent=styles["Normal"], fontSize=9, leading=12, leftIndent=24, textColor=colors.HexColor("#475569"), spaceAfter=1)
-    disc_h = ParagraphStyle("SumDiscH", parent=styles["Heading3"], fontSize=11, leading=14, textColor=colors.HexColor("#334155"), spaceBefore=18, spaceAfter=4)
-    disc_p = ParagraphStyle("SumDiscP", parent=styles["Normal"], fontSize=9.5, leading=13, textColor=colors.HexColor("#475569"))
-
-    flow = []
-    _append_agenda_header(flow, agenda, prefs, logo_bytes, styles)
-    flow.append(Spacer(1, 8))
-
+    """Render an Agenda-Only Summary PDF as Tagged PDF/UA via WeasyPrint."""
+    parts = [_agenda_header_html(agenda, prefs, logo_bytes)]
     items = agenda.get("items", [])
     if not items:
-        flow.append(Paragraph("No agenda items.", styles["Normal"]))
+        parts.append("<p>No agenda items.</p>")
     else:
         last_sec = None
         for item in items:
             sec = (item.get("section") or "").strip()
             if sec and sec != last_sec:
-                flow.append(Paragraph(_esc(sec.upper()), sec_p))
+                parts.append(f'<h2>{_esc(sec)}</h2>')
             last_sec = sec
-            badge = _rev_badge_markup(item.get("revision_status"))
-            flow.append(Paragraph(f"{item['position']}. {_esc(item['title'])}{badge}", item_h))
+            rev_html = ""
+            if item.get("revision_status") == "revised":
+                rev_html = ' <span class="badge-rev">[REVISED]</span>'
+            elif item.get("revision_status") == "addendum":
+                rev_html = ' <span class="badge-add">[ADDENDUM]</span>'
+            parts.append(f'<div class="item-block">')
+            parts.append(f'<h3>{item["position"]}. {_esc(item["title"])}{rev_html}</h3>')
             if item.get("description"):
-                flow.append(Paragraph(_esc(item["description"]), body_p))
+                parts.append(f'<p class="item-meta">{_esc(item["description"])}</p>')
             for lbl, key in (
                 ("Presenter", "presenter"),
                 ("Recommended Motion", "recommended_motion"),
                 ("Fiscal Impact", "fiscal_impact"),
             ):
                 if item.get(key):
-                    flow.append(Paragraph(f"<b>{lbl}:</b> {_esc(item[key])}", body_p))
-            for d in item.get("documents", []):
-                flow.append(Paragraph(f"&bull; {item['position']}.{d['position']} {_esc(d['title'])} [{_esc(d['doc_type'])}]", doc_p))
+                    parts.append(f'<p class="item-meta"><strong>{lbl}:</strong> {_esc(item[key])}</p>')
+            docs = item.get("documents", [])
+            if docs:
+                parts.append('<ul class="doc-list">')
+                for d in docs:
+                    parts.append(f'<li>{item["position"]}.{d["position"]} {_esc(d["title"])} [{_esc(d["doc_type"])}]</li>')
+                parts.append("</ul>")
+            parts.append("</div>")
 
     if prefs.get("footer_disclosures"):
-        flow.append(Paragraph("Additional Notes &amp; Disclosures", disc_h))
-        flow.append(Paragraph(_esc_multiline(prefs["footer_disclosures"]), disc_p))
+        parts.append("<h2>Additional Notes &amp; Disclosures</h2>")
+        parts.append(f'<p class="notes">{_esc_multiline(prefs["footer_disclosures"])}</p>')
 
-    return _render_flowables(flow)
+    sum_title = f"{agenda.get('title') or 'Meeting Agenda'} — Summary"
+    return _html_to_pdf_bytes("\n".join(parts), title=sum_title, include_page_numbers=include_page_numbers)
 
 
 def _stamp_page_number(page, page_num: int, total_pages: int) -> None:
@@ -587,21 +646,12 @@ def build_agenda_packet_pdf(
             logo_bytes = None
 
     if summary_only:
-        sum_reader = PdfReader(io.BytesIO(_render_agenda_summary(agenda, prefs, logo_bytes)))
-        final_writer = PdfWriter()
-        for page in sum_reader.pages:
-            final_writer.add_page(page)
-        if include_page_numbers:
-            total_pages = len(final_writer.pages)
-            for idx, page in enumerate(final_writer.pages, start=1):
-                _stamp_page_number(page, idx, total_pages)
-        sum_title = f"{agenda.get('title') or 'Meeting Agenda'} — Summary"
-        if len(final_writer.pages) > 1:
-            final_writer.add_outline_item(sum_title, 0)
-        apply_pdf_accessibility_metadata(final_writer, sum_title)
-        out = io.BytesIO()
-        final_writer.write(out)
-        return out.getvalue()
+        return _render_agenda_summary(
+            agenda,
+            prefs,
+            logo_bytes,
+            include_page_numbers=include_page_numbers,
+        )
 
     # 1. Build each item's pages and record relative page offsets.
     body_writer = PdfWriter()
@@ -754,7 +804,7 @@ def build_minutes_pdf(
     preferences: dict | None = None,
     watermark_draft: bool = False,
 ) -> bytes:
-    """Build a formatted Meeting Minutes PDF from the agenda, attendance, votes, and notes."""
+    """Build a formatted Meeting Minutes Tagged PDF/UA via WeasyPrint."""
     prefs = preferences or {}
     logo_bytes: bytes | None = None
     if prefs.get("city_logo_key"):
@@ -763,71 +813,56 @@ def build_minutes_pdf(
         except Exception:
             logo_bytes = None
 
-    styles = getSampleStyleSheet()
-    kicker = ParagraphStyle("MinKicker", parent=styles["Normal"], fontSize=11, fontName="Helvetica-Bold", textColor=colors.HexColor("#1d4ed8"), spaceAfter=4)
-    sec_p = ParagraphStyle("MinSec", parent=styles["Normal"], fontSize=11, leading=14, fontName="Helvetica-Bold", textColor=colors.HexColor("#1e3a8a"), spaceBefore=12, spaceAfter=4)
-    sub_h = ParagraphStyle("MinSubH", parent=styles["Heading3"], fontSize=11.5, leading=15, spaceBefore=10, spaceAfter=4)
-    item_h = ParagraphStyle("MinItem", parent=styles["Normal"], fontSize=11, leading=15, fontName="Helvetica-Bold", spaceBefore=8, spaceAfter=2)
-    body_p = ParagraphStyle("MinBody", parent=styles["Normal"], fontSize=9.5, leading=13, leftIndent=14, textColor=colors.HexColor("#334155"), spaceAfter=3)
-
     kicker_text = "DRAFT MEETING MINUTES (PENDING APPROVAL)" if watermark_draft else "MEETING MINUTES (APPROVED)"
-    flow = [Paragraph(kicker_text, kicker)]
-    _append_agenda_header(flow, agenda, prefs, logo_bytes, styles)
+    parts = [
+        f'<p class="kicker" style="color: #1d4ed8;">{_esc(kicker_text)}</p>',
+        _agenda_header_html(agenda, prefs, logo_bytes),
+    ]
 
     if agenda.get("minutes_attendance"):
-        flow.append(Paragraph("Attendance &amp; Roll Call", sub_h))
-        flow.append(Paragraph(_esc_multiline(agenda["minutes_attendance"]), body_p))
+        parts.append("<h2>Attendance &amp; Roll Call</h2>")
+        parts.append(f'<p>{_esc_multiline(agenda["minutes_attendance"])}</p>')
     if agenda.get("minutes_notes"):
-        flow.append(Paragraph("General Meeting Notes", sub_h))
-        flow.append(Paragraph(_esc_multiline(agenda["minutes_notes"]), body_p))
+        parts.append("<h2>General Meeting Notes</h2>")
+        parts.append(f'<p>{_esc_multiline(agenda["minutes_notes"])}</p>')
 
-    flow.append(Spacer(1, 6))
     items = agenda.get("items", [])
     if not items:
-        flow.append(Paragraph("No agenda items recorded.", styles["Normal"]))
+        parts.append("<p>No agenda items recorded.</p>")
     else:
         last_sec = None
         for item in items:
             sec = (item.get("section") or "").strip()
             if sec and sec != last_sec:
-                flow.append(Paragraph(_esc(sec.upper()), sec_p))
+                parts.append(f'<h2>{_esc(sec)}</h2>')
             last_sec = sec
-            flow.append(Paragraph(f"{item['position']}. {_esc(item['title'])}", item_h))
+            parts.append('<div class="item-block">')
+            parts.append(f'<h3>{item["position"]}. {_esc(item["title"])}</h3>')
 
-            parts = []
+            action_parts = []
             if item.get("minutes_action"):
-                parts.append(f"<b>Action:</b> {_esc(item['minutes_action'])}")
+                action_parts.append(f"<strong>Action:</strong> {_esc(item['minutes_action'])}")
             if item.get("minutes_motion_by"):
                 m_str = _esc(item["minutes_motion_by"])
                 if item.get("minutes_second_by"):
                     m_str += f" (Second: {_esc(item['minutes_second_by'])})"
-                parts.append(f"<b>Motion:</b> {m_str}")
+                action_parts.append(f"<strong>Motion:</strong> {m_str}")
             elif item.get("minutes_second_by"):
-                parts.append(f"<b>Second:</b> {_esc(item['minutes_second_by'])}")
+                action_parts.append(f"<strong>Second:</strong> {_esc(item['minutes_second_by'])}")
             if item.get("minutes_vote"):
-                parts.append(f"<b>Vote:</b> {_esc(item['minutes_vote'])}")
-            if parts:
-                flow.append(Paragraph(" &nbsp;|&nbsp; ".join(parts), body_p))
+                action_parts.append(f"<strong>Vote:</strong> {_esc(item['minutes_vote'])}")
+            if action_parts:
+                parts.append(f'<p class="item-meta">{" &nbsp;|&nbsp; ".join(action_parts)}</p>')
             if item.get("minutes_notes"):
-                flow.append(Paragraph(_esc_multiline(item["minutes_notes"]), body_p))
-            elif not parts:
-                flow.append(Paragraph("<i>No action or notes recorded.</i>", body_p))
+                parts.append(f'<p class="item-meta">{_esc_multiline(item["minutes_notes"])}</p>')
+            elif not action_parts:
+                parts.append('<p class="item-meta"><em>No action or notes recorded.</em></p>')
+            parts.append("</div>")
 
     min_title = f"{agenda.get('title') or 'Meeting'} — Minutes"
-    pdf_bytes = _render_flowables(flow, title=min_title)
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    writer = PdfWriter()
-    for page in reader.pages:
-        writer.add_page(page)
-    total = len(writer.pages)
-    for idx, page in enumerate(writer.pages, start=1):
-        if include_page_numbers:
-            _stamp_page_number(page, idx, total)
-        if watermark_draft:
-            _stamp_draft_watermark(page)
-    if total > 1:
-        writer.add_outline_item(min_title, 0)
-    apply_pdf_accessibility_metadata(writer, min_title)
-    out = io.BytesIO()
-    writer.write(out)
-    return out.getvalue()
+    return _html_to_pdf_bytes(
+        "\n".join(parts),
+        title=min_title,
+        include_page_numbers=include_page_numbers,
+        watermark_draft=watermark_draft,
+    )
