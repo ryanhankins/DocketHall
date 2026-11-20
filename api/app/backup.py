@@ -62,6 +62,12 @@ _CORE_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         False,
     ),
     (
+        "core_sla_rules",
+        ["rule_key", "label", "module_id", "target_days", "warning_days", "escalation_email", "auto_escalate", "enabled", "updated_by", "updated_at"],
+        set(),
+        False,
+    ),
+    (
         "public_subscriptions",
         ["id", "email", "topic", "token", "is_active", "created_at"],
         set(),

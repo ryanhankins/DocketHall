@@ -20,7 +20,7 @@ import os
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from . import audit, auth, backup, branding, docs, integrations, my_account, payments, pdf_check, permits, registry, search, subscriptions, tenancy, updates, users
+from . import audit, auth, backup, branding, docs, integrations, my_account, payments, pdf_check, permits, registry, search, sla, subscriptions, tenancy, updates, users
 from .db import open_pool, pool
 from .modules import register_builtin_modules
 
@@ -32,6 +32,7 @@ def _bootstrap_tenant_schema(slug: str, schema: str) -> None:
         auth.bootstrap()
         audit.bootstrap()
         integrations.bootstrap()
+        sla.bootstrap()
         payments.bootstrap()
         subscriptions.bootstrap()
         docs.bootstrap()
@@ -57,6 +58,10 @@ async def lifespan(app: FastAPI):
                 await asyncio.sleep(86400)
                 try:
                     permits.run_daily_compliance_digest()
+                except Exception:
+                    pass
+                try:
+                    sla.run_sla_escalation_digest()
                 except Exception:
                     pass
         digest_task = asyncio.create_task(_digest_loop())
@@ -91,6 +96,7 @@ app.include_router(audit.router)
 app.include_router(users.router)
 app.include_router(branding.router)
 app.include_router(integrations.router)
+app.include_router(sla.router)
 app.include_router(payments.router)
 app.include_router(pdf_check.router)
 app.include_router(my_account.router)

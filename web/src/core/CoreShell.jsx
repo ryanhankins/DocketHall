@@ -32,6 +32,7 @@ const BackupRestorePage = React.lazy(() => import('./BackupRestorePage.jsx'));
 const HelpDocsPage = React.lazy(() => import('./HelpDocsPage.jsx'));
 const MyAccountPage = React.lazy(() => import('./MyAccountPage.jsx'));
 const BillingManagePage = React.lazy(() => import('./BillingManagePage.jsx'));
+const SlaEscalationPage = React.lazy(() => import('./SlaEscalationPage.jsx'));
 
 export default function CoreShell() {
   const [me, setMe] = useState(null);
@@ -186,7 +187,7 @@ export default function CoreShell() {
     if (hash === 'calendar-manage' || hash === 'preferences-calendar') {
       setOpenSubmenus(prev => (prev['calendar-staff'] ? prev : { ...prev, 'calendar-staff': true }));
     }
-    if (['users', 'modules', 'preferences-general', 'integrations', 'audit', 'preferences-backup', 'billing'].includes(hash)) {
+    if (['users', 'modules', 'preferences-general', 'integrations', 'audit', 'preferences-backup', 'billing', 'sla-rules'].includes(hash)) {
       setOpenSubmenus(prev => (prev['admin-section'] ? prev : { ...prev, 'admin-section': true }));
     }
   }, [hash]);
@@ -211,6 +212,13 @@ export default function CoreShell() {
         component: GeneralPrefsPage,
         props: { onBrandingChange: applyBranding },
         activeSection: 'preferences-general',
+      };
+    }
+    if (hash === 'sla-rules' && canManageSettings) {
+      return {
+        component: SlaEscalationPage,
+        props: { onNavigate: navigate },
+        activeSection: 'sla-rules',
       };
     }
     if (hash === 'preferences-backup' && canManageSettings) {
@@ -545,6 +553,15 @@ export default function CoreShell() {
                         onClick={() => navigate('#billing')}
                       >
                         Utility Bills &amp; Citations
+                      </button>
+                    )}
+                    {canManageSettings && (
+                      <button
+                        type="button"
+                        className={activeSection === 'sla-rules' ? 'active' : ''}
+                        onClick={() => navigate('#sla-rules')}
+                      >
+                        SLA &amp; Escalations
                       </button>
                     )}
                     {canManageSettings && (

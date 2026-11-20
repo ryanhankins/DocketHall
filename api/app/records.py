@@ -338,7 +338,8 @@ def submit_public_foia_request(body: FoiaRequestIn):
     if not name or not subj:
         raise HTTPException(status_code=400, detail="Your name and request subject are required")
     yr = date.today().year
-    due = (date.today() + timedelta(days=14)).isoformat()
+    from .sla import get_sla_target_days
+    due = (date.today() + timedelta(days=get_sla_target_days("foia_deadline", 10))).isoformat()
     tmp = f"PRR-{yr}-{uuid.uuid4().hex[:8].upper()}"
     with pool.connection() as conn:
         row = conn.execute(
