@@ -136,6 +136,18 @@ PERMITS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         set(),
         True,
     ),
+    (
+        "recurring_compliance_programs",
+        [
+            "id", "program_type", "property_address", "parcel_id", "unit_count",
+            "owner_name", "local_agent_name", "local_agent_phone", "local_agent_email",
+            "cycle_months", "last_inspected_date", "next_inspection_date",
+            "last_result", "inspector", "certificate_number", "status", "notes",
+            "created_at", "updated_at",
+        ],
+        set(),
+        True,
+    ),
 ]
 
 MODULE = CivicModule(
@@ -156,7 +168,9 @@ MODULE = CivicModule(
             "permission": "permits.manage",
             "items": [
                 {"section": "permits-review", "label": "Permit Review Queue", "permission": "permits.manage"},
+                {"section": "permits-reports", "label": "Reports & Revenue", "permission": "permits.manage"},
                 {"section": "contractors", "label": "Contractors & Licenses", "permission": "permits.manage"},
+                {"section": "compliance-programs", "label": "Rental & Fire Compliance", "permission": "permits.manage"},
                 {"section": "preferences-permits", "label": "Permit Preferences", "permission": "permits.manage"},
             ],
         },

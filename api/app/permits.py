@@ -256,6 +256,28 @@ CREATE TABLE IF NOT EXISTS permit_fee_entries (
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS permit_fee_entries_permit_idx ON permit_fee_entries(permit_id, id);
+CREATE TABLE IF NOT EXISTS recurring_compliance_programs (
+    id                   BIGSERIAL PRIMARY KEY,
+    program_type         TEXT NOT NULL DEFAULT 'Rental Housing',
+    property_address     TEXT NOT NULL,
+    parcel_id            TEXT NOT NULL DEFAULT '',
+    unit_count           INTEGER NOT NULL DEFAULT 1,
+    owner_name           TEXT NOT NULL DEFAULT '',
+    local_agent_name     TEXT NOT NULL DEFAULT '',
+    local_agent_phone    TEXT NOT NULL DEFAULT '',
+    local_agent_email    TEXT NOT NULL DEFAULT '',
+    cycle_months         INTEGER NOT NULL DEFAULT 12,
+    last_inspected_date  DATE,
+    next_inspection_date DATE,
+    last_result          TEXT NOT NULL DEFAULT 'pending',
+    inspector            TEXT NOT NULL DEFAULT '',
+    certificate_number   TEXT NOT NULL DEFAULT '',
+    status               TEXT NOT NULL DEFAULT 'active',
+    notes                TEXT NOT NULL DEFAULT '',
+    created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS recurring_comp_next_idx ON recurring_compliance_programs(status, next_inspection_date);
 """
 
 _DEFAULT_PORTAL_SETTINGS = {
@@ -444,6 +466,43 @@ def bootstrap() -> None:
                     " bond_amount, bond_expires_at, status, notes) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                     "ON CONFLICT (license_number) DO NOTHING",
+                    row,
+                )
+
+        if conn.execute("SELECT COUNT(*) FROM recurring_compliance_programs").fetchone()[0] == 0:
+            today = date.today()
+            due_soon = (today + timedelta(days=20)).isoformat()
+            past_ok = (today - timedelta(days=120)).isoformat()
+            future_ok = (today + timedelta(days=245)).isoformat()
+            overdue_d = (today - timedelta(days=15)).isoformat()
+            past_yr = (today - timedelta(days=380)).isoformat()
+            for row in (
+                (
+                    "Rental Housing", "312 Cedar Lane (4-Plex)", "12-030-21-01", 4,
+                    "Cedar Properties LLC", "Morgan Lee", "(555) 234-6610", "morgan@cedarprops.example",
+                    12, past_yr, due_soon, "passed", "Building Official", "RNT-2025-0014", "active",
+                    "Annual 4-unit rental housing safety & egress inspection.",
+                ),
+                (
+                    "Short-Term Rental (STR)", "108 Lakeshore Drive", "12-030-14-08", 1,
+                    "Jordan Taylor", "Jordan Taylor", "(555) 234-6622", "jordan@lakeshorestr.example",
+                    12, past_ok, future_ok, "passed", "Fire Marshal", "STR-2026-0007", "active",
+                    "Verified smoke/CO alarms, posted parking rules, and emergency contact.",
+                ),
+                (
+                    "Commercial Fire Safety", "500 Main Street", "12-030-05-02", 2,
+                    "Main Street Mercantile", "Pat Alvarez", "(555) 234-6699", "pat@mainstreet.example",
+                    12, past_yr, overdue_d, "conditional", "Fire Marshal", "", "active",
+                    "Annual sprinkler, extinguisher, and exit signage inspection overdue.",
+                ),
+            ):
+                conn.execute(
+                    "INSERT INTO recurring_compliance_programs "
+                    "(program_type, property_address, parcel_id, unit_count, owner_name, "
+                    " local_agent_name, local_agent_phone, local_agent_email, cycle_months, "
+                    " last_inspected_date, next_inspection_date, last_result, inspector, "
+                    " certificate_number, status, notes) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                     row,
                 )
 
@@ -956,6 +1015,55 @@ class FeeEntryIn(BaseModel):
     amount_dollars: float
     payment_method: str = ""
     reference_number: str = ""
+    notes: str = ""
+
+
+COMPLIANCE_PROGRAM_STATUSES = ("active", "non_compliant", "suspended", "inactive")
+COMPLIANCE_RESULTS = ("pending", "passed", "failed", "conditional")
+
+
+class ComplianceProgramIn(BaseModel):
+    program_type: str = "Rental Housing"
+    property_address: str
+    parcel_id: str = ""
+    unit_count: int = 1
+    owner_name: str = ""
+    local_agent_name: str = ""
+    local_agent_phone: str = ""
+    local_agent_email: str = ""
+    cycle_months: int = 12
+    last_inspected_date: str = ""
+    next_inspection_date: str = ""
+    last_result: str = "pending"
+    inspector: str = ""
+    certificate_number: str = ""
+    status: str = "active"
+    notes: str = ""
+
+
+class ComplianceProgramPatch(BaseModel):
+    program_type: str | None = None
+    property_address: str | None = None
+    parcel_id: str | None = None
+    unit_count: int | None = None
+    owner_name: str | None = None
+    local_agent_name: str | None = None
+    local_agent_phone: str | None = None
+    local_agent_email: str | None = None
+    cycle_months: int | None = None
+    last_inspected_date: str | None = None
+    next_inspection_date: str | None = None
+    last_result: str | None = None
+    inspector: str | None = None
+    certificate_number: str | None = None
+    status: str | None = None
+    notes: str | None = None
+
+
+class ComplianceRecordInspectionIn(BaseModel):
+    result: str = "passed"
+    inspected_date: str = ""
+    inspector: str = ""
     notes: str = ""
 
 
@@ -1791,6 +1899,442 @@ def delete_contractor(contractor_id: int, user: dict = Depends(require_permissio
             raise HTTPException(status_code=404, detail="Contractor license not found")
     record_audit(user["username"], "permits.contractor_delete", f"Deleted {row[1]} ({row[2]})")
     return {"deleted": True, "id": contractor_id}
+
+
+# ------------------------------------------------------------------ recurring compliance / rental & fire programs
+
+_COMP_COLS = (
+    "id, program_type, property_address, parcel_id, unit_count, owner_name, "
+    "local_agent_name, local_agent_phone, local_agent_email, cycle_months, "
+    "last_inspected_date, next_inspection_date, last_result, inspector, "
+    "certificate_number, status, notes, created_at, updated_at"
+)
+
+
+def _add_months(d: date, months: int) -> date:
+    m_idx = (d.month - 1) + max(1, months)
+    yr = d.year + (m_idx // 12)
+    mo = (m_idx % 12) + 1
+    day = min(d.day, [31, 29 if yr % 4 == 0 and (yr % 100 != 0 or yr % 400 == 0) else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1])
+    return date(yr, mo, day)
+
+
+def _row_to_comp_program(r) -> dict:
+    today = date.today()
+    next_d = r[11]
+    days_until = (next_d - today).days if next_d else None
+    if r[15] != "active":
+        due_status = r[15]
+    elif days_until is None:
+        due_status = "unscheduled"
+    elif days_until < 0:
+        due_status = "overdue"
+    elif days_until <= 30:
+        due_status = "due_soon"
+    else:
+        due_status = "ok"
+    return {
+        "id": r[0],
+        "program_type": r[1],
+        "property_address": r[2],
+        "parcel_id": r[3],
+        "unit_count": r[4],
+        "owner_name": r[5],
+        "local_agent_name": r[6],
+        "local_agent_phone": r[7],
+        "local_agent_email": r[8],
+        "cycle_months": r[9],
+        "last_inspected_date": r[10].isoformat() if r[10] else "",
+        "next_inspection_date": next_d.isoformat() if next_d else "",
+        "last_result": r[12],
+        "inspector": r[13],
+        "certificate_number": r[14],
+        "status": r[15],
+        "notes": r[16],
+        "due_status": due_status,
+        "days_until_due": days_until,
+        "created_at": r[17].isoformat() if r[17] else None,
+        "updated_at": r[18].isoformat() if r[18] else None,
+    }
+
+
+@router.get("/compliance-programs")
+def list_compliance_programs(
+    q: str = "",
+    program_type: str = "",
+    status: str = "",
+    _: dict = Depends(require_permission("permits.manage")),
+):
+    ql = f"%{q.strip()}%"
+    pt = program_type.strip()
+    st = status.strip().lower()
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"SELECT {_COMP_COLS} FROM recurring_compliance_programs "
+            "WHERE (%s = '' OR program_type = %s) "
+            "AND (%s = '' OR status = %s) "
+            "AND (%s = '%%' OR property_address ILIKE %s OR owner_name ILIKE %s OR local_agent_name ILIKE %s OR parcel_id ILIKE %s OR certificate_number ILIKE %s) "
+            "ORDER BY next_inspection_date ASC NULLS LAST, id DESC",
+            (pt, pt, st, st, ql, ql, ql, ql, ql, ql),
+        ).fetchall()
+    return [_row_to_comp_program(r) for r in rows]
+
+
+@router.post("/compliance-programs", status_code=201)
+def create_compliance_program(body: ComplianceProgramIn, user: dict = Depends(require_permission("permits.manage"))):
+    addr = body.property_address.strip()
+    if not addr:
+        raise HTTPException(status_code=400, detail="Property address is required")
+    st = body.status.strip().lower()
+    if st not in COMPLIANCE_PROGRAM_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid status")
+    res = body.last_result.strip().lower()
+    if res not in COMPLIANCE_RESULTS:
+        raise HTTPException(status_code=400, detail="Invalid inspection result")
+    last_d = _parse_optional_date(body.last_inspected_date, "Last inspected date")
+    next_d = _parse_optional_date(body.next_inspection_date, "Next inspection date")
+    with pool.connection() as conn:
+        row = conn.execute(
+            "INSERT INTO recurring_compliance_programs "
+            "(program_type, property_address, parcel_id, unit_count, owner_name, "
+            " local_agent_name, local_agent_phone, local_agent_email, cycle_months, "
+            " last_inspected_date, next_inspection_date, last_result, inspector, "
+            " certificate_number, status, notes) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            f"RETURNING {_COMP_COLS}",
+            (
+                body.program_type.strip() or "Rental Housing",
+                addr,
+                body.parcel_id.strip(),
+                max(1, body.unit_count),
+                body.owner_name.strip(),
+                body.local_agent_name.strip(),
+                body.local_agent_phone.strip(),
+                body.local_agent_email.strip(),
+                max(1, body.cycle_months),
+                last_d,
+                next_d,
+                res,
+                body.inspector.strip(),
+                body.certificate_number.strip(),
+                st,
+                body.notes.strip(),
+            ),
+        ).fetchone()
+    record_audit(user["username"], "permits.compliance_create", f"{body.program_type}: {addr}")
+    return _row_to_comp_program(row)
+
+
+@router.patch("/compliance-programs/{prog_id}")
+def update_compliance_program(
+    prog_id: int,
+    body: ComplianceProgramPatch,
+    user: dict = Depends(require_permission("permits.manage")),
+):
+    if body.status is not None and body.status.strip().lower() not in COMPLIANCE_PROGRAM_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid status")
+    if body.last_result is not None and body.last_result.strip().lower() not in COMPLIANCE_RESULTS:
+        raise HTTPException(status_code=400, detail="Invalid inspection result")
+    with pool.connection() as conn:
+        cur = conn.execute(f"SELECT {_COMP_COLS} FROM recurring_compliance_programs WHERE id = %s", (prog_id,)).fetchone()
+        if not cur:
+            raise HTTPException(status_code=404, detail="Compliance program not found")
+        last_d = _parse_optional_date(body.last_inspected_date, "Last inspected date") if body.last_inspected_date is not None else cur[10]
+        next_d = _parse_optional_date(body.next_inspection_date, "Next inspection date") if body.next_inspection_date is not None else cur[11]
+        row = conn.execute(
+            "UPDATE recurring_compliance_programs SET "
+            "program_type = COALESCE(%s, program_type), "
+            "property_address = COALESCE(%s, property_address), "
+            "parcel_id = COALESCE(%s, parcel_id), "
+            "unit_count = COALESCE(%s, unit_count), "
+            "owner_name = COALESCE(%s, owner_name), "
+            "local_agent_name = COALESCE(%s, local_agent_name), "
+            "local_agent_phone = COALESCE(%s, local_agent_phone), "
+            "local_agent_email = COALESCE(%s, local_agent_email), "
+            "cycle_months = COALESCE(%s, cycle_months), "
+            "last_inspected_date = %s, "
+            "next_inspection_date = %s, "
+            "last_result = COALESCE(%s, last_result), "
+            "inspector = COALESCE(%s, inspector), "
+            "certificate_number = COALESCE(%s, certificate_number), "
+            "status = COALESCE(%s, status), "
+            "notes = COALESCE(%s, notes), "
+            "updated_at = now() "
+            f"WHERE id = %s RETURNING {_COMP_COLS}",
+            (
+                body.program_type.strip() if body.program_type is not None else None,
+                body.property_address.strip() if body.property_address is not None else None,
+                body.parcel_id.strip() if body.parcel_id is not None else None,
+                max(1, body.unit_count) if body.unit_count is not None else None,
+                body.owner_name.strip() if body.owner_name is not None else None,
+                body.local_agent_name.strip() if body.local_agent_name is not None else None,
+                body.local_agent_phone.strip() if body.local_agent_phone is not None else None,
+                body.local_agent_email.strip() if body.local_agent_email is not None else None,
+                max(1, body.cycle_months) if body.cycle_months is not None else None,
+                last_d,
+                next_d,
+                body.last_result.strip().lower() if body.last_result is not None else None,
+                body.inspector.strip() if body.inspector is not None else None,
+                body.certificate_number.strip() if body.certificate_number is not None else None,
+                body.status.strip().lower() if body.status is not None else None,
+                body.notes.strip() if body.notes is not None else None,
+                prog_id,
+            ),
+        ).fetchone()
+    record_audit(user["username"], "permits.compliance_update", f"Updated compliance program #{prog_id}")
+    return _row_to_comp_program(row)
+
+
+@router.post("/compliance-programs/{prog_id}/record-inspection")
+def record_compliance_inspection(
+    prog_id: int,
+    body: ComplianceRecordInspectionIn,
+    user: dict = Depends(require_permission("permits.manage")),
+):
+    res = body.result.strip().lower()
+    if res not in ("passed", "failed", "conditional"):
+        raise HTTPException(status_code=400, detail="Result must be passed, failed, or conditional")
+    insp_d = _parse_optional_date(body.inspected_date, "Inspection date") or date.today()
+    with pool.connection() as conn:
+        cur = conn.execute(f"SELECT {_COMP_COLS} FROM recurring_compliance_programs WHERE id = %s", (prog_id,)).fetchone()
+        if not cur:
+            raise HTTPException(status_code=404, detail="Compliance program not found")
+        cycle_months = cur[9] or 12
+        next_d = _add_months(insp_d, cycle_months) if res == "passed" else (insp_d + timedelta(days=30))
+        next_status = "active" if res == "passed" else ("non_compliant" if res == "failed" else cur[15])
+        cert_no = cur[14] or (f"CMP-{insp_d.year}-{prog_id:04d}" if res == "passed" else "")
+        notes_val = body.notes.strip() if body.notes.strip() else cur[16]
+        row = conn.execute(
+            "UPDATE recurring_compliance_programs SET "
+            "last_inspected_date = %s, next_inspection_date = %s, last_result = %s, "
+            "inspector = %s, status = %s, certificate_number = %s, notes = %s, updated_at = now() "
+            f"WHERE id = %s RETURNING {_COMP_COLS}",
+            (insp_d, next_d, res, body.inspector.strip() or user["username"], next_status, cert_no, notes_val, prog_id),
+        ).fetchone()
+    record_audit(user["username"], "permits.compliance_inspect", f"Program #{prog_id} -> {res}")
+    return _row_to_comp_program(row)
+
+
+@router.get("/compliance-programs/{prog_id}/certificate")
+def get_compliance_certificate_pdf(
+    prog_id: int,
+    _: dict = Depends(require_permission("permits.manage")),
+):
+    with pool.connection() as conn:
+        row = conn.execute(f"SELECT {_COMP_COLS} FROM recurring_compliance_programs WHERE id = %s", (prog_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Compliance program not found")
+    p = _row_to_comp_program(row)
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=54, rightMargin=54, topMargin=54, bottomMargin=54)
+    styles = getSampleStyleSheet()
+    cert_num = p["certificate_number"] or f"PROG-{p['id']}"
+    story = [
+        Paragraph(f"<b>CERTIFICATE OF COMPLIANCE — {_xml_escape(p['program_type'].upper())}</b>", styles["Title"]),
+        Paragraph(f"Certificate Number: <b>{_xml_escape(cert_num)}</b>", styles["Normal"]),
+        Spacer(1, 12),
+    ]
+    tbl_rows = [
+        ["Program Type", p["program_type"]],
+        ["Property Address", p["property_address"]],
+        ["Parcel ID / Units", f"{p['parcel_id'] or '—'} / {p['unit_count']} unit(s)"],
+        ["Property Owner", p["owner_name"] or "—"],
+        ["Local Agent", f"{p['local_agent_name'] or '—'} ({p['local_agent_phone'] or '—'})"],
+        ["Last Inspection", f"{p['last_inspected_date'] or '—'} ({p['last_result'].title()})"],
+        ["Inspector", p["inspector"] or "—"],
+        ["Next Inspection Due", p["next_inspection_date"] or "—"],
+        ["Status", p["status"].replace("_", " ").title()],
+    ]
+    tbl = Table(tbl_rows, colWidths=[150, 350])
+    tbl.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#eef2f6")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.extend([tbl, Spacer(1, 18), Paragraph("Authorized Municipal Inspector: _______________________________", styles["Normal"])])
+    doc.build(story)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="compliance-{p["id"]}.pdf"'},
+    )
+
+
+@router.delete("/compliance-programs/{prog_id}")
+def delete_compliance_program(prog_id: int, user: dict = Depends(require_permission("permits.manage"))):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "DELETE FROM recurring_compliance_programs WHERE id = %s RETURNING id, property_address",
+            (prog_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Compliance program not found")
+    record_audit(user["username"], "permits.compliance_delete", f"Deleted compliance program #{prog_id}: {row[1]}")
+    return {"deleted": True, "id": prog_id}
+
+
+def _parse_money_dollars(raw: str) -> float:
+    cleaned = re.sub(r"[^0-9.]", "", str(raw or ""))
+    if not cleaned:
+        return 0.0
+    try:
+        return float(cleaned)
+    except ValueError:
+        return 0.0
+
+
+def _build_operational_report(conn) -> dict:
+    p_rows = conn.execute(
+        "SELECT id, status, permit_type_name, estimated_value, created_at, issued_at, planning_data "
+        "FROM permits ORDER BY id ASC"
+    ).fetchall()
+    by_status: dict[str, int] = {}
+    by_type: dict[str, int] = {}
+    by_month: dict[str, dict[str, Any]] = {}
+    turnaround_days: list[float] = []
+    total_est_value = 0.0
+    stat_overdue = 0
+    stat_warning = 0
+
+    for pr in p_rows:
+        st = pr[1] or "submitted"
+        by_status[st] = by_status.get(st, 0) + 1
+        pt = pr[2] or "Other"
+        by_type[pt] = by_type.get(pt, 0) + 1
+        val = _parse_money_dollars(pr[3])
+        total_est_value += val
+        if pr[4]:
+            ym = pr[4].strftime("%Y-%m")
+            bucket = by_month.setdefault(ym, {"month": ym, "count": 0, "estimated_value": 0.0})
+            bucket["count"] += 1
+            bucket["estimated_value"] += val
+        if pr[4] and pr[5]:
+            turnaround_days.append(max(0.0, (pr[5] - pr[4]).total_seconds() / 86400.0))
+        sc = _compute_statutory_clock(pr[6] if isinstance(pr[6], dict) else {}, st)
+        if sc["urgency"] == "overdue":
+            stat_overdue += 1
+        elif sc["urgency"] == "warning":
+            stat_warning += 1
+
+    fee_rows = conn.execute("SELECT entry_type, amount_cents FROM permit_fee_entries").fetchall()
+    fees_assessed = sum(r[1] for r in fee_rows if r[0] == "fee")
+    waivers = sum(r[1] for r in fee_rows if r[0] == "waiver")
+    payments = sum(r[1] for r in fee_rows if r[0] == "payment")
+    escrow_dep = sum(r[1] for r in fee_rows if r[0] == "escrow_deposit")
+    escrow_ref = sum(r[1] for r in fee_rows if r[0] == "escrow_refund")
+
+    insp_rows = conn.execute("SELECT result, COUNT(*) FROM permit_inspections GROUP BY result").fetchall()
+    insp_by_result = {r[0]: int(r[1]) for r in insp_rows}
+
+    ctr_rows = conn.execute(f"SELECT {_CONTRACTOR_COLS} FROM contractor_licenses").fetchall()
+    ctrs = [_row_to_contractor(r) for r in ctr_rows]
+
+    comp_rows = conn.execute(f"SELECT {_COMP_COLS} FROM recurring_compliance_programs").fetchall()
+    comps = [_row_to_comp_program(r) for r in comp_rows]
+
+    code_enf = {"total": 0, "open": 0, "overdue": 0}
+    try:
+        today_s = date.today().isoformat()
+        ce_rows = conn.execute(
+            "SELECT status, nov_compliance_deadline, reinspection_date FROM complaints"
+        ).fetchall()
+        code_enf["total"] = len(ce_rows)
+        for cr in ce_rows:
+            if cr[0] not in ("resolved", "dismissed"):
+                code_enf["open"] += 1
+                if (cr[1] and cr[1] < today_s) or (cr[2] and cr[2] < today_s):
+                    code_enf["overdue"] += 1
+    except Exception:
+        pass
+
+    return {
+        "permits": {
+            "total": len(p_rows),
+            "open": sum(v for k, v in by_status.items() if k not in ("issued", "denied", "closed")),
+            "issued": by_status.get("issued", 0) + by_status.get("closed", 0),
+            "avg_turnaround_days": round(sum(turnaround_days) / len(turnaround_days), 1) if turnaround_days else None,
+            "total_estimated_value": round(total_est_value, 2),
+            "by_status": [{"status": k, "count": v} for k, v in sorted(by_status.items())],
+            "by_type": [{"type": k, "count": v} for k, v in sorted(by_type.items(), key=lambda x: -x[1])],
+            "by_month": [by_month[k] for k in sorted(by_month.keys())[-12:]],
+            "statutory_overdue": stat_overdue,
+            "statutory_warning": stat_warning,
+        },
+        "revenue": {
+            "fees_assessed_cents": fees_assessed,
+            "waivers_cents": waivers,
+            "payments_cents": payments,
+            "balance_due_cents": max(0, fees_assessed - waivers - payments),
+            "escrow_deposited_cents": escrow_dep,
+            "escrow_refunded_cents": escrow_ref,
+            "escrow_held_cents": max(0, escrow_dep - escrow_ref),
+        },
+        "inspections": {
+            "scheduled": insp_by_result.get("scheduled", 0),
+            "passed": insp_by_result.get("passed", 0),
+            "failed": insp_by_result.get("failed", 0),
+            "partial": insp_by_result.get("partial", 0),
+        },
+        "contractors": {
+            "total": len(ctrs),
+            "compliant": sum(1 for c in ctrs if c["compliant"]),
+            "blocked": sum(1 for c in ctrs if not c["compliant"]),
+            "expiring_soon": sum(1 for c in ctrs if c["expiring_soon"]),
+        },
+        "compliance_programs": {
+            "total": len(comps),
+            "overdue": sum(1 for c in comps if c["due_status"] == "overdue"),
+            "due_soon": sum(1 for c in comps if c["due_status"] == "due_soon"),
+            "ok": sum(1 for c in comps if c["due_status"] == "ok"),
+        },
+        "code_enforcement": code_enf,
+    }
+
+
+@router.get("/reports/summary")
+def get_operational_report(_: dict = Depends(require_permission("permits.manage"))):
+    with pool.connection() as conn:
+        return _build_operational_report(conn)
+
+
+@router.get("/reports/summary.csv")
+def export_operational_report_csv(_: dict = Depends(require_permission("permits.manage"))):
+    with pool.connection() as conn:
+        rep = _build_operational_report(conn)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Category", "Metric", "Value"])
+    p = rep["permits"]
+    w.writerow(["Permits", "Total Permits", p["total"]])
+    w.writerow(["Permits", "Open Permits", p["open"]])
+    w.writerow(["Permits", "Issued / Closed Permits", p["issued"]])
+    w.writerow(["Permits", "Avg Turnaround (Days)", p["avg_turnaround_days"] if p["avg_turnaround_days"] is not None else ""])
+    w.writerow(["Permits", "Total Estimated Valuation ($)", f"{p['total_estimated_value']:.2f}"])
+    rv = rep["revenue"]
+    w.writerow(["Revenue", "Fees Assessed ($)", f"{rv['fees_assessed_cents'] / 100:.2f}"])
+    w.writerow(["Revenue", "Payments Collected ($)", f"{rv['payments_cents'] / 100:.2f}"])
+    w.writerow(["Revenue", "Waivers ($)", f"{rv['waivers_cents'] / 100:.2f}"])
+    w.writerow(["Revenue", "Balance Due ($)", f"{rv['balance_due_cents'] / 100:.2f}"])
+    w.writerow(["Revenue", "Escrow Held ($)", f"{rv['escrow_held_cents'] / 100:.2f}"])
+    ins = rep["inspections"]
+    w.writerow(["Inspections", "Scheduled", ins["scheduled"]])
+    w.writerow(["Inspections", "Passed", ins["passed"]])
+    w.writerow(["Inspections", "Failed", ins["failed"]])
+    ct = rep["contractors"]
+    w.writerow(["Contractors", "Compliant", ct["compliant"]])
+    w.writerow(["Contractors", "Blocked / Non-Compliant", ct["blocked"]])
+    cp = rep["compliance_programs"]
+    w.writerow(["Recurring Compliance", "Overdue", cp["overdue"]])
+    w.writerow(["Recurring Compliance", "Due <= 30d", cp["due_soon"]])
+    ce = rep["code_enforcement"]
+    w.writerow(["Code Enforcement", "Open Cases", ce["open"]])
+    w.writerow(["Code Enforcement", "Overdue Deadlines", ce["overdue"]])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="civicdesk-operational-report.csv"'},
+    )
 
 
 @router.get("/{permit_id}")
