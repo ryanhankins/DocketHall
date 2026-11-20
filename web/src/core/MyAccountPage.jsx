@@ -101,6 +101,18 @@ export default function MyAccountPage({ me, onNavigate }) {
         });
       }
     }
+    for (const b of (data.bills || [])) {
+      if (b.payment_status === 'unpaid' && hasPayableFee(b.amount_due)) {
+        items.push({
+          key: `bill-${b.id}`,
+          item_type: 'bill',
+          item_id: b.id,
+          label: `${b.bill_type.toUpperCase()} ${b.reference_number}`,
+          detail: b.description || b.service_address || (b.account_number ? `Account ${b.account_number}` : ''),
+          fee_amount: b.amount_due,
+        });
+      }
+    }
     return items;
   }, [data]);
 
@@ -160,6 +172,7 @@ export default function MyAccountPage({ me, onNavigate }) {
   const recordsRequests = data?.records_requests || [];
   const formSubmissions = data?.form_submissions || [];
   const subscriptions = data?.subscriptions || [];
+  const bills = data?.bills || [];
 
   return (
     <div>
@@ -295,6 +308,11 @@ export default function MyAccountPage({ me, onNavigate }) {
             <div className="muted" style={{ fontSize: '.78rem' }}>By account email</div>
           </button>
         )}
+        <button type="button" className="card" style={{ marginBottom: 0, cursor: 'pointer', textAlign: 'left', width: '100%' }} onClick={() => setTab('bills')}>
+          <div className="muted" style={{ fontSize: '.8rem' }}>Bills &amp; Citations</div>
+          <div style={{ fontSize: '1.6rem', fontWeight: 700 }}>{counts.bills ?? 0}</div>
+          <div className="muted" style={{ fontSize: '.78rem' }}>By account email</div>
+        </button>
         <button type="button" className="card" style={{ marginBottom: 0, cursor: 'pointer', textAlign: 'left', width: '100%' }} onClick={() => setTab('forms')}>
           <div className="muted" style={{ fontSize: '.8rem' }}>Forms &amp; Alerts</div>
           <div style={{ fontSize: '1.6rem', fontWeight: 700 }}>
@@ -315,6 +333,7 @@ export default function MyAccountPage({ me, onNavigate }) {
               ...(enabled.has('complaints') ? [['complaints', `311 & Complaints (${complaints.length})`]] : []),
               ...(enabled.has('calendar') ? [['reservations', `Reservations (${reservations.length})`]] : []),
               ...(enabled.has('records') ? [['records', `FOIA Requests (${recordsRequests.length})`]] : []),
+              ['bills', `Bills & Citations (${bills.length})`],
               ['forms', `Forms & Alerts (${formSubmissions.length + subscriptions.length})`],
             ].map(([id, label]) => (
               <button
@@ -555,6 +574,51 @@ export default function MyAccountPage({ me, onNavigate }) {
                           <span className="muted">—</span>
                         )}
                       </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {(tab === 'all' || tab === 'bills') && (
+        <div className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '.5rem' }}>
+            <h2 style={{ marginTop: 0 }}>My Utility Bills, Citations &amp; Fees ({bills.length})</h2>
+            <a className="btn sm" href="/#pay">Look Up by Account / Citation # →</a>
+          </div>
+          {bills.length === 0 ? (
+            <p className="muted">
+              {user.email
+                ? `No utility bills or citations matched to ${user.email}.`
+                : 'Add an email address above to link utility bills and citations, or look up by account/citation # on the public portal.'}
+            </p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Reference #</th>
+                    <th>Type</th>
+                    <th>Account / Address</th>
+                    <th>Description</th>
+                    <th>Amount</th>
+                    <th>Due Date</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bills.map(b => (
+                    <tr key={b.id}>
+                      <td><strong>{b.reference_number}</strong></td>
+                      <td>{b.bill_type}</td>
+                      <td>{b.account_number || b.service_address || '—'}</td>
+                      <td>{b.description || '—'}</td>
+                      <td><strong>{b.amount_due}</strong></td>
+                      <td>{b.due_date ? formatDate(b.due_date) : '—'}</td>
+                      <td>{statusBadge(b.payment_status)}</td>
                     </tr>
                   ))}
                 </tbody>

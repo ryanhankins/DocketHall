@@ -32,6 +32,7 @@ def _bootstrap_tenant_schema(slug: str, schema: str) -> None:
         auth.bootstrap()
         audit.bootstrap()
         integrations.bootstrap()
+        payments.bootstrap()
         subscriptions.bootstrap()
         docs.bootstrap()
         registry.bootstrap()

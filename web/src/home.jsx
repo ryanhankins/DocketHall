@@ -2670,6 +2670,158 @@ function NotifyMeCard() {
 }
 
 
+function PayBillsPublicTab() {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [paymentsEnabled, setPaymentsEnabled] = useState(false);
+  const [payingId, setPayingId] = useState(null);
+  const [payMsg, setPayMsg] = useState('');
+
+  useEffect(() => {
+    fetch('/api/payments/config')
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((d) => setPaymentsEnabled(Boolean(d?.enabled)))
+      .catch(() => {});
+    const params = new URLSearchParams(window.location.search);
+    const sid = params.get('session_id');
+    if (params.get('payment') === 'success' && sid) {
+      fetch('/api/payments/verify-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sid }),
+      })
+        .then((r) => (r.ok ? r.json() : {}))
+        .then((res) => {
+          if (res?.paid) setPayMsg('Payment received! Your account balance has been updated.');
+          window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  const lookup = async (e) => {
+    e.preventDefault();
+    const term = query.trim();
+    if (term.length < 3) {
+      setErr('Please enter at least 3 characters (Account # or Citation/Reference #).');
+      return;
+    }
+    setErr('');
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/payments/bills/public-lookup?q=${encodeURIComponent(term)}`);
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d.detail || 'Lookup failed');
+      }
+      setResults(await r.json());
+    } catch (ex) {
+      setErr(ex.message || 'Lookup failed');
+      setResults(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startPay = async (bill) => {
+    setPayingId(bill.id);
+    setErr('');
+    try {
+      const r = await fetch('/api/payments/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_type: 'bill', item_id: bill.id }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || !d.checkout_url) {
+        throw new Error(d.detail || 'Unable to start online checkout');
+      }
+      window.location.href = d.checkout_url;
+    } catch (ex) {
+      setErr(ex.message || 'Checkout failed');
+      setPayingId(null);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>Pay Utility Bill, Citation or Municipal Fee</h2>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Look up water/sewer utility statements, municipal or parking citations, license renewals, or other city fees by your exact Account # or Reference / Citation #.
+      </p>
+      {payMsg && <div className="ok-msg" role="status" style={{ marginBottom: '.75rem' }}>{payMsg}</div>}
+      <form onSubmit={lookup} className="row" style={{ gap: '.5rem', marginBottom: '1rem' }}>
+        <input
+          aria-label="Utility account number or citation reference number"
+          placeholder="Enter Account # (e.g. ACCT-1042) or Reference # (e.g. UTIL-00001, CIT-00002)…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ flex: 1, minWidth: 260 }}
+        />
+        <button type="submit" className="btn primary" disabled={loading}>
+          {loading ? 'Searching…' : 'Look Up Balance'}
+        </button>
+      </form>
+      {err && <div className="error-msg" role="alert">{err}</div>}
+      {Array.isArray(results) && (
+        results.length === 0 ? (
+          <p className="muted">No matching utility bills, citations, or fees found for "{query.trim()}".</p>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Reference #</th>
+                  <th>Type</th>
+                  <th>Account / Address</th>
+                  <th>Description</th>
+                  <th>Due Date</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((b) => (
+                  <tr key={b.id}>
+                    <td><strong>{b.reference_number}</strong></td>
+                    <td>{b.bill_type}</td>
+                    <td>{b.account_number || b.service_address || '—'}</td>
+                    <td>{b.description || '—'}</td>
+                    <td>{b.due_date ? formatDate(b.due_date) : '—'}</td>
+                    <td><strong>{b.amount_due}</strong></td>
+                    <td>
+                      <span className={`badge ${b.payment_status === 'paid' ? 'active' : (b.payment_status === 'waived' ? 'draft' : 'disabled')}`}>
+                        {b.payment_status}
+                      </span>
+                    </td>
+                    <td>
+                      {b.payment_status === 'unpaid' ? (
+                        paymentsEnabled ? (
+                          <button type="button" className="btn sm primary" disabled={payingId === b.id} onClick={() => startPay(b)}>
+                            {payingId === b.id ? 'Redirecting…' : 'Pay Online'}
+                          </button>
+                        ) : (
+                          <span className="muted" style={{ fontSize: '.82rem' }}>Pay at City Hall</span>
+                        )
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+
 function PublicHomePage() {
   const params = useMemo(() => new URLSearchParams(location.search), []);
   const [branding, setBranding] = useState({ city_title: '', has_city_logo: false });
@@ -2722,7 +2874,7 @@ function PublicHomePage() {
         setEnabledModules(list);
         setPublicFeatures(d && typeof d.features === 'object' && d.features ? d.features : {});
         const hashTab = location.hash.replace(/^#/, '');
-        setActiveTab(list.includes(hashTab) ? hashTab : 'overview');
+        setActiveTab(list.includes(hashTab) || hashTab === 'pay' ? hashTab : 'overview');
       })
       .catch(() => { setEnabledModules([]); setPublicFeatures({}); });
   }, [params]);
@@ -2732,7 +2884,7 @@ function PublicHomePage() {
       const h = location.hash.replace(/^#/, '');
       if (!h || h === 'overview') {
         setActiveTab('overview');
-      } else if (enabledModules?.includes(h)) {
+      } else if (h === 'pay' || enabledModules?.includes(h)) {
         setActiveTab(h);
       }
     };
@@ -2742,7 +2894,15 @@ function PublicHomePage() {
 
   const visibleTabs = useMemo(() => {
     if (!enabledModules) return [];
-    return TAB_DEFS.filter((t) => enabledModules.includes(t.id));
+    return [
+      ...TAB_DEFS.filter((t) => enabledModules.includes(t.id)),
+      {
+        id: 'pay',
+        label: 'Utility Billing & Citations',
+        description: 'Look up and pay water/sewer utility bills, municipal citations, license renewals, and fees online.',
+        actionLabel: 'Look Up & Pay →',
+      },
+    ];
   }, [enabledModules]);
 
   const overviewTabs = useMemo(() => {
@@ -2934,6 +3094,7 @@ function PublicHomePage() {
             {activeTab === 'directory' && <DirectoryPublicTab features={publicFeatures.directory || {}} />}
             {activeTab === 'forms' && <FormsPublicTab />}
             {activeTab === 'pages' && <PagesPublicTab />}
+            {activeTab === 'pay' && <PayBillsPublicTab />}
           </div>
         )}
       </main>

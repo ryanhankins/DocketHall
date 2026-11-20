@@ -31,6 +31,18 @@ export const THEME_PRESETS = [
     colors: { ...DEFAULT_THEME },
   },
   {
+    id: 'dockethall-navy',
+    label: 'DocketHall Navy & Sage',
+    colors: {
+      theme_primary: '#1e3a5f',
+      theme_secondary: '#1d4ed8',
+      theme_tint: '#e6f0ff',
+      theme_bg: '#f3f5f8',
+      theme_surface: '#ffffff',
+      theme_header_bg: '#ffffff',
+    },
+  },
+  {
     id: 'birchwood',
     label: 'Birchwood Forest',
     colors: {

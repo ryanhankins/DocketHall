@@ -79,6 +79,16 @@ _CORE_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         set(),
         True,
     ),
+    (
+        "municipal_bills",
+        [
+            "id", "reference_number", "bill_type", "account_number", "payer_name", "payer_email",
+            "service_address", "description", "amount_due", "due_date", "payment_status", "paid_at",
+            "payment_method", "payment_ref", "notes", "created_by", "created_at", "updated_at",
+        ],
+        set(),
+        True,
+    ),
 ]
 
 

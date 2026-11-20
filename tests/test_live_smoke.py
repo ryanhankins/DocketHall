@@ -50,6 +50,7 @@ class LiveSmokeTest(unittest.TestCase):
             "/api/subscriptions/topics",
             "/api/public/search?q=water",
             "/api/public/transparency",
+            "/api/payments/bills/public-lookup?q=UTIL",
         ]
         if "agendas" in enabled:
             public_paths.append("/api/agendas/public")
@@ -102,6 +103,7 @@ class LiveSmokeTest(unittest.TestCase):
             "/api/my-account/summary",
             "/api/modules/admin",
             "/api/modules/admin/presets",
+            "/api/payments/bills",
         ]
         if "permits" in ids:
             admin_paths.extend([

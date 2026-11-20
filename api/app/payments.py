@@ -25,12 +25,13 @@ import urllib.parse
 import urllib.request
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
 from .audit import record_audit
-from .auth import current_user, has_permission, require_admin
+from .auth import current_user, has_permission, require_admin, require_permission
 from .db import pool
 from .integrations import _mask_key, get_app_base_url
 from .tenancy import get_current_tenant_slug, is_multi_tenant, schema_for_slug, tenant_context
@@ -38,6 +39,38 @@ from .tenancy import get_current_tenant_slug, is_multi_tenant, schema_for_slug, 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
 _AMOUNT_RE = re.compile(r"([0-9]+(?:\.[0-9]{1,2})?)")
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS municipal_bills (
+    id               BIGSERIAL PRIMARY KEY,
+    reference_number TEXT NOT NULL UNIQUE,
+    bill_type        TEXT NOT NULL DEFAULT 'utility',
+    account_number   TEXT NOT NULL DEFAULT '',
+    payer_name       TEXT NOT NULL DEFAULT '',
+    payer_email      TEXT NOT NULL DEFAULT '',
+    service_address  TEXT NOT NULL DEFAULT '',
+    description      TEXT NOT NULL DEFAULT '',
+    amount_due       TEXT NOT NULL DEFAULT '',
+    due_date         TEXT NOT NULL DEFAULT '',
+    payment_status   TEXT NOT NULL DEFAULT 'unpaid',
+    paid_at          TIMESTAMPTZ,
+    payment_method   TEXT NOT NULL DEFAULT '',
+    payment_ref      TEXT NOT NULL DEFAULT '',
+    notes            TEXT NOT NULL DEFAULT '',
+    created_by       TEXT NOT NULL DEFAULT '',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS municipal_bills_ref_idx ON municipal_bills(reference_number);
+CREATE INDEX IF NOT EXISTS municipal_bills_acct_idx ON municipal_bills(account_number);
+CREATE INDEX IF NOT EXISTS municipal_bills_email_idx ON municipal_bills(LOWER(payer_email));
+"""
+
+
+def bootstrap() -> None:
+    with pool.connection() as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(424255)")
+        conn.execute(SCHEMA)
 
 
 def _parse_cents(fee_text: str) -> int:
@@ -140,7 +173,7 @@ class StripeConfigIn(BaseModel):
 
 
 class CheckoutIn(BaseModel):
-    item_type: Literal["permit", "reservation"]
+    item_type: Literal["permit", "reservation", "bill"]
     item_id: int
 
 
@@ -248,6 +281,14 @@ def _mark_item_paid(conn, item_type: str, item_id: int, session_id: str) -> bool
             (item_id,),
         ).fetchone()
         return bool(row)
+    elif item_type == "bill":
+        row = conn.execute(
+            "UPDATE municipal_bills SET payment_status = 'paid', paid_at = now(), "
+            "payment_method = 'stripe', payment_ref = %s, updated_at = now() "
+            "WHERE id = %s AND payment_status != 'paid' RETURNING reference_number",
+            (session_id, item_id),
+        ).fetchone()
+        return bool(row)
     return False
 
 
@@ -285,6 +326,24 @@ def create_checkout_session(
             desc = f"Permit {row[1]} — {row[2]}: {row[3]}"
             success_url = f"{base}/app?payment=success&session_id={{CHECKOUT_SESSION_ID}}#my-permits"
             cancel_url = f"{base}/app?payment=cancelled#my-permits"
+        elif body.item_type == "bill":
+            row = conn.execute(
+                "SELECT id, reference_number, bill_type, account_number, description, amount_due, payment_status "
+                "FROM municipal_bills WHERE id = %s",
+                (body.item_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Bill or citation not found")
+            if row[6] == "paid":
+                raise HTTPException(status_code=400, detail="This bill is already paid")
+            if row[6] == "waived":
+                raise HTTPException(status_code=400, detail="This bill has been waived")
+            cents = _parse_cents(row[5])
+            if cents <= 0:
+                raise HTTPException(status_code=400, detail="No payable dollar amount is set on this bill")
+            desc = f"{row[2].title()} {row[1]}" + (f" — {row[4]}" if row[4] else "")
+            success_url = f"{base}/?payment=success&session_id={{CHECKOUT_SESSION_ID}}#pay"
+            cancel_url = f"{base}/?payment=cancelled#pay"
         else:
             row = conn.execute(
                 "SELECT id, reservation_number, facility_name, event_date, fee_amount, payment_status "
@@ -336,7 +395,7 @@ def verify_checkout_session(body: VerifySessionIn):
     meta = session.get("metadata") or {}
     item_type = meta.get("item_type")
     item_id = int(meta["item_id"]) if str(meta.get("item_id") or "").isdigit() else 0
-    if paid and item_type in ("permit", "reservation") and item_id > 0:
+    if paid and item_type in ("permit", "reservation", "bill") and item_id > 0:
         with pool.connection() as conn:
             changed = _mark_item_paid(conn, item_type, item_id, sid)
         if changed:
@@ -383,7 +442,7 @@ async def stripe_webhook(request: Request):
             item_type = meta.get("item_type")
             item_id = int(meta["item_id"]) if str(meta.get("item_id") or "").isdigit() else 0
             t_slug = (meta.get("tenant_slug") or "default").strip()
-            if item_type in ("permit", "reservation") and item_id > 0:
+            if item_type in ("permit", "reservation", "bill") and item_id > 0:
                 schema = schema_for_slug(t_slug) if (is_multi_tenant() and t_slug != "default") else "public"
                 with tenant_context(t_slug, schema):
                     with pool.connection() as conn:
@@ -391,3 +450,203 @@ async def stripe_webhook(request: Request):
                     if changed:
                         record_audit("stripe", f"payment.{item_type}_paid", f"{item_type} #{item_id} via webhook")
     return {"received": True}
+
+
+BillType = Literal["utility", "citation", "license", "misc"]
+BillStatus = Literal["unpaid", "paid", "waived"]
+
+
+class BillIn(BaseModel):
+    reference_number: str = ""
+    bill_type: BillType = "utility"
+    account_number: str = ""
+    payer_name: str = ""
+    payer_email: str = ""
+    service_address: str = ""
+    description: str = ""
+    amount_due: str = ""
+    due_date: str = ""
+    notes: str = ""
+
+
+class BillPatchIn(BaseModel):
+    bill_type: BillType | None = None
+    account_number: str | None = None
+    payer_name: str | None = None
+    payer_email: str | None = None
+    service_address: str | None = None
+    description: str | None = None
+    amount_due: str | None = None
+    due_date: str | None = None
+    payment_status: BillStatus | None = None
+    payment_method: str | None = None
+    payment_ref: str | None = None
+    notes: str | None = None
+
+
+def _row_to_bill(r, include_private: bool = True) -> dict:
+    out = {
+        "id": r[0],
+        "reference_number": r[1],
+        "bill_type": r[2],
+        "account_number": r[3],
+        "service_address": r[6],
+        "description": r[7],
+        "amount_due": r[8],
+        "due_date": r[9],
+        "payment_status": r[10],
+        "paid_at": r[11].isoformat() if r[11] else None,
+        "created_at": r[16].isoformat() if r[16] else None,
+    }
+    if include_private:
+        out.update({
+            "payer_name": r[4],
+            "payer_email": r[5],
+            "payment_method": r[12],
+            "payment_ref": r[13],
+            "notes": r[14],
+            "created_by": r[15],
+            "updated_at": r[17].isoformat() if r[17] else None,
+        })
+    return out
+
+
+_BILL_COLS = (
+    "id, reference_number, bill_type, account_number, payer_name, payer_email, "
+    "service_address, description, amount_due, due_date, payment_status, paid_at, "
+    "payment_method, payment_ref, notes, created_by, created_at, updated_at"
+)
+
+
+@router.get("/bills/public-lookup")
+def public_lookup_bills(q: str = Query(..., min_length=3, max_length=64)):
+    """Public lookup of utility bills, citations, or misc fees by exact reference or account number."""
+    term = q.strip()
+    if len(term) < 3:
+        raise HTTPException(status_code=400, detail="Enter at least 3 characters")
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"SELECT {_BILL_COLS} FROM municipal_bills "
+            "WHERE UPPER(reference_number) = UPPER(%s) OR (account_number != '' AND UPPER(account_number) = UPPER(%s)) "
+            "ORDER BY (payment_status = 'unpaid') DESC, id DESC LIMIT 20",
+            (term, term),
+        ).fetchall()
+    return [_row_to_bill(r, include_private=False) for r in rows]
+
+
+@router.get("/bills")
+def list_bills(
+    bill_type: str = "",
+    payment_status: str = "",
+    q: str = "",
+    _: dict = Depends(require_permission("settings.manage")),
+):
+    clauses = ["TRUE"]
+    params: list = []
+    if bill_type:
+        clauses.append("bill_type = %s")
+        params.append(bill_type.strip())
+    if payment_status:
+        clauses.append("payment_status = %s")
+        params.append(payment_status.strip())
+    if q.strip():
+        like = f"%{q.strip()}%"
+        clauses.append(
+            "(reference_number ILIKE %s OR account_number ILIKE %s OR payer_name ILIKE %s "
+            "OR payer_email ILIKE %s OR service_address ILIKE %s OR description ILIKE %s)"
+        )
+        params.extend([like, like, like, like, like, like])
+    where_sql = " AND ".join(clauses)
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"SELECT {_BILL_COLS} FROM municipal_bills WHERE {where_sql} ORDER BY id DESC LIMIT 200",
+            tuple(params),
+        ).fetchall()
+    return [_row_to_bill(r, include_private=True) for r in rows]
+
+
+@router.post("/bills", status_code=201)
+def create_bill(body: BillIn, user: dict = Depends(require_permission("settings.manage"))):
+    if _parse_cents(body.amount_due) <= 0:
+        raise HTTPException(status_code=400, detail="Enter a positive dollar amount due (e.g. $45.00)")
+    prefix_map = {"utility": "UTIL", "citation": "CIT", "license": "LIC", "misc": "FEE"}
+    prefix = prefix_map.get(body.bill_type, "BILL")
+    ref = body.reference_number.strip().upper()
+    try:
+        with pool.connection() as conn:
+            if not ref:
+                next_seq = (conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM municipal_bills").fetchone() or [1])[0]
+                ref = f"{prefix}-{next_seq:05d}"
+            row = conn.execute(
+                f"INSERT INTO municipal_bills "
+                "(reference_number, bill_type, account_number, payer_name, payer_email, "
+                "service_address, description, amount_due, due_date, notes, created_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                f"RETURNING {_BILL_COLS}",
+                (
+                    ref,
+                    body.bill_type,
+                    body.account_number.strip(),
+                    body.payer_name.strip(),
+                    body.payer_email.strip(),
+                    body.service_address.strip(),
+                    body.description.strip(),
+                    body.amount_due.strip(),
+                    body.due_date.strip(),
+                    body.notes.strip(),
+                    user["username"],
+                ),
+            ).fetchone()
+    except UniqueViolation:
+        raise HTTPException(status_code=409, detail=f"Reference number '{ref}' already exists")
+    record_audit(user["username"], "bill.created", "municipal_bills", row[0], f"Created {body.bill_type} bill {ref}")
+    return _row_to_bill(row, include_private=True)
+
+
+@router.patch("/bills/{bill_id}")
+def update_bill(
+    bill_id: int,
+    body: BillPatchIn,
+    user: dict = Depends(require_permission("settings.manage")),
+):
+    sets: list[str] = ["updated_at = now()"]
+    params: list = []
+    for field in (
+        "bill_type", "account_number", "payer_name", "payer_email",
+        "service_address", "description", "amount_due", "due_date",
+        "payment_method", "payment_ref", "notes",
+    ):
+        val = getattr(body, field)
+        if val is not None:
+            sets.append(f"{field} = %s")
+            params.append(val.strip())
+    if body.payment_status is not None:
+        sets.append("payment_status = %s")
+        params.append(body.payment_status)
+        if body.payment_status == "paid":
+            sets.append("paid_at = COALESCE(paid_at, now())")
+        elif body.payment_status == "unpaid":
+            sets.append("paid_at = NULL")
+    params.append(bill_id)
+    with pool.connection() as conn:
+        row = conn.execute(
+            f"UPDATE municipal_bills SET {', '.join(sets)} WHERE id = %s RETURNING {_BILL_COLS}",
+            tuple(params),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Bill not found")
+    record_audit(user["username"], "bill.updated", "municipal_bills", bill_id, f"Updated bill {row[1]}")
+    return _row_to_bill(row, include_private=True)
+
+
+@router.delete("/bills/{bill_id}")
+def delete_bill(bill_id: int, user: dict = Depends(require_permission("settings.manage"))):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "DELETE FROM municipal_bills WHERE id = %s RETURNING reference_number",
+            (bill_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Bill not found")
+    record_audit(user["username"], "bill.deleted", "municipal_bills", bill_id, f"Deleted bill {row[0]}")
+    return {"deleted": True}

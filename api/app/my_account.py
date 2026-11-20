@@ -68,6 +68,7 @@ def get_my_account_summary(user: dict = Depends(_require_authenticated)):
     records_requests: list[dict] = []
     form_submissions: list[dict] = []
     subscriptions: list[dict] = []
+    bills: list[dict] = []
     stripe_enabled = False
 
     with pool.connection() as conn:
@@ -221,10 +222,34 @@ def get_my_account_summary(user: dict = Depends(_require_authenticated)):
                 for r in sub_rows
             ]
 
+            b_rows = conn.execute(
+                "SELECT id, reference_number, bill_type, account_number, service_address, "
+                "description, amount_due, due_date, payment_status, created_at "
+                "FROM municipal_bills WHERE LOWER(payer_email) = LOWER(%s) "
+                "ORDER BY (payment_status = 'unpaid') DESC, id DESC LIMIT 50",
+                (email,),
+            ).fetchall()
+            bills = [
+                {
+                    "id": r[0],
+                    "reference_number": r[1],
+                    "bill_type": r[2],
+                    "account_number": r[3] or "",
+                    "service_address": r[4] or "",
+                    "description": r[5] or "",
+                    "amount_due": r[6] or "",
+                    "due_date": r[7] or "",
+                    "payment_status": r[8] or "unpaid",
+                    "created_at": r[9].isoformat() if r[9] else None,
+                }
+                for r in b_rows
+            ]
+
     today_str = date.today().isoformat()
     open_permits = sum(1 for p in permits if p["status"] not in ("closed", "denied", "withdrawn", "expired"))
     unpaid_permits = [p for p in permits if p["payment_status"] != "paid" and _has_payable_amount(p["fee_amount"])]
     unpaid_reservations = [r for r in reservations if r["payment_status"] != "paid" and r["status"] != "cancelled" and _has_payable_amount(r["fee_amount"])]
+    unpaid_bills = [b for b in bills if b["payment_status"] == "unpaid" and _has_payable_amount(b["amount_due"])]
     open_complaints = sum(1 for c in complaints if c["status"] not in ("closed", "resolved", "dismissed"))
     upcoming_inspections = sum(
         1 for i in inspections
@@ -243,7 +268,7 @@ def get_my_account_summary(user: dict = Depends(_require_authenticated)):
         "counts": {
             "open_permits": open_permits,
             "total_permits": len(permits),
-            "unpaid_items": len(unpaid_permits) + len(unpaid_reservations),
+            "unpaid_items": len(unpaid_permits) + len(unpaid_reservations) + len(unpaid_bills),
             "upcoming_inspections": upcoming_inspections,
             "open_complaints": open_complaints,
             "total_complaints": len(complaints),
@@ -251,6 +276,7 @@ def get_my_account_summary(user: dict = Depends(_require_authenticated)):
             "records_requests": len(records_requests),
             "form_submissions": len(form_submissions),
             "subscriptions": len(subscriptions),
+            "bills": len(bills),
         },
         "permits": permits,
         "inspections": inspections,
@@ -259,6 +285,7 @@ def get_my_account_summary(user: dict = Depends(_require_authenticated)):
         "records_requests": records_requests,
         "form_submissions": form_submissions,
         "subscriptions": subscriptions,
+        "bills": bills,
     }
 
 
