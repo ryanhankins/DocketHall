@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
+from .audit import record_audit
 from .auth import require_permission
 from .db import pool
 from .integrations import _send_smtp_mail, get_app_base_url
@@ -51,6 +52,12 @@ PUBLIC_TOPICS = [
         "module_id": "records",
         "label": "Public Contracts & Records",
         "description": "Get notified when new public contracts, resolutions, or records are published.",
+    },
+    {
+        "id": "notices",
+        "module_id": "notices",
+        "label": "News, Notices & Bids",
+        "description": "Get notified when city news, public notices, RFPs/bids, or job postings are published.",
     },
 ]
 _VALID_TOPIC_IDS = {t["id"] for t in PUBLIC_TOPICS}
@@ -250,6 +257,68 @@ def list_subscribers(_: dict = Depends(require_permission("settings.manage"))):
             "created_at": r[4].isoformat() if r[4] else None,
         })
     return {"topics": PUBLIC_TOPICS, "counts": counts, "subscribers": subs}
+
+
+class BulletinIn(BaseModel):
+    topic: str = "all"
+    subject: str
+    body: str
+    link_path: str = ""
+
+
+@router.post("/bulletin")
+def send_email_bulletin(
+    body: BulletinIn,
+    request: Request,
+    user: dict = Depends(require_permission("settings.manage", "notices.manage", "agendas.manage")),
+):
+    subj = body.subject.strip()
+    msg_body = body.body.strip()
+    if not subj or not msg_body:
+        raise HTTPException(status_code=400, detail="Subject and message body are required")
+    topic = (body.topic or "all").strip()
+    if topic != "all" and topic not in _VALID_TOPIC_IDS:
+        raise HTTPException(status_code=400, detail="Invalid subscriber topic")
+
+    with pool.connection() as conn:
+        smtp_cfg = _get_smtp_config(conn)
+        if not smtp_cfg:
+            raise HTTPException(status_code=400, detail="Outgoing SMTP email is not configured/enabled")
+        if topic == "all":
+            rows = conn.execute(
+                "SELECT DISTINCT ON (email) email, token FROM public_subscriptions "
+                "WHERE is_active = TRUE ORDER BY email, id DESC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT email, token FROM public_subscriptions WHERE topic = %s AND is_active = TRUE",
+                (topic,),
+            ).fetchall()
+    if not rows:
+        raise HTTPException(status_code=400, detail="No active subscribers found for the selected topic")
+
+    smtp_host, smtp_port, sender, app_pw = smtp_cfg
+    base = get_app_base_url(request)
+    extra_link = ""
+    if body.link_path.strip():
+        lp = body.link_path.strip()
+        extra_link = lp if lp.startswith(("http://", "https://")) else f"{base}{lp}"
+
+    def _bg():
+        for em, tok in rows:
+            try:
+                unsub_url = f"{base}/api/subscriptions/unsubscribe?token={tok}"
+                parts = [msg_body]
+                if extra_link:
+                    parts.append(f"More details: {extra_link}")
+                parts.append(f"---\nUnsubscribe: {unsub_url}")
+                _send_smtp_mail(smtp_host, smtp_port, sender, app_pw, em, subj, "\n\n".join(parts))
+            except Exception:
+                pass
+
+    threading.Thread(target=_bg, daemon=True).start()
+    record_audit(user["username"], "subscription.bulletin_sent", f"Topic={topic}, recipients={len(rows)}, subject={subj}")
+    return {"queued": True, "recipient_count": len(rows)}
 
 
 @router.delete("/{sub_id}")

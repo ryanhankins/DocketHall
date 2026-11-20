@@ -456,6 +456,8 @@ export default function IntegrationsPage() {
           </div>
         </div>
 
+        <BulletinComposer topics={subData.topics || []} showToast={showToast} />
+
         {!(subData.subscribers || []).length ? (
           <p className="muted" style={{ margin: 0 }}>No public subscribers yet.</p>
         ) : (
@@ -499,6 +501,83 @@ export default function IntegrationsPage() {
 
       <StripePaymentsCard showToast={showToast} />
     </section>
+  );
+}
+
+function BulletinComposer({ topics, showToast }) {
+  const [topic, setTopic] = useState('all');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [linkPath, setLinkPath] = useState('');
+  const [sending, setSending] = useState(false);
+  const [msg, setMsg] = useState({ text: '', isError: false });
+
+  const handleSend = async (e) => {
+    e.preventDefault();
+    if (!subject.trim() || !body.trim()) return;
+    if (!window.confirm('Send this email bulletin to all active subscribers in the selected group?')) return;
+    setSending(true);
+    setMsg({ text: '', isError: false });
+    try {
+      const res = await api('/api/subscriptions/bulletin', {
+        method: 'POST',
+        body: JSON.stringify({
+          topic,
+          subject: subject.trim(),
+          body: body.trim(),
+          link_path: linkPath.trim(),
+        }),
+      });
+      const ok = `Bulletin queued for ${res.recipient_count} subscriber(s).`;
+      setMsg({ text: ok, isError: false });
+      showToast(ok, 'ok');
+      setSubject('');
+      setBody('');
+      setLinkPath('');
+    } catch (err) {
+      setMsg({ text: err.message, isError: true });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <details style={{ marginBottom: '1rem', padding: '.75rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6 }}>
+      <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: '.92rem', color: '#1e293b' }}>
+        Send Email Bulletin / Newsletter to Subscribers
+      </summary>
+      <form onSubmit={handleSend} style={{ display: 'grid', gap: '.65rem', marginTop: '.75rem' }}>
+        <div className="row">
+          <div className="field" style={{ flex: 1, minWidth: 180 }}>
+            <label htmlFor="bul-topic">Audience</label>
+            <select id="bul-topic" value={topic} onChange={(e) => setTopic(e.target.value)}>
+              <option value="all">All Active Subscribers</option>
+              {topics.map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+          <div className="field" style={{ flex: 2, minWidth: 220 }}>
+            <label htmlFor="bul-subj">Subject *</label>
+            <input id="bul-subj" required placeholder="e.g. November City Newsletter & Snow Plow Reminder" value={subject} onChange={(e) => setSubject(e.target.value)} />
+          </div>
+        </div>
+        <div className="field">
+          <label htmlFor="bul-body">Message *</label>
+          <textarea id="bul-body" rows={4} required placeholder="Write your city update or announcement..." value={body} onChange={(e) => setBody(e.target.value)} />
+        </div>
+        <div className="field">
+          <label htmlFor="bul-link">Optional Link URL or Path (e.g. /#notices or https://...)</label>
+          <input id="bul-link" placeholder="/#notices" value={linkPath} onChange={(e) => setLinkPath(e.target.value)} />
+        </div>
+        <div>
+          <button type="submit" className="btn sm primary" disabled={sending}>
+            {sending ? 'Sending…' : 'Send Email Bulletin'}
+          </button>
+        </div>
+        {msg.text && <div className={msg.isError ? 'error-msg' : 'ok-msg'} role="status">{msg.text}</div>}
+      </form>
+    </details>
   );
 }
 
