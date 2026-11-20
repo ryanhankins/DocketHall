@@ -23,6 +23,12 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+if [ -r /etc/civicdesk/upgrade.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . /etc/civicdesk/upgrade.env
+  set +a
+fi
 STACK_NAME="${STACK_NAME:-civicdesk}"
 if [ -z "${CIVICDESK_SECRET_PREFIX+x}" ]; then
   if [ "$STACK_NAME" = "civicdesk" ]; then
@@ -73,7 +79,13 @@ if [ "$CIVICDESK_PULL_ONLY" = "true" ]; then
   done
 else
   echo "==> Building frontend bundle"
-  (cd web && ([ -d node_modules ] || npm ci) && npm run build)
+  if [ "${SKIP_WEB_BUILD:-false}" = "true" ]; then
+    echo "    (skipped via SKIP_WEB_BUILD=true)"
+  elif command -v npm >/dev/null 2>&1; then
+    (cd web && ([ -d node_modules ] || npm ci) && npm run build)
+  else
+    docker run --rm -v "$(pwd)/web:/src" -w /src node:20-alpine sh -c '([ -d node_modules ] || npm ci) && npm run build'
+  fi
 
   echo "==> Building images"
   COMMIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
