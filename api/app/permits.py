@@ -241,6 +241,19 @@ CREATE TABLE IF NOT EXISTS contractor_licenses (
     updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS contractor_licenses_status_idx ON contractor_licenses(status, business_name);
+CREATE TABLE IF NOT EXISTS permit_fee_entries (
+    id               BIGSERIAL PRIMARY KEY,
+    permit_id        BIGINT NOT NULL REFERENCES permits(id) ON DELETE CASCADE,
+    entry_type       TEXT NOT NULL DEFAULT 'fee',
+    description      TEXT NOT NULL,
+    amount_cents     INTEGER NOT NULL DEFAULT 0,
+    payment_method   TEXT NOT NULL DEFAULT '',
+    reference_number TEXT NOT NULL DEFAULT '',
+    recorded_by      TEXT NOT NULL DEFAULT '',
+    notes            TEXT NOT NULL DEFAULT '',
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS permit_fee_entries_permit_idx ON permit_fee_entries(permit_id, id);
 """
 
 _DEFAULT_PORTAL_SETTINGS = {
@@ -931,6 +944,18 @@ class PermitMessageIn(BaseModel):
     is_internal: bool = False
 
 
+FEE_ENTRY_TYPES = ("fee", "payment", "waiver", "escrow_deposit", "escrow_refund")
+
+
+class FeeEntryIn(BaseModel):
+    entry_type: str = "fee"
+    description: str
+    amount_dollars: float
+    payment_method: str = ""
+    reference_number: str = ""
+    notes: str = ""
+
+
 # ------------------------------------------------------------------ helpers
 def _load_settings(conn) -> dict:
     row = conn.execute(
@@ -1142,6 +1167,28 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
         })
 
     links_by_permit = _hydrate_links(conn, ids)
+
+    fee_rows = conn.execute(
+        "SELECT id, permit_id, entry_type, description, amount_cents, payment_method, "
+        "       reference_number, recorded_by, notes, created_at "
+        "FROM permit_fee_entries WHERE permit_id = ANY(%s) ORDER BY id ASC",
+        (ids,),
+    ).fetchall()
+    fees_by_permit: dict[int, list[dict]] = {}
+    for fe in fee_rows:
+        fees_by_permit.setdefault(fe[1], []).append({
+            "id": fe[0],
+            "permit_id": fe[1],
+            "entry_type": fe[2],
+            "description": fe[3],
+            "amount_cents": fe[4],
+            "payment_method": fe[5] or "",
+            "reference_number": fe[6] or "",
+            "recorded_by": fe[7] or "",
+            "notes": fe[8] or "",
+            "created_at": fe[9].isoformat() if fe[9] else None,
+        })
+
     out = []
     for r in rows:
         permit_links = links_by_permit.get(r[0], [])
@@ -1149,6 +1196,21 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
             lp for lp in permit_links
             if lp["direction"] == "prerequisite" and lp["status"] not in _SATISFIED_PREREQ_STATUSES
         ]
+        f_entries = fees_by_permit.get(r[0], [])
+        fees_assessed = sum(e["amount_cents"] for e in f_entries if e["entry_type"] == "fee")
+        waivers = sum(e["amount_cents"] for e in f_entries if e["entry_type"] == "waiver")
+        payments = sum(e["amount_cents"] for e in f_entries if e["entry_type"] == "payment")
+        escrow_dep = sum(e["amount_cents"] for e in f_entries if e["entry_type"] == "escrow_deposit")
+        escrow_ref = sum(e["amount_cents"] for e in f_entries if e["entry_type"] == "escrow_refund")
+        fee_summary = {
+            "fees_assessed_cents": fees_assessed,
+            "waivers_cents": waivers,
+            "payments_cents": payments,
+            "balance_due_cents": max(0, fees_assessed - waivers - payments),
+            "escrow_deposited_cents": escrow_dep,
+            "escrow_refunded_cents": escrow_ref,
+            "escrow_held_cents": max(0, escrow_dep - escrow_ref),
+        }
         out.append({
             "id": r[0],
             "permit_number": r[1],
@@ -1193,6 +1255,8 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
             "inspections": insp_by_permit.get(r[0], []),
             "messages": msgs_by_permit.get(r[0], []),
             "activity_log": logs_by_permit.get(r[0], []),
+            "fee_entries": f_entries,
+            "fee_summary": fee_summary,
         })
     return out
 
@@ -2931,3 +2995,170 @@ def delete_contractor(contractor_id: int, user: dict = Depends(require_permissio
             raise HTTPException(status_code=404, detail="Contractor license not found")
     record_audit(user["username"], "permits.contractor_delete", f"Deleted {row[1]} ({row[2]})")
     return {"deleted": True, "id": contractor_id}
+
+
+# ------------------------------------------------------------------ itemized fee ledger, escrow & receipts
+
+def _sync_permit_fee_totals(conn, permit_id: int) -> None:
+    rows = conn.execute(
+        "SELECT entry_type, amount_cents FROM permit_fee_entries WHERE permit_id = %s",
+        (permit_id,),
+    ).fetchall()
+    if not rows:
+        return
+    fees = sum(r[1] for r in rows if r[0] == "fee")
+    waivers = sum(r[1] for r in rows if r[0] == "waiver")
+    payments = sum(r[1] for r in rows if r[0] == "payment")
+    bal = fees - waivers - payments
+    if fees > 0:
+        pay_status = "paid" if (bal <= 0 and payments > 0) else ("waived" if (bal <= 0 and waivers > 0) else "unpaid")
+        conn.execute(
+            "UPDATE permits SET fee_amount = %s, payment_status = %s, updated_at = now() WHERE id = %s",
+            (f"${fees / 100:,.2f}", pay_status, permit_id),
+        )
+
+
+@router.post("/{permit_id}/fees", status_code=201)
+def add_fee_entry(
+    permit_id: int,
+    body: FeeEntryIn,
+    user: dict = Depends(require_permission("permits.manage")),
+):
+    etype = body.entry_type.strip().lower()
+    if etype not in FEE_ENTRY_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid fee entry type")
+    desc = body.description.strip()
+    if not desc:
+        raise HTTPException(status_code=400, detail="Description is required")
+    cents = int(round(body.amount_dollars * 100))
+    if cents <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than zero")
+    with pool.connection() as conn:
+        _get_permit_or_404(conn, permit_id)
+        conn.execute(
+            "INSERT INTO permit_fee_entries "
+            "(permit_id, entry_type, description, amount_cents, payment_method, reference_number, recorded_by, notes) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                permit_id,
+                etype,
+                desc,
+                cents,
+                body.payment_method.strip(),
+                body.reference_number.strip(),
+                user["username"],
+                body.notes.strip(),
+            ),
+        )
+        _sync_permit_fee_totals(conn, permit_id)
+        conn.execute(
+            "INSERT INTO permit_activity_log (permit_id, action, actor_username, note) "
+            "VALUES (%s, %s, %s, %s)",
+            (permit_id, f"Ledger: {etype.replace('_', ' ').title()}", user["username"], f"{desc} (${cents / 100:,.2f})"),
+        )
+        return _get_permit_or_404(conn, permit_id, include_internal=True)
+
+
+@router.delete("/{permit_id}/fees/{entry_id}")
+def delete_fee_entry(
+    permit_id: int,
+    entry_id: int,
+    user: dict = Depends(require_permission("permits.manage")),
+):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "DELETE FROM permit_fee_entries WHERE id = %s AND permit_id = %s RETURNING description, amount_cents",
+            (entry_id, permit_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Fee ledger entry not found")
+        _sync_permit_fee_totals(conn, permit_id)
+        conn.execute(
+            "INSERT INTO permit_activity_log (permit_id, action, actor_username, note) "
+            "VALUES (%s, 'Ledger Entry Removed', %s, %s)",
+            (permit_id, user["username"], f"{row[0]} (${row[1] / 100:,.2f})"),
+        )
+        return _get_permit_or_404(conn, permit_id, include_internal=True)
+
+
+@router.get("/{permit_id}/receipt")
+def get_permit_receipt_pdf(
+    permit_id: int,
+    user: dict = Depends(require_permission("permits.submit", "permits.manage")),
+):
+    with pool.connection() as conn:
+        permit = _get_permit_or_404(conn, permit_id)
+    _check_permit_access(permit, user)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=54, rightMargin=54, topMargin=54, bottomMargin=54)
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph("<b>FEE &amp; ESCROW PAYMENT RECEIPT</b>", styles["Title"]),
+        Paragraph(f"Permit Number: <b>{_xml_escape(str(permit['permit_number'] or ''))}</b>", styles["Normal"]),
+        Paragraph(f"Receipt Generated: {date.today().isoformat()}", styles["Normal"]),
+        Spacer(1, 10),
+    ]
+    meta_rows = [
+        ["Applicant", permit["applicant_name"] or "—"],
+        ["Property Address", permit["property_address"] or "—"],
+        ["Permit Type / Use", f"{permit['permit_type_name']} — {permit['permit_use_name']}"],
+        ["Overall Payment Status", str(permit["payment_status"] or "unpaid").title()],
+    ]
+    mtbl = Table(meta_rows, colWidths=[145, 355])
+    mtbl.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#eef2f6")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("PADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.extend([mtbl, Spacer(1, 14)])
+
+    entries = permit.get("fee_entries") or []
+    summary = permit.get("fee_summary") or {}
+    if entries:
+        story.append(Paragraph("<b>Itemized Fee &amp; Escrow Ledger</b>", styles["Heading2"]))
+        t_rows = [["Date", "Type", "Description", "Method / Ref", "Amount"]]
+        for e in entries:
+            t_rows.append([
+                (e.get("created_at") or "")[:10] or "—",
+                e["entry_type"].replace("_", " ").title(),
+                e["description"],
+                " / ".join(x for x in (e.get("payment_method"), e.get("reference_number")) if x) or "—",
+                f"${e['amount_cents'] / 100:,.2f}",
+            ])
+        etbl = Table(t_rows, colWidths=[72, 92, 168, 98, 70])
+        etbl.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("ALIGN", (4, 1), (4, -1), "RIGHT"),
+            ("PADDING", (0, 0), (-1, -1), 5),
+        ]))
+        story.extend([etbl, Spacer(1, 14)])
+
+    sum_rows = [
+        ["Total Fees Assessed", f"${summary.get('fees_assessed_cents', 0) / 100:,.2f}"],
+        ["Waivers / Credits", f"${summary.get('waivers_cents', 0) / 100:,.2f}"],
+        ["Payments Received", f"${summary.get('payments_cents', 0) / 100:,.2f}"],
+        ["Balance Due", f"${summary.get('balance_due_cents', 0) / 100:,.2f}"],
+        ["Escrow Deposited", f"${summary.get('escrow_deposited_cents', 0) / 100:,.2f}"],
+        ["Escrow Refunded / Released", f"${summary.get('escrow_refunded_cents', 0) / 100:,.2f}"],
+        ["Current Escrow Held", f"${summary.get('escrow_held_cents', 0) / 100:,.2f}"],
+    ]
+    stbl = Table(sum_rows, colWidths=[220, 120])
+    stbl.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f8fafc")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("PADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.append(stbl)
+    doc.build(story)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{permit["permit_number"]}-receipt.pdf"'},
+    )

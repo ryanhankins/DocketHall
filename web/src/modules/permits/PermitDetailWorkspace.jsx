@@ -67,6 +67,13 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
   const [openChecklistId, setOpenChecklistId] = useState(null);
   const [newCheckItem, setNewCheckItem] = useState('');
 
+  // Fee ledger form
+  const [feeType, setFeeType] = useState('fee');
+  const [feeDesc, setFeeDesc] = useState('');
+  const [feeAmt, setFeeAmt] = useState('');
+  const [feeMethod, setFeeMethod] = useState('');
+  const [feeRef, setFeeRef] = useState('');
+
   // Message form
   const [msgText, setMsgText] = useState('');
   const [msgInternal, setMsgInternal] = useState(false);
@@ -182,6 +189,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
             + Create Follow-Up Permit
           </button>
           <a className="btn sm primary" href={`/api/permits/${permit.id}/pdf`} target="_blank" rel="noreferrer">Permit PDF</a>
+          <a className="btn sm" href={`/api/permits/${permit.id}/receipt`} target="_blank" rel="noreferrer">Receipt PDF</a>
           {(permit.status === 'issued' || permit.status === 'closed') && (
             <a
               className="btn sm"
@@ -218,6 +226,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
       <div className="tabs">
         {[
           ['overview', 'Overview & Review'],
+          ['fees', `Fees & Escrow (${(permit.fee_entries || []).length})`],
           ['workflow', `Workflow (${workflow.length})`],
           ['inspections', `Inspections (${inspections.length})`],
           ['messages', `Messages (${messages.length})`],
@@ -663,6 +672,140 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
           </div>
         </div>
       )}
+
+      {tab === 'fees' && (() => {
+        const fs = permit.fee_summary || {};
+        const entries = permit.fee_entries || [];
+        const fmt = (c) => `$${((Number(c) || 0) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        return (
+          <div className="card">
+            <div className="between" style={{ marginBottom: '.85rem', flexWrap: 'wrap', gap: '.5rem' }}>
+              <h2 style={{ margin: 0 }}>Itemized Fee &amp; Escrow Ledger</h2>
+              <a className="btn sm" href={`/api/permits/${permit.id}/receipt`} target="_blank" rel="noreferrer">
+                Download Receipt PDF
+              </a>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '.65rem', marginBottom: '1rem' }}>
+              <div style={{ padding: '.65rem .8rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#f8fafc' }}>
+                <div className="muted" style={{ fontSize: '.78rem' }}>Fees Assessed</div>
+                <strong style={{ fontSize: '1.1rem' }}>{fmt(fs.fees_assessed_cents)}</strong>
+              </div>
+              <div style={{ padding: '.65rem .8rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#f8fafc' }}>
+                <div className="muted" style={{ fontSize: '.78rem' }}>Payments &amp; Waivers</div>
+                <strong style={{ fontSize: '1.1rem' }}>{fmt((fs.payments_cents || 0) + (fs.waivers_cents || 0))}</strong>
+              </div>
+              <div style={{ padding: '.65rem .8rem', border: '1px solid #e2e8f0', borderRadius: 8, background: (fs.balance_due_cents || 0) > 0 ? '#fffbeb' : '#f0fdf4' }}>
+                <div className="muted" style={{ fontSize: '.78rem' }}>Balance Due</div>
+                <strong style={{ fontSize: '1.1rem' }}>{fmt(fs.balance_due_cents)}</strong>
+              </div>
+              <div style={{ padding: '.65rem .8rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#eff6ff' }}>
+                <div className="muted" style={{ fontSize: '.78rem' }}>Escrow Held</div>
+                <strong style={{ fontSize: '1.1rem' }}>{fmt(fs.escrow_held_cents)}</strong>
+              </div>
+            </div>
+
+            {isManager && (
+              <form
+                className="row"
+                style={{ marginBottom: '1rem', alignItems: 'flex-end' }}
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const amt = parseFloat(feeAmt);
+                  if (!feeDesc.trim() || Number.isNaN(amt) || amt <= 0) return;
+                  setBusy(true);
+                  try {
+                    const updated = await api(`/api/permits/${permit.id}/fees`, {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        entry_type: feeType,
+                        description: feeDesc.trim(),
+                        amount_dollars: amt,
+                        payment_method: feeMethod.trim(),
+                        reference_number: feeRef.trim(),
+                      }),
+                    });
+                    setFeeDesc(''); setFeeAmt(''); setFeeMethod(''); setFeeRef('');
+                    onUpdated(updated);
+                    showToast('Ledger entry recorded', 'ok');
+                  } catch (err) {
+                    showToast(err.message, 'error');
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                <div className="field" style={{ minWidth: 150 }}>
+                  <label>Entry Type</label>
+                  <select value={feeType} onChange={(e) => setFeeType(e.target.value)}>
+                    <option value="fee">Fee Assessed</option>
+                    <option value="payment">Payment Received</option>
+                    <option value="escrow_deposit">Escrow Deposit</option>
+                    <option value="escrow_refund">Escrow Refund / Release</option>
+                    <option value="waiver">Fee Waiver / Credit</option>
+                  </select>
+                </div>
+                <div className="field" style={{ flex: 2, minWidth: 180 }}>
+                  <label>Description</label>
+                  <input required placeholder="e.g. Application Fee, Escrow Deposit, Check Payment" value={feeDesc} onChange={(e) => setFeeDesc(e.target.value)} />
+                </div>
+                <div className="field" style={{ width: 110 }}>
+                  <label>Amount ($)</label>
+                  <input required type="number" step="0.01" min="0.01" placeholder="150.00" value={feeAmt} onChange={(e) => setFeeAmt(e.target.value)} />
+                </div>
+                <div className="field" style={{ minWidth: 120 }}>
+                  <label>Method</label>
+                  <input placeholder="Check / Card" value={feeMethod} onChange={(e) => setFeeMethod(e.target.value)} />
+                </div>
+                <div className="field" style={{ minWidth: 120 }}>
+                  <label>Ref / Check #</label>
+                  <input placeholder="Ref #" value={feeRef} onChange={(e) => setFeeRef(e.target.value)} />
+                </div>
+                <button type="submit" className="btn sm primary" disabled={busy}>+ Add Entry</button>
+              </form>
+            )}
+
+            {!entries.length ? (
+              <p className="muted">No itemized fee or escrow entries recorded yet.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Description</th>
+                    <th>Method / Ref</th>
+                    <th style={{ textAlign: 'right' }}>Amount</th>
+                    {isManager && <th>Actions</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((fe) => (
+                    <tr key={fe.id}>
+                      <td>{formatDate(fe.created_at)}</td>
+                      <td><span className="badge draft">{fe.entry_type.replace('_', ' ')}</span></td>
+                      <td>{fe.description}</td>
+                      <td className="muted">{[fe.payment_method, fe.reference_number].filter(Boolean).join(' · ') || '—'}</td>
+                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(fe.amount_cents)}</td>
+                      {isManager && (
+                        <td>
+                          <button
+                            type="button"
+                            className="btn sm danger"
+                            onClick={async () => onUpdated(await api(`/api/permits/${permit.id}/fees/${fe.id}`, { method: 'DELETE' }))}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        );
+      })()}
 
       {tab === 'workflow' && (
         <div className="card">

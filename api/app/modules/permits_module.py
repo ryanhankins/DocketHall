@@ -127,6 +127,15 @@ PERMITS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         set(),
         True,
     ),
+    (
+        "permit_fee_entries",
+        [
+            "id", "permit_id", "entry_type", "description", "amount_cents",
+            "payment_method", "reference_number", "recorded_by", "notes", "created_at",
+        ],
+        set(),
+        True,
+    ),
 ]
 
 MODULE = CivicModule(
