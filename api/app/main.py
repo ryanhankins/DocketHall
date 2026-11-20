@@ -64,6 +64,10 @@ async def lifespan(app: FastAPI):
                     sla.run_sla_escalation_digest()
                 except Exception:
                     pass
+                try:
+                    permits.run_recurring_renewals(days_ahead=60, send_emails=True)
+                except Exception:
+                    pass
         digest_task = asyncio.create_task(_digest_loop())
     yield
     if digest_task:

@@ -181,6 +181,7 @@ MODULE = CivicModule(
                 {"section": "permits-reports", "label": "Reports & Revenue", "permission": "permits.manage", "feature": "reports"},
                 {"section": "contractors", "label": "Contractors & Licenses", "permission": "permits.manage", "feature": "contractors"},
                 {"section": "compliance-programs", "label": "Rental & Fire Compliance", "permission": "permits.manage", "feature": "compliance_programs"},
+                {"section": "renewals", "label": "Recurring Renewals", "permission": "permits.manage"},
                 {"section": "preferences-permits", "label": "Permit Preferences", "permission": "permits.manage"},
             ],
         },

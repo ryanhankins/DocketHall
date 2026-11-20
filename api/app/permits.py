@@ -4328,3 +4328,241 @@ def push_permit_to_agenda_backlog(
             (permit_id, user["username"], f"Backlog item #{row[0]} ({target_body})"),
         )
         return _get_permit_or_404(conn, permit_id, include_internal=True)
+
+
+class RenewalsGenerateIn(BaseModel):
+    days_ahead: int = 60
+    default_license_fee: str = "100.00"
+    default_compliance_fee: str = "75.00"
+    default_contractor_fee: str = "100.00"
+    send_emails: bool = True
+
+
+def _collect_upcoming_renewals(conn, days_ahead: int = 60) -> list[dict]:
+    today = date.today()
+    cutoff = today + timedelta(days=max(1, min(days_ahead, 365)))
+    items: list[dict] = []
+
+    # 1. Expiring permits / business licenses
+    p_rows = conn.execute(
+        "SELECT id, permit_number, permit_type_name, permit_kind, applicant_name, applicant_email, "
+        "       property_address, fee_amount, expires_at "
+        "FROM permits "
+        "WHERE expires_at IS NOT NULL AND expires_at <= %s AND status IN ('approved', 'issued') "
+        "ORDER BY expires_at ASC, id ASC",
+        (cutoff,),
+    ).fetchall()
+    for r in p_rows:
+        exp_d = r[8]
+        yr = exp_d.year if exp_d else today.year
+        items.append({
+            "category": "business_license",
+            "category_label": "Business License / Permit",
+            "source_id": r[0],
+            "reference": r[1],
+            "bill_reference": f"REN-LIC-{r[0]}-{yr}",
+            "bill_type": "business_license",
+            "entity_name": r[4] or r[2] or "License Holder",
+            "email": (r[5] or "").strip(),
+            "address": r[6] or "",
+            "description": f"Annual Renewal: {r[2] or r[1]}",
+            "suggested_fee": (r[7] or "").strip(),
+            "expires_at": exp_d.isoformat() if exp_d else "",
+            "days_remaining": (exp_d - today).days if exp_d else 0,
+        })
+
+    # 2. Recurring Rental & Fire Compliance Inspections
+    c_rows = conn.execute(
+        "SELECT id, program_type, property_address, owner_name, local_agent_name, local_agent_email, next_inspection_date "
+        "FROM recurring_compliance_programs "
+        "WHERE status = 'active' AND next_inspection_date IS NOT NULL AND next_inspection_date <= %s "
+        "ORDER BY next_inspection_date ASC, id ASC",
+        (cutoff,),
+    ).fetchall()
+    for r in c_rows:
+        exp_d = r[6]
+        yr = exp_d.year if exp_d else today.year
+        items.append({
+            "category": "compliance_program",
+            "category_label": f"{r[1]} Inspection",
+            "source_id": r[0],
+            "reference": f"COMP-{r[0]}",
+            "bill_reference": f"REN-COMP-{r[0]}-{yr}",
+            "bill_type": "misc_fee",
+            "entity_name": r[4] or r[3] or "Property Owner",
+            "email": (r[5] or "").strip(),
+            "address": r[2] or "",
+            "description": f"{r[1]} Inspection Renewal — {r[2]}",
+            "suggested_fee": "",
+            "expires_at": exp_d.isoformat() if exp_d else "",
+            "days_remaining": (exp_d - today).days if exp_d else 0,
+        })
+
+    # 3. Contractor Registrations
+    ctr_rows = conn.execute(
+        "SELECT id, license_number, business_name, contact_name, email, address, license_expires_at "
+        "FROM contractor_licenses "
+        "WHERE license_expires_at IS NOT NULL AND license_expires_at <= %s "
+        "ORDER BY license_expires_at ASC, id ASC",
+        (cutoff,),
+    ).fetchall()
+    for r in ctr_rows:
+        exp_d = r[6]
+        yr = exp_d.year if exp_d else today.year
+        items.append({
+            "category": "contractor",
+            "category_label": "Contractor Registration",
+            "source_id": r[0],
+            "reference": r[1],
+            "bill_reference": f"REN-CTR-{r[0]}-{yr}",
+            "bill_type": "business_license",
+            "entity_name": r[2] or r[3] or "Contractor",
+            "email": (r[4] or "").strip(),
+            "address": r[5] or "",
+            "description": f"Contractor Registration Renewal ({r[1]} — {r[2]})",
+            "suggested_fee": "",
+            "expires_at": exp_d.isoformat() if exp_d else "",
+            "days_remaining": (exp_d - today).days if exp_d else 0,
+        })
+
+    # Attach existing bill status if municipal_bills table exists
+    has_bills = conn.execute("SELECT to_regclass('municipal_bills')").fetchone()
+    if has_bills and has_bills[0] and items:
+        refs = [it["bill_reference"] for it in items]
+        b_rows = conn.execute(
+            "SELECT reference_number, payment_status, amount_due FROM municipal_bills WHERE reference_number = ANY(%s)",
+            (refs,),
+        ).fetchall()
+        b_map = {br[0]: {"payment_status": br[1], "amount_due": br[2]} for br in b_rows}
+        for it in items:
+            b = b_map.get(it["bill_reference"])
+            it["bill_exists"] = b is not None
+            it["payment_status"] = b["payment_status"] if b else ""
+            it["bill_amount"] = b["amount_due"] if b else ""
+    else:
+        for it in items:
+            it["bill_exists"] = False
+            it["payment_status"] = ""
+            it["bill_amount"] = ""
+
+    items.sort(key=lambda x: (x["days_remaining"], x["category"], x["reference"]))
+    return items
+
+
+def run_recurring_renewals(
+    days_ahead: int = 60,
+    *,
+    default_license_fee: str = "100.00",
+    default_compliance_fee: str = "75.00",
+    default_contractor_fee: str = "100.00",
+    send_emails: bool = True,
+    actor_username: str = "system",
+    request: Request | None = None,
+) -> dict:
+    with pool.connection() as conn:
+        items = _collect_upcoming_renewals(conn, days_ahead=days_ahead)
+        has_bills = conn.execute("SELECT to_regclass('municipal_bills')").fetchone()
+        bills_ok = bool(has_bills and has_bills[0])
+        created_bills = 0
+        skipped_existing = 0
+        emailed = 0
+        fee_defaults = {
+            "business_license": default_license_fee.strip() or "100.00",
+            "compliance_program": default_compliance_fee.strip() or "75.00",
+            "contractor": default_contractor_fee.strip() or "100.00",
+        }
+        for it in items:
+            amt = it["suggested_fee"] or fee_defaults.get(it["category"], "100.00")
+            if it["bill_exists"]:
+                skipped_existing += 1
+                continue
+            if bills_ok:
+                conn.execute(
+                    "INSERT INTO municipal_bills "
+                    "(reference_number, bill_type, account_number, payer_name, payer_email, "
+                    " service_address, description, amount_due, due_date, created_by) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    "ON CONFLICT (reference_number) DO NOTHING",
+                    (
+                        it["bill_reference"],
+                        it["bill_type"],
+                        it["reference"],
+                        it["entity_name"],
+                        it["email"],
+                        it["address"],
+                        it["description"],
+                        amt,
+                        it["expires_at"],
+                        actor_username,
+                    ),
+                )
+                created_bills += 1
+                it["bill_exists"] = True
+                it["payment_status"] = "unpaid"
+                it["bill_amount"] = amt
+
+            if send_emails and it["email"]:
+                send_direct_email(
+                    [it["email"]],
+                    f"[DocketHall] Renewal Notice & Payment Link — {it['reference']}",
+                    f"Hello {it['entity_name']},\n\n"
+                    f"Your {it['category_label']} ({it['reference']}) is due for renewal on {it['expires_at']}.\n"
+                    f"- Description: {it['description']}\n"
+                    f"- Renewal Fee: ${amt}\n"
+                    f"- Payment Reference #: {it['bill_reference']}\n\n"
+                    "You can pay this renewal securely online using your Payment Reference # or sign in to My Account.",
+                    link_path="/#pay",
+                    request=request,
+                )
+                emailed += 1
+
+    return {
+        "days_ahead": days_ahead,
+        "total_upcoming": len(items),
+        "created_bills": created_bills,
+        "skipped_existing": skipped_existing,
+        "emailed": emailed,
+        "items": items,
+    }
+
+
+@router.get("/renewals/upcoming")
+def list_upcoming_renewals(
+    days: int = 60,
+    _: dict = Depends(require_permission("permits.manage")),
+):
+    with pool.connection() as conn:
+        items = _collect_upcoming_renewals(conn, days_ahead=days)
+    return {
+        "days_ahead": days,
+        "summary": {
+            "total": len(items),
+            "business_licenses": sum(1 for i in items if i["category"] == "business_license"),
+            "compliance_programs": sum(1 for i in items if i["category"] == "compliance_program"),
+            "contractors": sum(1 for i in items if i["category"] == "contractor"),
+        },
+        "items": items,
+    }
+
+
+@router.post("/renewals/generate")
+def generate_recurring_renewals(
+    body: RenewalsGenerateIn,
+    request: Request,
+    user: dict = Depends(require_permission("permits.manage")),
+):
+    res = run_recurring_renewals(
+        days_ahead=body.days_ahead,
+        default_license_fee=body.default_license_fee,
+        default_compliance_fee=body.default_compliance_fee,
+        default_contractor_fee=body.default_contractor_fee,
+        send_emails=body.send_emails,
+        actor_username=user["username"],
+        request=request,
+    )
+    record_audit(
+        user["username"],
+        "permits.generate_renewals",
+        f"days={body.days_ahead}, created_bills={res['created_bills']}, emailed={res['emailed']}",
+    )
+    return res
