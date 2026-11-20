@@ -59,6 +59,16 @@ VALID_DOC_CATEGORIES = {
     "correspondence",
     "other",
 }
+VALID_ENFORCEMENT_STAGES = {
+    "intake",
+    "courtesy_warning",
+    "formal_nov",
+    "reinspection",
+    "citation",
+    "abatement",
+    "closed",
+}
+VALID_REINSPECTION_OUTCOMES = {"scheduled", "in_compliance", "non_compliant", "extended"}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS complaints (
@@ -103,11 +113,34 @@ CREATE TABLE IF NOT EXISTS complaints (
     final_resolution            TEXT NOT NULL DEFAULT '',
     resolved_at                 TIMESTAMPTZ,
 
+    -- Deeper Code Enforcement Lifecycle
+    code_section_id             BIGINT,
+    enforcement_stage           TEXT NOT NULL DEFAULT 'intake',
+    reinspection_date           TEXT NOT NULL DEFAULT '',
+    citation_amount             TEXT NOT NULL DEFAULT '',
+    citation_issued_at          TIMESTAMPTZ,
+
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE complaints ADD COLUMN IF NOT EXISTS code_section_id BIGINT;
+ALTER TABLE complaints ADD COLUMN IF NOT EXISTS enforcement_stage TEXT NOT NULL DEFAULT 'intake';
+ALTER TABLE complaints ADD COLUMN IF NOT EXISTS reinspection_date TEXT NOT NULL DEFAULT '';
+ALTER TABLE complaints ADD COLUMN IF NOT EXISTS citation_amount TEXT NOT NULL DEFAULT '';
+ALTER TABLE complaints ADD COLUMN IF NOT EXISTS citation_issued_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS complaints_status_idx ON complaints(status);
 CREATE INDEX IF NOT EXISTS complaints_user_idx ON complaints(complainant_user_id);
+
+CREATE TABLE IF NOT EXISTS complaint_reinspections (
+    id             BIGSERIAL PRIMARY KEY,
+    complaint_id   BIGINT NOT NULL REFERENCES complaints(id) ON DELETE CASCADE,
+    inspect_date   TEXT NOT NULL DEFAULT '',
+    inspector      TEXT NOT NULL DEFAULT '',
+    outcome        TEXT NOT NULL DEFAULT 'scheduled',
+    notes          TEXT NOT NULL DEFAULT '',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS complaint_reinspections_cid_idx ON complaint_reinspections(complaint_id, id);
 
 CREATE TABLE IF NOT EXISTS complaint_documents (
     id              BIGSERIAL PRIMARY KEY,
@@ -272,6 +305,50 @@ def _fetch_messages(conn, complaint_id: int, include_internal: bool, include_sen
     ]
 
 
+def _fetch_reinspections(conn, complaint_id: int) -> list[dict]:
+    rows = conn.execute(
+        "SELECT id, complaint_id, inspect_date, inspector, outcome, notes, created_at "
+        "FROM complaint_reinspections WHERE complaint_id = %s ORDER BY id DESC",
+        (complaint_id,),
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "complaint_id": r[1],
+            "inspect_date": r[2],
+            "inspector": r[3],
+            "outcome": r[4],
+            "notes": r[5],
+            "created_at": _iso(r[6]),
+        }
+        for r in rows
+    ]
+
+
+def _fetch_linked_code_section(conn, code_section_id: int | None) -> dict | None:
+    if not code_section_id:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT s.id, s.section_number, s.title, s.summary, c.chapter_number, c.title "
+            "FROM code_sections s JOIN code_chapters c ON c.id = s.chapter_id "
+            "WHERE s.id = %s",
+            (code_section_id,),
+        ).fetchone()
+    except Exception:
+        return None
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "section_number": row[1],
+        "title": row[2],
+        "summary": row[3] or "",
+        "chapter_number": row[4],
+        "chapter_title": row[5],
+    }
+
+
 _SELECT_COLS = """
     id, complaint_number, intake_channel, is_anonymous, is_real_property_complaint,
     complainant_user_id, complainant_username, complainant_name, complainant_email,
@@ -282,7 +359,8 @@ _SELECT_COLS = """
     nov_issued_at, nov_issuing_official, nov_violation_datetime,
     nov_required_action, nov_compliance_deadline, hearing_requested_at,
     council_meeting_date, final_resolution, resolved_at,
-    created_at, updated_at
+    created_at, updated_at,
+    code_section_id, enforcement_stage, reinspection_date, citation_amount, citation_issued_at
 """
 
 
@@ -291,6 +369,8 @@ def _serialize_public(
     docs: list[dict] | None = None,
     activity: list[dict] | None = None,
     messages: list[dict] | None = None,
+    reinspections: list[dict] | None = None,
+    linked_code_section: dict | None = None,
 ) -> dict:
     """Public Complaint Log Book representation (Section 618.025 & MN Stat. 13.44).
     Complainant identity, contact info, and internal staff notes are strictly omitted.
@@ -320,6 +400,13 @@ def _serialize_public(
         "resolved_at": _iso(row[29]),
         "created_at": _iso(row[30]),
         "updated_at": _iso(row[31]),
+        "code_section_id": row[32] if len(row) > 32 else None,
+        "enforcement_stage": (row[33] or "intake") if len(row) > 33 else "intake",
+        "reinspection_date": (row[34] or "") if len(row) > 34 else "",
+        "citation_amount": (row[35] or "") if len(row) > 35 else "",
+        "citation_issued_at": _iso(row[36]) if len(row) > 36 else "",
+        "linked_code_section": linked_code_section,
+        "reinspections": reinspections if reinspections is not None else [],
         "documents": docs if docs is not None else [],
         "activity": activity if activity is not None else [],
         "messages": messages if messages is not None else [],
@@ -333,11 +420,20 @@ def _serialize_private(
     messages: list[dict] | None = None,
     include_internal: bool = True,
     include_complainant_private: bool = True,
+    reinspections: list[dict] | None = None,
+    linked_code_section: dict | None = None,
 ) -> dict:
     """Representation for staff (with complainant private data gated on complaints.view_private)
     or the complainant viewing their own filing.
     """
-    base = _serialize_public(row, docs=docs, activity=activity, messages=messages)
+    base = _serialize_public(
+        row,
+        docs=docs,
+        activity=activity,
+        messages=messages,
+        reinspections=reinspections,
+        linked_code_section=linked_code_section,
+    )
     base.update(
         {
             "complainant_user_id": row[5] if include_complainant_private else None,
@@ -381,6 +477,18 @@ class ComplaintPatchIn(BaseModel):
     council_meeting_date: str | None = None
     final_resolution: str | None = None
     hearing_requested: bool | None = None
+    code_section_id: int | None = None
+    enforcement_stage: str | None = None
+    reinspection_date: str | None = None
+    citation_amount: str | None = None
+
+
+class ReinspectionIn(BaseModel):
+    inspect_date: str = ""
+    inspector: str = ""
+    outcome: str = "scheduled"
+    notes: str = ""
+    resolve_if_compliant: bool = False
 
 
 class NoticeOfViolationIn(BaseModel):
@@ -672,6 +780,8 @@ def list_complaints_staff(
             docs = _fetch_docs(conn, r[0], include_confidential=can_view_private)
             act = _fetch_activity(conn, r[0], include_internal=True)
             msgs = _fetch_messages(conn, r[0], include_internal=True, include_sender=True)
+            reinsps = _fetch_reinspections(conn, r[0])
+            code_sec = _fetch_linked_code_section(conn, r[32] if len(r) > 32 else None)
             items.append(
                 _serialize_private(
                     r,
@@ -680,6 +790,8 @@ def list_complaints_staff(
                     messages=msgs,
                     include_internal=True,
                     include_complainant_private=can_view_private,
+                    reinspections=reinsps,
+                    linked_code_section=code_sec,
                 )
             )
         all_rows = conn.execute(
@@ -739,11 +851,29 @@ def update_complaint(
         "subject_person_name",
         "council_meeting_date",
         "final_resolution",
+        "reinspection_date",
+        "citation_amount",
     ):
         val = getattr(body, field)
         if val is not None:
             sets.append(f"{field} = %s")
             params.append(val.strip())
+
+    if body.code_section_id is not None:
+        sets.append("code_section_id = %s")
+        params.append(body.code_section_id if body.code_section_id > 0 else None)
+
+    if body.enforcement_stage is not None:
+        es = body.enforcement_stage.strip().lower()
+        if es not in VALID_ENFORCEMENT_STAGES:
+            raise HTTPException(status_code=400, detail="Invalid enforcement stage")
+        sets.append("enforcement_stage = %s")
+        params.append(es)
+        if es == "citation":
+            sets.append("citation_issued_at = COALESCE(citation_issued_at, now())")
+
+    if body.citation_amount is not None and body.citation_amount.strip():
+        sets.append("citation_issued_at = COALESCE(citation_issued_at, now())")
 
     if body.hearing_requested:
         sets.append("hearing_requested_at = COALESCE(hearing_requested_at, now())")
@@ -779,12 +909,206 @@ def update_complaint(
             can_view_private = bool(user and has_permission(user, "complaints.view_private"))
             docs = _fetch_docs(conn, complaint_id, include_confidential=can_view_private)
             act = _fetch_activity(conn, complaint_id, include_internal=True)
+            reinsps = _fetch_reinspections(conn, complaint_id)
+            code_sec = _fetch_linked_code_section(conn, row[32] if len(row) > 32 else None)
     return _serialize_private(
         row,
         docs=docs,
         activity=act,
         include_internal=True,
         include_complainant_private=can_view_private,
+        reinspections=reinsps,
+        linked_code_section=code_sec,
+    )
+
+
+@router.get("/reinspections/queue")
+def list_reinspection_queue(_: dict = Depends(require_permission("complaints.manage"))):
+    """Open enforcement cases with a scheduled reinspection date or NOV compliance deadline."""
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT id, complaint_number, subject_property_address, ordinance_section, "
+            "       enforcement_stage, reinspection_date, nov_compliance_deadline, assigned_to, status "
+            "FROM complaints "
+            "WHERE status NOT IN ('resolved', 'dismissed') "
+            "AND (reinspection_date <> '' OR nov_compliance_deadline <> '') "
+            "ORDER BY LEAST("
+            "  NULLIF(reinspection_date, ''), "
+            "  NULLIF(nov_compliance_deadline, '')"
+            ") ASC NULLS LAST, id ASC"
+        ).fetchall()
+    today_str = date.today().isoformat()
+    return [
+        {
+            "id": r[0],
+            "complaint_number": r[1],
+            "subject_property_address": r[2],
+            "ordinance_section": r[3],
+            "enforcement_stage": r[4] or "intake",
+            "reinspection_date": r[5] or "",
+            "nov_compliance_deadline": r[6] or "",
+            "assigned_to": r[7] or "",
+            "status": r[8],
+            "is_overdue": bool(
+                (r[5] and r[5] < today_str) or (r[6] and r[6] < today_str)
+            ),
+        }
+        for r in rows
+    ]
+
+
+@router.post("/{complaint_id}/reinspections", status_code=201)
+def add_reinspection(
+    complaint_id: int,
+    body: ReinspectionIn,
+    user: dict = Depends(require_permission("complaints.manage")),
+):
+    outcome = body.outcome.strip().lower()
+    if outcome not in VALID_REINSPECTION_OUTCOMES:
+        raise HTTPException(status_code=400, detail="Invalid reinspection outcome")
+    insp_date = body.inspect_date.strip() or date.today().isoformat()
+    with pool.connection() as conn:
+        with conn.transaction():
+            exists = conn.execute("SELECT id FROM complaints WHERE id = %s", (complaint_id,)).fetchone()
+            if not exists:
+                raise HTTPException(status_code=404, detail="Complaint not found")
+            conn.execute(
+                "INSERT INTO complaint_reinspections (complaint_id, inspect_date, inspector, outcome, notes) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (complaint_id, insp_date, body.inspector.strip() or user["username"], outcome, body.notes.strip()),
+            )
+            if outcome == "scheduled":
+                conn.execute(
+                    "UPDATE complaints SET reinspection_date = %s, enforcement_stage = 'reinspection', updated_at = now() WHERE id = %s",
+                    (insp_date, complaint_id),
+                )
+            elif outcome == "in_compliance" and body.resolve_if_compliant:
+                conn.execute(
+                    "UPDATE complaints SET status = 'resolved', enforcement_stage = 'closed', resolved_at = COALESCE(resolved_at, now()), updated_at = now() WHERE id = %s",
+                    (complaint_id,),
+                )
+            elif outcome == "non_compliant":
+                conn.execute(
+                    "UPDATE complaints SET enforcement_stage = 'reinspection', updated_at = now() WHERE id = %s",
+                    (complaint_id,),
+                )
+            conn.execute(
+                "INSERT INTO complaint_activity_log (complaint_id, action, actor_username, is_internal, note) "
+                "VALUES (%s, 'reinspection', %s, FALSE, %s)",
+                (complaint_id, user["username"], f"Reinspection ({insp_date}): {outcome.replace('_', ' ')} — {body.notes.strip()}".strip(" —")),
+            )
+            row = conn.execute(f"SELECT {_SELECT_COLS} FROM complaints WHERE id = %s", (complaint_id,)).fetchone()
+            can_view_private = bool(user and has_permission(user, "complaints.view_private"))
+            docs = _fetch_docs(conn, complaint_id, include_confidential=can_view_private)
+            act = _fetch_activity(conn, complaint_id, include_internal=True)
+            reinsps = _fetch_reinspections(conn, complaint_id)
+            code_sec = _fetch_linked_code_section(conn, row[32] if len(row) > 32 else None)
+    return _serialize_private(
+        row,
+        docs=docs,
+        activity=act,
+        include_internal=True,
+        include_complainant_private=can_view_private,
+        reinspections=reinsps,
+        linked_code_section=code_sec,
+    )
+
+
+@router.delete("/{complaint_id}/reinspections/{reinsp_id}")
+def delete_reinspection(
+    complaint_id: int,
+    reinsp_id: int,
+    user: dict = Depends(require_permission("complaints.manage")),
+):
+    with pool.connection() as conn:
+        conn.execute(
+            "DELETE FROM complaint_reinspections WHERE id = %s AND complaint_id = %s",
+            (reinsp_id, complaint_id),
+        )
+        row = conn.execute(f"SELECT {_SELECT_COLS} FROM complaints WHERE id = %s", (complaint_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Complaint not found")
+        can_view_private = bool(user and has_permission(user, "complaints.view_private"))
+        docs = _fetch_docs(conn, complaint_id, include_confidential=can_view_private)
+        act = _fetch_activity(conn, complaint_id, include_internal=True)
+        reinsps = _fetch_reinspections(conn, complaint_id)
+        code_sec = _fetch_linked_code_section(conn, row[32] if len(row) > 32 else None)
+    return _serialize_private(
+        row,
+        docs=docs,
+        activity=act,
+        include_internal=True,
+        include_complainant_private=can_view_private,
+        reinspections=reinsps,
+        linked_code_section=code_sec,
+    )
+
+
+@router.get("/{complaint_id}/nov-pdf")
+def get_nov_pdf(
+    complaint_id: int,
+    _: dict = Depends(require_permission("complaints.manage")),
+):
+    from xml.sax.saxutils import escape as _xml_escape
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    with pool.connection() as conn:
+        row = conn.execute(f"SELECT {_SELECT_COLS} FROM complaints WHERE id = %s", (complaint_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Complaint not found")
+        code_sec = _fetch_linked_code_section(conn, row[32] if len(row) > 32 else None)
+
+    c = _serialize_public(row, linked_code_section=code_sec)
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, leftMargin=54, rightMargin=54, topMargin=54, bottomMargin=54)
+    styles = getSampleStyleSheet()
+    title_txt = "ADMINISTRATIVE CITATION &amp; NOTICE OF VIOLATION" if c["citation_amount"] else "NOTICE OF MUNICIPAL CODE VIOLATION"
+    story = [
+        Paragraph(f"<b>{title_txt}</b>", styles["Title"]),
+        Paragraph(f"Case Number: <b>{_xml_escape(str(c['complaint_number']))}</b> · Date Issued: {date.today().isoformat()}", styles["Normal"]),
+        Spacer(1, 12),
+    ]
+    rows = [
+        ["Property / Location", c["subject_property_address"] or "—"],
+        ["Subject / Owner", c["subject_person_name"] or "—"],
+        ["Ordinance Cited", c["ordinance_section"] or "—"],
+        ["Enforcement Stage", c["enforcement_stage"].replace("_", " ").title()],
+        ["Compliance Deadline", c["nov_compliance_deadline"] or "—"],
+        ["Next Reinspection", c["reinspection_date"] or "—"],
+        ["Administrative Citation", c["citation_amount"] or "None assessed"],
+        ["Issuing Official", c["nov_issuing_official"] or "City Code Enforcement"],
+    ]
+    tbl = Table(rows, colWidths=[150, 350])
+    tbl.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#fef2f2")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.extend([tbl, Spacer(1, 12)])
+    if code_sec:
+        story.extend([
+            Paragraph(f"<b>Cited City Code — § {_xml_escape(code_sec['section_number'])} {_xml_escape(code_sec['title'])}</b>", styles["Heading3"]),
+            Paragraph(_xml_escape(code_sec["summary"] or "See official Municipal Code for full section text."), styles["Normal"]),
+            Spacer(1, 10),
+        ])
+    story.extend([
+        Paragraph("<b>Observed Violation / Conduct</b>", styles["Heading3"]),
+        Paragraph(_xml_escape(c["conduct_description"] or "—"), styles["Normal"]),
+        Spacer(1, 10),
+        Paragraph("<b>Required Corrective Action</b>", styles["Heading3"]),
+        Paragraph(_xml_escape(c["nov_required_action"] or "Bring property into full compliance with the cited municipal code section prior to the reinspection date."), styles["Normal"]),
+        Spacer(1, 18),
+        Paragraph("You have the right to request a public hearing before the City Council within 10 days of this Notice.", styles["Normal"]),
+    ])
+    doc.build(story)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{c["complaint_number"]}-nov.pdf"'},
     )
 
 

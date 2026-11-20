@@ -42,6 +42,16 @@ export const ASSISTING_AGENCIES = [
   'City Council',
 ];
 
+export const ENFORCEMENT_STAGES = [
+  { value: 'intake', label: 'Intake / Triage' },
+  { value: 'courtesy_warning', label: 'Courtesy Warning' },
+  { value: 'formal_nov', label: 'Formal Notice of Violation' },
+  { value: 'reinspection', label: 'Reinspection Pending / Follow-Up' },
+  { value: 'citation', label: 'Administrative Citation / Fine' },
+  { value: 'abatement', label: 'Hearing / City Abatement' },
+  { value: 'closed', label: 'Closed / In Compliance' },
+];
+
 export function StatusBadge({ status }) {
   const meta = COMPLAINT_STATUSES.find((s) => s.value === status) || {
     label: status || 'unknown',

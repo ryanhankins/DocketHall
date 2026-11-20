@@ -21,6 +21,7 @@ import { useToast } from '../../core/toast.jsx';
 import {
   ASSISTING_AGENCIES,
   COMPLAINT_STATUSES,
+  ENFORCEMENT_STAGES,
   ORDINANCE_PRESETS,
   StatusBadge,
 } from './constants.jsx';
@@ -65,6 +66,17 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
   const [msgInternal, setMsgInternal] = useState(false);
   const [sendingMsg, setSendingMsg] = useState(false);
 
+  const [codeSections, setCodeSections] = useState([]);
+  const [showQueue, setShowQueue] = useState(false);
+  const [reinspQueue, setReinspQueue] = useState([]);
+  const [reinspForm, setReinspForm] = useState({
+    inspect_date: '',
+    inspector: me?.username || '',
+    outcome: 'scheduled',
+    notes: '',
+    resolve_if_compliant: false,
+  });
+
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -92,6 +104,34 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
   }, [loadAll]);
 
   useEffect(() => {
+    fetch('/api/codification/public')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const list = [];
+        for (const ch of d?.chapters || []) {
+          for (const sec of ch.sections || []) {
+            list.push({
+              id: sec.id,
+              section_number: sec.section_number,
+              title: sec.title,
+              summary: sec.summary || '',
+              label: `§ ${sec.section_number} — ${sec.title}`,
+            });
+          }
+        }
+        setCodeSections(list);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!showQueue) return;
+    api('/api/complaints/reinspections/queue')
+      .then((rows) => setReinspQueue(Array.isArray(rows) ? rows : []))
+      .catch(() => setReinspQueue([]));
+  }, [showQueue, items]);
+
+  useEffect(() => {
     if (!initialId || items.length === 0) return;
     const target = items.find((c) => c.id === initialId);
     if (target) openCase(target);
@@ -111,6 +151,10 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
       internal_notes: c.internal_notes || '',
       council_meeting_date: c.council_meeting_date || '',
       final_resolution: c.final_resolution || '',
+      code_section_id: c.code_section_id || 0,
+      enforcement_stage: c.enforcement_stage || 'intake',
+      reinspection_date: c.reinspection_date || '',
+      citation_amount: c.citation_amount || '',
     });
   }
 
@@ -226,14 +270,71 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
             Staff workbench for investigations, Notices of Violation, Council/Board referrals, and Log Book resolutions.
           </p>
         </div>
-        <button
-          type="button"
-          className="btn primary"
-          onClick={() => setShowOralForm((v) => !v)}
-        >
-          {showOralForm ? 'Close Intake Form' : '+ Log Oral / Staff Complaint'}
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => setShowQueue((v) => !v)}
+          >
+            {showQueue ? 'Hide Reinspection Queue' : 'Reinspection & Deadline Queue'}
+          </button>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={() => setShowOralForm((v) => !v)}
+          >
+            {showOralForm ? 'Close Intake Form' : '+ Log Oral / Staff Complaint'}
+          </button>
+        </div>
       </div>
+
+      {showQueue && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Reinspection &amp; NOV Compliance Queue</h3>
+          {reinspQueue.length === 0 ? (
+            <p className="muted" style={{ margin: 0 }}>No open cases with scheduled reinspections or NOV deadlines.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>
+                  <th style={{ padding: '6px' }}>Case #</th>
+                  <th style={{ padding: '6px' }}>Property</th>
+                  <th style={{ padding: '6px' }}>Stage</th>
+                  <th style={{ padding: '6px' }}>Reinspection</th>
+                  <th style={{ padding: '6px' }}>NOV Deadline</th>
+                  <th style={{ padding: '6px' }}>Open</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reinspQueue.map((rq) => (
+                  <tr key={rq.id} style={{ borderBottom: '1px solid #f3f4f6', background: rq.is_overdue ? '#fef2f2' : 'transparent' }}>
+                    <td style={{ padding: '6px' }}>
+                      <strong>{rq.complaint_number}</strong>
+                      {rq.is_overdue && <span className="badge disabled" style={{ marginLeft: 6 }}>Overdue</span>}
+                    </td>
+                    <td style={{ padding: '6px' }}>{rq.subject_property_address || '—'}</td>
+                    <td style={{ padding: '6px' }}><span className="badge draft">{rq.enforcement_stage.replace('_', ' ')}</span></td>
+                    <td style={{ padding: '6px' }}>{rq.reinspection_date || '—'}</td>
+                    <td style={{ padding: '6px' }}>{rq.nov_compliance_deadline || '—'}</td>
+                    <td style={{ padding: '6px' }}>
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={() => {
+                          const match = items.find((x) => x.id === rq.id);
+                          if (match) openCase(match);
+                        }}
+                      >
+                        Open
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
         <div className="card" style={{ margin: 0, padding: '.75rem 1rem' }}>
@@ -471,16 +572,75 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                     onChange={(e) => setEditForm({ ...editForm, assigned_to: e.target.value })}
                   />
                 </label>
-                <label>
-                  <div className="muted" style={{ fontSize: 12 }}>Council / Board Meeting Date</div>
-                  <input
-                    type="date"
-                    className="input"
-                    value={editForm.council_meeting_date}
-                    onChange={(e) => setEditForm({ ...editForm, council_meeting_date: e.target.value })}
-                  />
-                </label>
-              </div>
+                    <label>
+                      <div className="muted" style={{ fontSize: 12 }}>Council / Board Meeting Date</div>
+                      <input
+                        type="date"
+                        className="input"
+                        value={editForm.council_meeting_date}
+                        onChange={(e) => setEditForm({ ...editForm, council_meeting_date: e.target.value })}
+                      />
+                    </label>
+                    <label>
+                      <div className="muted" style={{ fontSize: 12 }}>Enforcement Stage</div>
+                      <select
+                        className="input"
+                        value={editForm.enforcement_stage}
+                        onChange={(e) => setEditForm({ ...editForm, enforcement_stage: e.target.value })}
+                      >
+                        {ENFORCEMENT_STAGES.map((st) => (
+                          <option key={st.value} value={st.value}>{st.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <div className="muted" style={{ fontSize: 12 }}>Next Reinspection Date</div>
+                      <input
+                        type="date"
+                        className="input"
+                        value={editForm.reinspection_date}
+                        onChange={(e) => setEditForm({ ...editForm, reinspection_date: e.target.value })}
+                      />
+                    </label>
+                    <label>
+                      <div className="muted" style={{ fontSize: 12 }}>Citation / Fine Amount</div>
+                      <input
+                        className="input"
+                        placeholder="e.g. $150.00"
+                        value={editForm.citation_amount}
+                        onChange={(e) => setEditForm({ ...editForm, citation_amount: e.target.value })}
+                      />
+                    </label>
+                    {codeSections.length > 0 && (
+                      <label style={{ gridColumn: '1 / -1' }}>
+                        <div className="muted" style={{ fontSize: 12 }}>Link City Code Section (§)</div>
+                        <select
+                          className="input"
+                          value={editForm.code_section_id || 0}
+                          onChange={(e) => {
+                            const cid = Number(e.target.value) || 0;
+                            const sec = codeSections.find((s) => s.id === cid);
+                            setEditForm({
+                              ...editForm,
+                              code_section_id: cid,
+                              ordinance_section: sec ? sec.label : editForm.ordinance_section,
+                            });
+                          }}
+                        >
+                          <option value={0}>— Select Municipal Code Section (optional) —</option>
+                          {codeSections.map((sec) => (
+                            <option key={sec.id} value={sec.id}>{sec.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+                  {selected.linked_code_section && (
+                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 6, padding: 8, fontSize: 12 }}>
+                      <strong>Cited Code § {selected.linked_code_section.section_number} ({selected.linked_code_section.title}):</strong>{' '}
+                      <span className="muted">{selected.linked_code_section.summary || 'See Municipal Code.'}</span>
+                    </div>
+                  )}
 
               <label>
                 <div className="muted" style={{ fontSize: 12 }}>
@@ -530,6 +690,14 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                   >
                     Issue Notice of Violation
                   </button>
+                  <a
+                    className="btn"
+                    href={`/api/complaints/${selected.id}/nov-pdf`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    NOV / Citation PDF
+                  </a>
                 </div>
                 <button
                   type="button"
@@ -590,6 +758,89 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                 </button>
               </form>
             )}
+
+            <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 10, display: 'grid', gap: 8 }}>
+              <strong>Field Inspections &amp; Reinspections ({(selected.reinspections || []).length})</strong>
+              <form
+                style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  try {
+                    const updated = await api(`/api/complaints/${selected.id}/reinspections`, {
+                      method: 'POST',
+                      body: JSON.stringify(reinspForm),
+                    });
+                    setSelected(updated);
+                    openCase(updated);
+                    setReinspForm({ inspect_date: '', inspector: me?.username || '', outcome: 'scheduled', notes: '', resolve_if_compliant: false });
+                    showToast('Reinspection recorded', 'ok');
+                    await loadAll();
+                  } catch (err) {
+                    showToast(err.message || 'Failed to log reinspection', 'error');
+                  }
+                }}
+              >
+                <input
+                  type="date"
+                  className="input"
+                  style={{ width: 'auto' }}
+                  value={reinspForm.inspect_date}
+                  onChange={(e) => setReinspForm({ ...reinspForm, inspect_date: e.target.value })}
+                />
+                <select
+                  className="input"
+                  style={{ width: 'auto' }}
+                  value={reinspForm.outcome}
+                  onChange={(e) => setReinspForm({ ...reinspForm, outcome: e.target.value })}
+                >
+                  <option value="scheduled">Scheduled Reinspection</option>
+                  <option value="in_compliance">In Compliance</option>
+                  <option value="non_compliant">Still Non-Compliant</option>
+                  <option value="extended">Deadline Extended</option>
+                </select>
+                <input
+                  className="input"
+                  style={{ flex: '1 1 160px' }}
+                  placeholder="Field observations / notes..."
+                  value={reinspForm.notes}
+                  onChange={(e) => setReinspForm({ ...reinspForm, notes: e.target.value })}
+                />
+                {reinspForm.outcome === 'in_compliance' && (
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12 }}>
+                    <input
+                      type="checkbox"
+                      checked={reinspForm.resolve_if_compliant}
+                      onChange={(e) => setReinspForm({ ...reinspForm, resolve_if_compliant: e.target.checked })}
+                    />
+                    <span>Resolve case</span>
+                  </label>
+                )}
+                <button type="submit" className="btn sm primary">Log</button>
+              </form>
+              {(selected.reinspections || []).length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {selected.reinspections.map((ri) => (
+                    <div key={ri.id} style={{ fontSize: 12, padding: '4px 8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 4, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                      <span>
+                        <strong>{ri.inspect_date || 'TBD'}</strong> · <span className="badge draft">{ri.outcome.replace('_', ' ')}</span> ({ri.inspector})
+                        {ri.notes ? ` — ${ri.notes}` : ''}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn sm danger"
+                        onClick={async () => {
+                          const updated = await api(`/api/complaints/${selected.id}/reinspections/${ri.id}`, { method: 'DELETE' });
+                          setSelected(updated);
+                          await loadAll();
+                        }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 10, display: 'grid', gap: 8 }}>
               <strong>Attachments</strong>
