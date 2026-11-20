@@ -185,6 +185,9 @@ export default function CoreShell() {
     if (hash === 'calendar-manage' || hash === 'preferences-calendar') {
       setOpenSubmenus(prev => (prev['calendar-staff'] ? prev : { ...prev, 'calendar-staff': true }));
     }
+    if (['users', 'modules', 'preferences-general', 'integrations', 'audit', 'preferences-backup'].includes(hash)) {
+      setOpenSubmenus(prev => (prev['admin-section'] ? prev : { ...prev, 'admin-section': true }));
+    }
   }, [hash]);
 
   // Resolve active route
@@ -470,60 +473,73 @@ export default function CoreShell() {
 
             {(isAdmin || canManageSettings) && (
               <div id="menu-admin" style={{ borderTop: '1px solid #e2e8f0', paddingTop: '.65rem', marginTop: '.35rem' }}>
-                <h2>Administration</h2>
-                {isAdmin && (
-                  <button
-                    type="button"
-                    className={activeSection === 'users' ? 'active' : ''}
-                    onClick={() => navigate('#users')}
-                  >
-                    Manage Users
-                  </button>
-                )}
-                {isAdmin && (
-                  <button
-                    type="button"
-                    className={activeSection === 'modules' ? 'active' : ''}
-                    onClick={() => navigate('#modules')}
-                  >
-                    Manage Modules
-                  </button>
-                )}
-                {canManageSettings && (
-                  <button
-                    type="button"
-                    className={activeSection === 'preferences-general' ? 'active' : ''}
-                    onClick={() => navigate('#preferences-general')}
-                  >
-                    General &amp; Branding
-                  </button>
-                )}
-                {isAdmin && (
-                  <button
-                    type="button"
-                    className={activeSection === 'integrations' ? 'active' : ''}
-                    onClick={() => navigate('#integrations')}
-                  >
-                    Email &amp; Integrations
-                  </button>
-                )}
-                {isAdmin && (
-                  <button
-                    type="button"
-                    className={activeSection === 'audit' ? 'active' : ''}
-                    onClick={() => navigate('#audit')}
-                  >
-                    Audit Log
-                  </button>
-                )}
-                {canManageSettings && (
-                  <button
-                    type="button"
-                    className={activeSection === 'preferences-backup' ? 'active' : ''}
-                    onClick={() => navigate('#preferences-backup')}
-                  >
-                    Backup &amp; Restore
-                  </button>
+                <button
+                  type="button"
+                  className="nav-parent"
+                  aria-expanded={!!openSubmenus['admin-section']}
+                  onClick={() => setOpenSubmenus(prev => ({ ...prev, 'admin-section': !prev['admin-section'] }))}
+                  style={{ fontWeight: 700, fontSize: '.85rem', textTransform: 'uppercase', letterSpacing: '.04em', color: '#475569' }}
+                >
+                  <span>Administration</span>
+                  <span className="nav-arrow" aria-hidden="true">{openSubmenus['admin-section'] ? '▾' : '▸'}</span>
+                </button>
+                {openSubmenus['admin-section'] && (
+                  <div className="nav-submenu">
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        className={activeSection === 'users' ? 'active' : ''}
+                        onClick={() => navigate('#users')}
+                      >
+                        Manage Users
+                      </button>
+                    )}
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        className={activeSection === 'modules' ? 'active' : ''}
+                        onClick={() => navigate('#modules')}
+                      >
+                        Manage Modules
+                      </button>
+                    )}
+                    {canManageSettings && (
+                      <button
+                        type="button"
+                        className={activeSection === 'preferences-general' ? 'active' : ''}
+                        onClick={() => navigate('#preferences-general')}
+                      >
+                        General &amp; Branding
+                      </button>
+                    )}
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        className={activeSection === 'integrations' ? 'active' : ''}
+                        onClick={() => navigate('#integrations')}
+                      >
+                        Email &amp; Integrations
+                      </button>
+                    )}
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        className={activeSection === 'audit' ? 'active' : ''}
+                        onClick={() => navigate('#audit')}
+                      >
+                        Audit Log
+                      </button>
+                    )}
+                    {canManageSettings && (
+                      <button
+                        type="button"
+                        className={activeSection === 'preferences-backup' ? 'active' : ''}
+                        onClick={() => navigate('#preferences-backup')}
+                      >
+                        Backup &amp; Restore
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
             )}

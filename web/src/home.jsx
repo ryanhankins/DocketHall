@@ -489,7 +489,7 @@ function FormsPublicTab() {
   );
 }
 
-function DirectoryPublicTab() {
+function DirectoryPublicTab({ features = {} }) {
   const [data, setData] = useState({ contacts: [], faqs: [], resources: [], boards: [] });
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
@@ -532,7 +532,7 @@ function DirectoryPublicTab() {
   }
 
   const showContacts = subTab === 'all' || subTab === 'contacts';
-  const showResources = subTab === 'all' || subTab === 'resources';
+  const showResources = features.resources !== false && (subTab === 'all' || subTab === 'resources');
   const showBoards = subTab === 'all' || subTab === 'boards';
   const showFaqs = subTab === 'all' || subTab === 'faqs';
 
@@ -556,7 +556,7 @@ function DirectoryPublicTab() {
           {[
             { id: 'all', label: 'All' },
             { id: 'contacts', label: `Staff & Council (${data.contacts.length})` },
-            { id: 'resources', label: `Local Business & Resources (${data.resources.length})` },
+            ...(features.resources !== false ? [{ id: 'resources', label: `Local Business & Resources (${data.resources.length})` }] : []),
             { id: 'boards', label: `Boards & Commissions (${data.boards.length})` },
             { id: 'faqs', label: `FAQs (${data.faqs.length})` },
           ].map((t) => (
@@ -725,7 +725,7 @@ function DirectoryPublicTab() {
   );
 }
 
-function NoticesPublicTab() {
+function NoticesPublicTab({ features = {} }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [cat, setCat] = useState('');
@@ -766,8 +766,8 @@ function NoticesPublicTab() {
               <option value="">All Categories</option>
               <option value="news">City News</option>
               <option value="public_notice">Public Notices</option>
-              <option value="bid">Bids &amp; RFPs</option>
-              <option value="job">Job Openings</option>
+              {features.bids !== false && <option value="bid">Bids &amp; RFPs</option>}
+              {features.jobs !== false && <option value="job">Job Openings</option>}
             </select>
             <input
               placeholder="Search notices, bids, jobs…"
@@ -1547,7 +1547,7 @@ function CodePublicTab() {
   );
 }
 
-function RecordsPublicTab() {
+function RecordsPublicTab({ features = {} }) {
   const [items, setItems] = useState([]);
   const [q, setQ] = useState('');
   const [category, setCategory] = useState('');
@@ -1614,13 +1614,15 @@ function RecordsPublicTab() {
             <option value="">All Years</option>
             {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
-          <button type="button" className="btn sm" onClick={() => setShowFoia((v) => !v)}>
-            {showFoia ? 'Hide Data Request' : '+ Request Public Record (FOIA)'}
-          </button>
+          {features.foia_requests !== false && (
+            <button type="button" className="btn sm" onClick={() => setShowFoia((v) => !v)}>
+              {showFoia ? 'Hide Data Request' : '+ Request Public Record (FOIA)'}
+            </button>
+          )}
         </div>
       </div>
 
-      {showFoia && (
+      {features.foia_requests !== false && showFoia && (
         <div style={{ marginBottom: '1rem', padding: '1rem', border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}>
           <h3 style={{ marginTop: 0 }}>Submit or Track a Public Records (FOIA / Data Practices) Request</h3>
           <form
@@ -1720,7 +1722,7 @@ function RecordsPublicTab() {
   );
 }
 
-function ComplaintsPublicTab({ me, onRequireAuth }) {
+function ComplaintsPublicTab({ me, onRequireAuth, features = {} }) {
   const [subView, setSubView] = useState('log'); // 'log' | 'file' | '311'
   const [woForm, setWoForm] = useState({ category: 'Pothole / Street', location: '', description: '', reporter_name: '', reporter_email: '' });
   const [woDone, setWoDone] = useState(null);
@@ -1845,13 +1847,15 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
           <button type="button" className={`btn sm${subView === 'file' ? ' primary' : ''}`} onClick={() => setSubView('file')}>
             + File a Complaint (No Account Required)
           </button>
-          <button type="button" className={`btn sm${subView === '311' ? ' primary' : ''}`} onClick={() => setSubView('311')}>
-            + 311 Service Request
-          </button>
+          {features.work_orders !== false && (
+            <button type="button" className={`btn sm${subView === '311' ? ' primary' : ''}`} onClick={() => setSubView('311')}>
+              + 311 Service Request
+            </button>
+          )}
         </div>
       </div>
 
-      {subView === '311' ? (
+      {features.work_orders !== false && subView === '311' ? (
         <form
           className="card"
           style={{ display: 'grid', gap: 10 }}
@@ -2112,7 +2116,7 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
   );
 }
 
-function CalendarPublicTab() {
+function CalendarPublicTab({ features = {} }) {
   const [month, setMonth] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -2362,7 +2366,7 @@ function CalendarPublicTab() {
         )}
       </div>
 
-      {(data.facilities || []).length > 0 && (
+      {features.reservations !== false && (data.facilities || []).length > 0 && (
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Reserve a City Facility</h3>
           <p className="muted" style={{ marginTop: 0 }}>
@@ -2659,6 +2663,14 @@ function PublicHomePage() {
   const params = useMemo(() => new URLSearchParams(location.search), []);
   const [branding, setBranding] = useState({ city_title: '', has_city_logo: false });
   const [enabledModules, setEnabledModules] = useState(null);
+  const [publicFeatures, setPublicFeatures] = useState({});
+  const [showAllServices, setShowAllServices] = useState(() => {
+    try {
+      return localStorage.getItem('civicdesk.showAllServices') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [me, setMe] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
 
@@ -2693,14 +2705,15 @@ function PublicHomePage() {
       .catch(() => setMe(null));
 
     fetch('/api/modules/public')
-      .then((r) => (r.ok ? r.json() : { enabled: [] }))
+      .then((r) => (r.ok ? r.json() : { enabled: [], features: {} }))
       .then((d) => {
         const list = Array.isArray(d.enabled) ? d.enabled : [];
         setEnabledModules(list);
+        setPublicFeatures(d && typeof d.features === 'object' && d.features ? d.features : {});
         const hashTab = location.hash.replace(/^#/, '');
         setActiveTab(list.includes(hashTab) ? hashTab : 'overview');
       })
-      .catch(() => setEnabledModules([]));
+      .catch(() => { setEnabledModules([]); setPublicFeatures({}); });
   }, [params]);
 
   useEffect(() => {
@@ -2720,6 +2733,11 @@ function PublicHomePage() {
     if (!enabledModules) return [];
     return TAB_DEFS.filter((t) => enabledModules.includes(t.id));
   }, [enabledModules]);
+
+  const overviewTabs = useMemo(() => {
+    if (showAllServices || visibleTabs.length <= 4) return visibleTabs;
+    return visibleTabs.slice(0, 4);
+  }, [visibleTabs, showAllServices]);
 
   function openAuth(nextUrl = '/app', register = false, reason = '') {
     setAuthModal({ open: true, register, nextUrl, reason });
@@ -2823,7 +2841,7 @@ function PublicHomePage() {
                 gap: '1rem',
               }}
             >
-              {visibleTabs.map((t) => (
+              {overviewTabs.map((t) => (
                 <div
                   key={t.id}
                   className="card service-tile"
@@ -2861,6 +2879,22 @@ function PublicHomePage() {
               ))}
             </div>
 
+            {visibleTabs.length > 4 && (
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={() => {
+                    const next = !showAllServices;
+                    setShowAllServices(next);
+                    try { localStorage.setItem('civicdesk.showAllServices', String(next)); } catch { /* ignore */ }
+                  }}
+                >
+                  {showAllServices ? 'Show Fewer Services ▴' : `Show All City Services (${visibleTabs.length}) ▾`}
+                </button>
+              </div>
+            )}
+
             <TransparencySnapshotBar onSelectTab={selectTab} />
 
             <NotifyMeCard />
@@ -2882,11 +2916,11 @@ function PublicHomePage() {
             {activeTab === 'agendas' && <AgendasPublicTab />}
             {activeTab === 'permits' && <PermitsPublicTab me={me} onRequireAuth={openAuth} />}
             {activeTab === 'codification' && <CodePublicTab />}
-            {activeTab === 'records' && <RecordsPublicTab />}
-            {activeTab === 'complaints' && <ComplaintsPublicTab me={me} onRequireAuth={openAuth} />}
-            {activeTab === 'calendar' && <CalendarPublicTab />}
-            {activeTab === 'notices' && <NoticesPublicTab />}
-            {activeTab === 'directory' && <DirectoryPublicTab />}
+            {activeTab === 'records' && <RecordsPublicTab features={publicFeatures.records || {}} />}
+            {activeTab === 'complaints' && <ComplaintsPublicTab me={me} onRequireAuth={openAuth} features={publicFeatures.complaints || {}} />}
+            {activeTab === 'calendar' && <CalendarPublicTab features={publicFeatures.calendar || {}} />}
+            {activeTab === 'notices' && <NoticesPublicTab features={publicFeatures.notices || {}} />}
+            {activeTab === 'directory' && <DirectoryPublicTab features={publicFeatures.directory || {}} />}
             {activeTab === 'forms' && <FormsPublicTab />}
             {activeTab === 'pages' && <PagesPublicTab />}
           </div>
