@@ -43,6 +43,15 @@ DIRECTORY_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         set(),
         True,
     ),
+    (
+        "city_board_members",
+        [
+            "id", "board_name", "seat_name", "member_name", "email",
+            "term_start", "term_end", "is_vacant", "is_public", "sort_order", "notes", "created_at",
+        ],
+        set(),
+        True,
+    ),
 ]
 
 MODULE = CivicModule(

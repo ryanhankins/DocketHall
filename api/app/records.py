@@ -26,6 +26,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from .agendas import _bucket, _minio, _remove_minio_objects
+from .audit import record_audit
 from .auth import require_permission
 from .db import pool
 from .tenancy import tenant_object_key
@@ -69,6 +70,25 @@ CREATE TABLE IF NOT EXISTS repository_files (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS repo_files_doc_idx ON repository_files(document_id, id);
+CREATE TABLE IF NOT EXISTS public_records_requests (
+    id              BIGSERIAL PRIMARY KEY,
+    request_number  TEXT NOT NULL UNIQUE,
+    requester_name  TEXT NOT NULL,
+    requester_email TEXT NOT NULL DEFAULT '',
+    requester_phone TEXT NOT NULL DEFAULT '',
+    subject         TEXT NOT NULL,
+    description     TEXT NOT NULL DEFAULT '',
+    department      TEXT NOT NULL DEFAULT 'City Clerk',
+    status          TEXT NOT NULL DEFAULT 'submitted',
+    due_date        TEXT NOT NULL DEFAULT '',
+    assigned_to     TEXT NOT NULL DEFAULT '',
+    fee_estimate    TEXT NOT NULL DEFAULT '',
+    response_notes  TEXT NOT NULL DEFAULT '',
+    fulfilled_at    TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS prr_status_idx ON public_records_requests(status, id DESC);
 """
 
 
@@ -253,6 +273,175 @@ def download_public_file(file_id: int):
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+# ------------------------------------------------------------------ FOIA / Public Data Requests
+
+FOIA_STATUSES = ("submitted", "in_review", "ready", "fulfilled", "denied")
+
+
+class FoiaRequestIn(BaseModel):
+    requester_name: str
+    requester_email: str = ""
+    requester_phone: str = ""
+    subject: str
+    description: str = ""
+    department: str = "City Clerk"
+
+
+class FoiaRequestPatch(BaseModel):
+    status: str | None = None
+    assigned_to: str | None = None
+    due_date: str | None = None
+    fee_estimate: str | None = None
+    response_notes: str | None = None
+
+
+def _row_to_foia(r) -> dict:
+    return {
+        "id": r[0],
+        "request_number": r[1],
+        "requester_name": r[2],
+        "requester_email": r[3],
+        "requester_phone": r[4],
+        "subject": r[5],
+        "description": r[6],
+        "department": r[7],
+        "status": r[8],
+        "due_date": r[9],
+        "assigned_to": r[10],
+        "fee_estimate": r[11],
+        "response_notes": r[12],
+        "fulfilled_at": r[13].isoformat() if r[13] else None,
+        "created_at": r[14].isoformat() if r[14] else None,
+        "updated_at": r[15].isoformat() if r[15] else None,
+    }
+
+
+_FOIA_COLS = (
+    "id, request_number, requester_name, requester_email, requester_phone, "
+    "subject, description, department, status, due_date, assigned_to, "
+    "fee_estimate, response_notes, fulfilled_at, created_at, updated_at"
+)
+
+
+@router.post("/requests/public", status_code=201)
+def submit_public_foia_request(body: FoiaRequestIn):
+    name = body.requester_name.strip()
+    subj = body.subject.strip()
+    if not name or not subj:
+        raise HTTPException(status_code=400, detail="Your name and request subject are required")
+    yr = date.today().year
+    due = (date.today() + timedelta(days=14)).isoformat()
+    tmp = f"PRR-{yr}-{uuid.uuid4().hex[:8].upper()}"
+    with pool.connection() as conn:
+        row = conn.execute(
+            "INSERT INTO public_records_requests "
+            "(request_number, requester_name, requester_email, requester_phone, subject, description, department, due_date) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (tmp, name, body.requester_email.strip(), body.requester_phone.strip(), subj, body.description.strip(), body.department.strip() or "City Clerk", due),
+        ).fetchone()
+        final_num = f"PRR-{yr}-{row[0]:04d}"
+        full = conn.execute(
+            f"UPDATE public_records_requests SET request_number = %s WHERE id = %s RETURNING {_FOIA_COLS}",
+            (final_num, row[0]),
+        ).fetchone()
+    return {
+        "request_number": full[1],
+        "subject": full[5],
+        "status": full[8],
+        "due_date": full[9],
+        "created_at": full[14].isoformat() if full[14] else None,
+    }
+
+
+@router.get("/requests/public-lookup")
+def lookup_public_foia_request(request_number: str = ""):
+    num = request_number.strip().upper()
+    if not num:
+        raise HTTPException(status_code=400, detail="Request number is required")
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT request_number, subject, department, status, due_date, fee_estimate, response_notes, fulfilled_at, created_at "
+            "FROM public_records_requests WHERE UPPER(request_number) = %s",
+            (num,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Records request not found")
+    return {
+        "request_number": row[0],
+        "subject": row[1],
+        "department": row[2],
+        "status": row[3],
+        "due_date": row[4],
+        "fee_estimate": row[5],
+        "response_notes": row[6],
+        "fulfilled_at": row[7].isoformat() if row[7] else None,
+        "created_at": row[8].isoformat() if row[8] else None,
+    }
+
+
+@router.get("/requests")
+def list_foia_requests(
+    status: str = "",
+    q: str = "",
+    _: dict = Depends(require_permission("records.view", "records.manage")),
+):
+    st = status.strip().lower()
+    ql = f"%{q.strip()}%"
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"SELECT {_FOIA_COLS} FROM public_records_requests "
+            "WHERE (%s = '' OR status = %s) "
+            "AND (%s = '%%' OR request_number ILIKE %s OR subject ILIKE %s OR requester_name ILIKE %s) "
+            "ORDER BY id DESC",
+            (st, st, ql, ql, ql, ql),
+        ).fetchall()
+    return [_row_to_foia(r) for r in rows]
+
+
+@router.patch("/requests/{req_id}")
+def update_foia_request(
+    req_id: int,
+    body: FoiaRequestPatch,
+    user: dict = Depends(require_permission("records.manage")),
+):
+    if body.status is not None and body.status.strip().lower() not in FOIA_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid FOIA request status")
+    ful_clause = ", fulfilled_at = COALESCE(fulfilled_at, now())" if body.status == "fulfilled" else ""
+    with pool.connection() as conn:
+        row = conn.execute(
+            f"UPDATE public_records_requests SET "
+            f"status = COALESCE(%s, status), "
+            f"assigned_to = COALESCE(%s, assigned_to), "
+            f"due_date = COALESCE(%s, due_date), "
+            f"fee_estimate = COALESCE(%s, fee_estimate), "
+            f"response_notes = COALESCE(%s, response_notes), "
+            f"updated_at = now(){ful_clause} "
+            f"WHERE id = %s RETURNING {_FOIA_COLS}",
+            (
+                body.status.strip().lower() if body.status is not None else None,
+                body.assigned_to.strip() if body.assigned_to is not None else None,
+                body.due_date.strip() if body.due_date is not None else None,
+                body.fee_estimate.strip() if body.fee_estimate is not None else None,
+                body.response_notes.strip() if body.response_notes is not None else None,
+                req_id,
+            ),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Records request not found")
+    record_audit(user["username"], "records.foia_update", f"Updated {row[1]} -> {row[8]}")
+    return _row_to_foia(row)
+
+
+@router.delete("/requests/{req_id}")
+def delete_foia_request(req_id: int, user: dict = Depends(require_permission("records.manage"))):
+    with pool.connection() as conn:
+        row = conn.execute("DELETE FROM public_records_requests WHERE id = %s RETURNING request_number", (req_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Records request not found")
+    record_audit(user["username"], "records.foia_delete", f"Deleted {row[0]}")
+    return {"deleted": True, "id": req_id}
 
 
 # ------------------------------------------------------------------ staff endpoints

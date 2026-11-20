@@ -98,6 +98,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
 
   // Document upload
   const [docCat, setDocCat] = useState('Other');
+  const [docRound, setDocRound] = useState(1);
   const [busy, setBusy] = useState(false);
   const showToast = useToast();
 
@@ -1525,13 +1526,25 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
           {docs.length > 0 ? (
             <ul className="doc-list">
               {docs.map(d => (
-                <li key={d.id}>
+                <li key={d.id} style={{ opacity: d.is_superseded ? 0.6 : 1 }}>
                   <span>
                     <span className="badge text">{d.doc_category}</span>{' '}
-                    {d.title} <span className="muted">({formatSize(d.size_bytes)}, by {d.uploaded_by})</span>
+                    <span className="badge draft">v{d.revision_round || 1}</span>{' '}
+                    {d.is_superseded && <span className="badge disabled">Superseded</span>}{' '}
+                    <span style={{ textDecoration: d.is_superseded ? 'line-through' : 'none' }}>{d.title}</span>{' '}
+                    <span className="muted">({formatSize(d.size_bytes)}, by {d.uploaded_by})</span>
                   </span>
                   <div className="actions">
                     <a className="btn sm" href={`/api/permits/${permit.id}/documents/${d.id}/download`} target="_blank" rel="noreferrer">View</a>
+                    {isManager && (
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={async () => onUpdated(await api(`/api/permits/${permit.id}/documents/${d.id}/supersede`, { method: 'PATCH' }))}
+                      >
+                        {d.is_superseded ? 'Restore' : 'Supersede'}
+                      </button>
+                    )}
                     {(isManager || permit.status === 'submitted' || permit.status === 'needs_info') && (
                       <button
                         type="button"
@@ -1556,6 +1569,12 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
               <option value="Inspection Report">Inspection Report</option>
               <option value="Other">Other</option>
             </select>
+            <select value={docRound} onChange={(e) => setDocRound(Number(e.target.value) || 1)} style={{ width: 'auto' }} aria-label="Revision Round">
+              <option value={1}>Round 1 (v1)</option>
+              <option value={2}>Round 2 (v2)</option>
+              <option value={3}>Round 3 (v3)</option>
+              <option value={4}>Round 4 (v4)</option>
+            </select>
             <input
               id={`ws-doc-file-${permit.id}`}
               type="file"
@@ -1566,6 +1585,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                   const fd = new FormData();
                   fd.append('file', file);
                   fd.append('doc_category', docCat);
+                  fd.append('revision_round', String(docRound));
                   onUpdated(await api(`/api/permits/${permit.id}/documents`, { method: 'POST', body: fd }));
                 }
                 e.target.value = '';

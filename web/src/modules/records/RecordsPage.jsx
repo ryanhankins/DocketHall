@@ -92,6 +92,8 @@ export default function RecordsPage({ me }) {
   const [savingEdit, setSavingEdit] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [showFoia, setShowFoia] = useState(false);
+  const [foiaItems, setFoiaItems] = useState([]);
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -121,6 +123,13 @@ export default function RecordsPage({ me }) {
   useEffect(() => {
     loadRecords();
   }, [loadRecords]);
+
+  useEffect(() => {
+    if (!showFoia) return;
+    api('/api/records/requests')
+      .then((rows) => setFoiaItems(Array.isArray(rows) ? rows : []))
+      .catch(() => setFoiaItems([]));
+  }, [showFoia]);
 
   function openDetail(rec) {
     setSelected(rec);
@@ -260,16 +269,74 @@ export default function RecordsPage({ me }) {
             Central archive for city contracts, resolutions, ordinances, agreements, and renewal tracking.
           </p>
         </div>
-        {canManage && (
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => setShowAdd((v) => !v)}
-          >
-            {showAdd ? 'Close Form' : '+ Add Record'}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" className="btn" onClick={() => setShowFoia((v) => !v)}>
+            {showFoia ? 'Hide FOIA Requests' : 'FOIA / Data Requests'}
           </button>
-        )}
+          {canManage && (
+            <button
+              type="button"
+              className="btn primary"
+              onClick={() => setShowAdd((v) => !v)}
+            >
+              {showAdd ? 'Close Form' : '+ Add Record'}
+            </button>
+          )}
+        </div>
       </div>
+
+      {showFoia && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Public Records / FOIA Requests ({foiaItems.length})</h3>
+          {!foiaItems.length ? (
+            <p className="muted" style={{ margin: 0 }}>No FOIA / public data requests submitted yet.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>
+                  <th style={{ padding: 6 }}>Request #</th>
+                  <th style={{ padding: 6 }}>Requester</th>
+                  <th style={{ padding: 6 }}>Subject</th>
+                  <th style={{ padding: 6 }}>Due Date</th>
+                  <th style={{ padding: 6 }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {foiaItems.map((fr) => (
+                  <tr key={fr.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                    <td style={{ padding: 6 }}><strong>{fr.request_number}</strong></td>
+                    <td style={{ padding: 6 }}>{fr.requester_name}<div className="muted" style={{ fontSize: 11 }}>{fr.requester_email || fr.requester_phone}</div></td>
+                    <td style={{ padding: 6 }}>{fr.subject}{fr.description && <div className="muted" style={{ fontSize: 11 }}>{fr.description}</div>}</td>
+                    <td style={{ padding: 6 }}>{fr.due_date || '—'}</td>
+                    <td style={{ padding: 6 }}>
+                      <select
+                        className="input"
+                        style={{ width: 'auto' }}
+                        value={fr.status}
+                        disabled={!canManage}
+                        onChange={async (e) => {
+                          const updated = await api(`/api/records/requests/${fr.id}`, {
+                            method: 'PATCH',
+                            body: JSON.stringify({ status: e.target.value }),
+                          });
+                          setFoiaItems((prev) => prev.map((x) => (x.id === fr.id ? updated : x)));
+                          showToast('FOIA request updated', 'ok');
+                        }}
+                      >
+                        <option value="submitted">Submitted</option>
+                        <option value="in_review">In Review</option>
+                        <option value="ready">Ready for Pickup</option>
+                        <option value="fulfilled">Fulfilled</option>
+                        <option value="denied">Denied / Exempt</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {expiringCount > 0 && (
         <div

@@ -68,6 +68,8 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
 
   const [codeSections, setCodeSections] = useState([]);
   const [showQueue, setShowQueue] = useState(false);
+  const [showWo, setShowWo] = useState(false);
+  const [woList, setWoList] = useState([]);
   const [reinspQueue, setReinspQueue] = useState([]);
   const [reinspForm, setReinspForm] = useState({
     inspect_date: '',
@@ -130,6 +132,13 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
       .then((rows) => setReinspQueue(Array.isArray(rows) ? rows : []))
       .catch(() => setReinspQueue([]));
   }, [showQueue, items]);
+
+  useEffect(() => {
+    if (!showWo) return;
+    api('/api/complaints/work-orders')
+      .then((rows) => setWoList(Array.isArray(rows) ? rows : []))
+      .catch(() => setWoList([]));
+  }, [showWo]);
 
   useEffect(() => {
     if (!initialId || items.length === 0) return;
@@ -274,6 +283,13 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
           <button
             type="button"
             className="btn"
+            onClick={() => setShowWo((v) => !v)}
+          >
+            {showWo ? 'Hide 311 / Public Works' : '311 / Public Works Orders'}
+          </button>
+          <button
+            type="button"
+            className="btn"
             onClick={() => setShowQueue((v) => !v)}
           >
             {showQueue ? 'Hide Reinspection Queue' : 'Reinspection & Deadline Queue'}
@@ -287,6 +303,58 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
           </button>
         </div>
       </div>
+
+      {showWo && (
+        <div className="card">
+          <h3 style={{ marginTop: 0 }}>Public Works &amp; 311 Work Orders ({woList.length})</h3>
+          {!woList.length ? (
+            <p className="muted" style={{ margin: 0 }}>No Public Works work orders yet.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '1px solid #e5e7eb' }}>
+                  <th style={{ padding: 6 }}>WO #</th>
+                  <th style={{ padding: 6 }}>Category &amp; Asset</th>
+                  <th style={{ padding: 6 }}>Location &amp; Description</th>
+                  <th style={{ padding: 6 }}>Crew</th>
+                  <th style={{ padding: 6 }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {woList.map((wo) => (
+                  <tr key={wo.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                    <td style={{ padding: 6 }}><strong>{wo.work_order_number}</strong><div className="muted" style={{ fontSize: 11 }}>{wo.priority}</div></td>
+                    <td style={{ padding: 6 }}>{wo.category}{wo.asset_id && <div className="muted" style={{ fontSize: 11 }}>Asset: {wo.asset_id}</div>}</td>
+                    <td style={{ padding: 6 }}><strong>{wo.location || '—'}</strong><div className="muted" style={{ fontSize: 11 }}>{wo.description}</div></td>
+                    <td style={{ padding: 6 }}>{wo.assigned_crew || 'Unassigned'}</td>
+                    <td style={{ padding: 6 }}>
+                      <select
+                        className="input"
+                        style={{ width: 'auto' }}
+                        value={wo.status}
+                        onChange={async (e) => {
+                          const updated = await api(`/api/complaints/work-orders/${wo.id}`, {
+                            method: 'PATCH',
+                            body: JSON.stringify({ status: e.target.value }),
+                          });
+                          setWoList((prev) => prev.map((x) => (x.id === wo.id ? updated : x)));
+                          showToast('Work order updated', 'ok');
+                        }}
+                      >
+                        <option value="open">Open</option>
+                        <option value="assigned">Assigned</option>
+                        <option value="in_progress">In Progress</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {showQueue && (
         <div className="card">
@@ -698,6 +766,27 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                   >
                     NOV / Citation PDF
                   </a>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={async () => {
+                      const wo = await api('/api/complaints/work-orders', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                          source_complaint_id: selected.id,
+                          category: 'Other',
+                          location: selected.subject_property_address || '',
+                          description: `From ${selected.complaint_number}: ${selected.conduct_description}`,
+                          assigned_crew: 'Public Works',
+                        }),
+                      });
+                      setShowWo(true);
+                      setWoList((prev) => [wo, ...prev]);
+                      showToast(`Created Work Order ${wo.work_order_number}`, 'ok');
+                    }}
+                  >
+                    Create Work Order
+                  </button>
                 </div>
                 <button
                   type="button"

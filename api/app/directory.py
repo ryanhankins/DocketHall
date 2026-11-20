@@ -62,6 +62,20 @@ CREATE TABLE IF NOT EXISTS city_community_resources (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS city_board_members (
+    id          BIGSERIAL PRIMARY KEY,
+    board_name  TEXT NOT NULL,
+    seat_name   TEXT NOT NULL DEFAULT '',
+    member_name TEXT NOT NULL DEFAULT '',
+    email       TEXT NOT NULL DEFAULT '',
+    term_start  TEXT NOT NULL DEFAULT '',
+    term_end    TEXT NOT NULL DEFAULT '',
+    is_vacant   BOOLEAN NOT NULL DEFAULT FALSE,
+    is_public   BOOLEAN NOT NULL DEFAULT TRUE,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    notes       TEXT NOT NULL DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 _SEED_RESOURCES = [
@@ -127,6 +141,18 @@ def bootstrap() -> None:
                     "(name, category, description, address, phone, email, website_url, hours, is_featured, sort_order, is_public) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)",
                     item,
+                )
+        if conn.execute("SELECT COUNT(*) FROM city_board_members").fetchone()[0] == 0:
+            for b_row in (
+                ("Planning Commission", "Chair — Seat 1", "Elena Rostova", "planning1@city.example", "2024-01-01", "2027-12-31", False, 1, "3-year term"),
+                ("Planning Commission", "Commissioner — Seat 2", "David Kim", "planning2@city.example", "2025-01-01", "2028-12-31", False, 2, "3-year term"),
+                ("Park & Recreation Board", "Member — Seat 3 (Open)", "", "", "", "", True, 3, "Accepting resident applications"),
+            ):
+                conn.execute(
+                    "INSERT INTO city_board_members "
+                    "(board_name, seat_name, member_name, email, term_start, term_end, is_vacant, sort_order, notes, is_public) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)",
+                    b_row,
                 )
 
 
@@ -259,6 +285,49 @@ def _row_to_resource(r) -> dict:
     }
 
 
+def _row_to_board(r) -> dict:
+    return {
+        "id": r[0],
+        "board_name": r[1],
+        "seat_name": r[2],
+        "member_name": r[3],
+        "email": r[4],
+        "term_start": r[5],
+        "term_end": r[6],
+        "is_vacant": bool(r[7]),
+        "is_public": bool(r[8]),
+        "sort_order": r[9],
+        "notes": r[10],
+        "created_at": r[11].isoformat() if r[11] else None,
+    }
+
+
+class BoardMemberIn(BaseModel):
+    board_name: str
+    seat_name: str = ""
+    member_name: str = ""
+    email: str = ""
+    term_start: str = ""
+    term_end: str = ""
+    is_vacant: bool = False
+    is_public: bool = True
+    sort_order: int = 0
+    notes: str = ""
+
+
+class BoardMemberPatch(BaseModel):
+    board_name: str | None = None
+    seat_name: str | None = None
+    member_name: str | None = None
+    email: str | None = None
+    term_start: str | None = None
+    term_end: str | None = None
+    is_vacant: bool | None = None
+    is_public: bool | None = None
+    sort_order: int | None = None
+    notes: str | None = None
+
+
 @router.get("/public")
 def get_public_directory(q: str = "", resource_category: str = ""):
     ql = f"%{q.strip()}%"
@@ -289,6 +358,14 @@ def get_public_directory(q: str = "", resource_category: str = ""):
                 "ORDER BY is_featured DESC, sort_order ASC, name ASC",
                 (rc_filter, rc_filter, ql, ql, ql, ql),
             ).fetchall()
+            b_rows = conn.execute(
+                "SELECT id, board_name, seat_name, member_name, email, term_start, term_end, "
+                "       is_vacant, is_public, sort_order, notes, created_at "
+                "FROM city_board_members "
+                "WHERE is_public = TRUE AND (board_name ILIKE %s OR seat_name ILIKE %s OR member_name ILIKE %s) "
+                "ORDER BY board_name ASC, sort_order ASC, id ASC",
+                (ql, ql, ql),
+            ).fetchall()
         else:
             c_rows = conn.execute(
                 "SELECT id, name, title_role, department, email, phone, office_hours, notes, "
@@ -309,10 +386,17 @@ def get_public_directory(q: str = "", resource_category: str = ""):
                 "ORDER BY is_featured DESC, sort_order ASC, name ASC",
                 (rc_filter, rc_filter),
             ).fetchall()
+            b_rows = conn.execute(
+                "SELECT id, board_name, seat_name, member_name, email, term_start, term_end, "
+                "       is_vacant, is_public, sort_order, notes, created_at "
+                "FROM city_board_members WHERE is_public = TRUE "
+                "ORDER BY board_name ASC, sort_order ASC, id ASC"
+            ).fetchall()
     return {
         "contacts": [_row_to_contact(r) for r in c_rows],
         "faqs": [_row_to_faq(r) for r in f_rows],
         "resources": [_row_to_resource(r) for r in r_rows],
+        "boards": [_row_to_board(r) for r in b_rows],
     }
 
 
@@ -559,3 +643,89 @@ def delete_resource(resource_id: int, user: dict = Depends(require_permission("d
             raise HTTPException(status_code=404, detail="Community resource not found")
     record_audit(user["username"], "directory.resource_delete", f"Deleted resource #{resource_id}: {row[1]}")
     return {"deleted": True, "id": resource_id}
+
+
+@router.get("/boards")
+def list_boards(_: dict = Depends(require_permission("directory.manage"))):
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT id, board_name, seat_name, member_name, email, term_start, term_end, "
+            "       is_vacant, is_public, sort_order, notes, created_at "
+            "FROM city_board_members ORDER BY board_name ASC, sort_order ASC, id ASC"
+        ).fetchall()
+    return [_row_to_board(r) for r in rows]
+
+
+@router.post("/boards", status_code=201)
+def create_board_member(body: BoardMemberIn, user: dict = Depends(require_permission("directory.manage"))):
+    bname = body.board_name.strip()
+    if not bname:
+        raise HTTPException(status_code=400, detail="Board / Commission name is required")
+    with pool.connection() as conn:
+        row = conn.execute(
+            "INSERT INTO city_board_members "
+            "(board_name, seat_name, member_name, email, term_start, term_end, is_vacant, is_public, sort_order, notes) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "RETURNING id, board_name, seat_name, member_name, email, term_start, term_end, is_vacant, is_public, sort_order, notes, created_at",
+            (
+                bname,
+                body.seat_name.strip(),
+                body.member_name.strip(),
+                body.email.strip(),
+                body.term_start.strip(),
+                body.term_end.strip(),
+                body.is_vacant,
+                body.is_public,
+                body.sort_order,
+                body.notes.strip(),
+            ),
+        ).fetchone()
+    record_audit(user["username"], "directory.board_create", f"{bname}: {body.seat_name.strip() or body.member_name.strip()}")
+    return _row_to_board(row)
+
+
+@router.patch("/boards/{board_id}")
+def update_board_member(board_id: int, body: BoardMemberPatch, user: dict = Depends(require_permission("directory.manage"))):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "UPDATE city_board_members SET "
+            "board_name = COALESCE(%s, board_name), "
+            "seat_name = COALESCE(%s, seat_name), "
+            "member_name = COALESCE(%s, member_name), "
+            "email = COALESCE(%s, email), "
+            "term_start = COALESCE(%s, term_start), "
+            "term_end = COALESCE(%s, term_end), "
+            "is_vacant = COALESCE(%s, is_vacant), "
+            "is_public = COALESCE(%s, is_public), "
+            "sort_order = COALESCE(%s, sort_order), "
+            "notes = COALESCE(%s, notes) "
+            "WHERE id = %s "
+            "RETURNING id, board_name, seat_name, member_name, email, term_start, term_end, is_vacant, is_public, sort_order, notes, created_at",
+            (
+                body.board_name.strip() if body.board_name is not None else None,
+                body.seat_name.strip() if body.seat_name is not None else None,
+                body.member_name.strip() if body.member_name is not None else None,
+                body.email.strip() if body.email is not None else None,
+                body.term_start.strip() if body.term_start is not None else None,
+                body.term_end.strip() if body.term_end is not None else None,
+                body.is_vacant,
+                body.is_public,
+                body.sort_order,
+                body.notes.strip() if body.notes is not None else None,
+                board_id,
+            ),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Board member not found")
+    record_audit(user["username"], "directory.board_update", f"Updated board seat #{board_id}")
+    return _row_to_board(row)
+
+
+@router.delete("/boards/{board_id}")
+def delete_board_member(board_id: int, user: dict = Depends(require_permission("directory.manage"))):
+    with pool.connection() as conn:
+        row = conn.execute("DELETE FROM city_board_members WHERE id = %s RETURNING id", (board_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Board member not found")
+    record_audit(user["username"], "directory.board_delete", f"Deleted board seat #{board_id}")
+    return {"deleted": True, "id": board_id}

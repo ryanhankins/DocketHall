@@ -226,3 +226,57 @@ def global_public_search(q: str = ""):
                 })
 
     return {"query": term, "results": results[:40]}
+
+
+@router.get("/transparency")
+def public_transparency_snapshot():
+    """Return anonymized YTD & active civic metrics across enabled public modules (no PII)."""
+    enabled = set(get_enabled_module_ids())
+    metrics: list[dict] = []
+    with pool.connection() as conn:
+        if "permits" in enabled:
+            try:
+                p_sub = conn.execute(
+                    "SELECT COUNT(*) FROM permits WHERE EXTRACT(YEAR FROM created_at) = EXTRACT(YEAR FROM CURRENT_DATE)"
+                ).fetchone()[0]
+                p_iss = conn.execute(
+                    "SELECT COUNT(*) FROM permits WHERE status IN ('issued','closed') "
+                    "AND EXTRACT(YEAR FROM COALESCE(issued_at, created_at)) = EXTRACT(YEAR FROM CURRENT_DATE)"
+                ).fetchone()[0]
+                metrics.append({"label": "Permits Issued (YTD)", "value": int(p_iss), "tab": "permits"})
+                metrics.append({"label": "Permit Applications (YTD)", "value": int(p_sub), "tab": "permits"})
+            except Exception:
+                pass
+        if "agendas" in enabled:
+            try:
+                ag = conn.execute(
+                    "SELECT COUNT(*) FROM agendas WHERE status = 'finalized' AND meeting_date >= CURRENT_DATE"
+                ).fetchone()[0]
+                metrics.append({"label": "Upcoming Finalized Meetings", "value": int(ag), "tab": "agendas"})
+            except Exception:
+                pass
+        if "complaints" in enabled:
+            try:
+                ce = conn.execute(
+                    "SELECT COUNT(*) FROM complaints WHERE status IN ('resolved','dismissed') "
+                    "AND EXTRACT(YEAR FROM COALESCE(resolved_at, updated_at)) = EXTRACT(YEAR FROM CURRENT_DATE)"
+                ).fetchone()[0]
+                metrics.append({"label": "Code Cases Resolved (YTD)", "value": int(ce), "tab": "complaints"})
+            except Exception:
+                pass
+        if "notices" in enabled:
+            try:
+                nt = conn.execute(
+                    "SELECT COUNT(*) FROM city_notices WHERE is_published = TRUE AND category IN ('bid_rfp','job') "
+                    "AND (expires_at IS NULL OR expires_at >= CURRENT_DATE)"
+                ).fetchone()[0]
+                metrics.append({"label": "Open RFPs / Bids & Jobs", "value": int(nt), "tab": "notices"})
+            except Exception:
+                pass
+        if "records" in enabled:
+            try:
+                rc = conn.execute("SELECT COUNT(*) FROM repository_documents WHERE is_public = TRUE").fetchone()[0]
+                metrics.append({"label": "Published Public Records", "value": int(rc), "tab": "records"})
+            except Exception:
+                pass
+    return {"metrics": metrics}

@@ -99,7 +99,7 @@ PERMITS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         [
             "id", "permit_id", "doc_category", "title", "filename",
             "content_type", "size_bytes", "sha256", "object_key",
-            "uploaded_by", "inspection_id", "created_at",
+            "uploaded_by", "inspection_id", "revision_round", "is_superseded", "created_at",
         ],
         set(),
         True,

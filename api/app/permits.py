@@ -142,11 +142,15 @@ CREATE TABLE IF NOT EXISTS permit_documents (
     size_bytes    BIGINT NOT NULL DEFAULT 0,
     sha256        TEXT NOT NULL DEFAULT '',
     object_key    TEXT NOT NULL,
-    uploaded_by   TEXT NOT NULL DEFAULT '',
-    inspection_id BIGINT,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    uploaded_by     TEXT NOT NULL DEFAULT '',
+    inspection_id   BIGINT,
+    revision_round  INTEGER NOT NULL DEFAULT 1,
+    is_superseded   BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE permit_documents ADD COLUMN IF NOT EXISTS inspection_id BIGINT;
+ALTER TABLE permit_documents ADD COLUMN IF NOT EXISTS revision_round INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE permit_documents ADD COLUMN IF NOT EXISTS is_superseded BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS permit_documents_permit_idx ON permit_documents(permit_id, id);
 CREATE TABLE IF NOT EXISTS permit_activity_log (
     id              BIGSERIAL PRIMARY KEY,
@@ -1193,7 +1197,7 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
     ids = [r[0] for r in rows]
     doc_rows = conn.execute(
         "SELECT id, permit_id, doc_category, title, filename, content_type, "
-        "       size_bytes, uploaded_by, created_at, inspection_id "
+        "       size_bytes, uploaded_by, created_at, inspection_id, revision_round, is_superseded "
         "FROM permit_documents WHERE permit_id = ANY(%s) ORDER BY id ASC",
         (ids,),
     ).fetchall()
@@ -1210,6 +1214,8 @@ def _hydrate_permits(conn, rows: list[tuple], include_internal: bool = True) -> 
             "uploaded_by": d[7],
             "created_at": d[8].isoformat() if d[8] else None,
             "inspection_id": d[9],
+            "revision_round": d[10] if d[10] is not None else 1,
+            "is_superseded": bool(d[11]),
         })
 
     wf_rows = conn.execute(
@@ -2592,6 +2598,40 @@ def send_compliance_program_reminders(
     return {"sent_count": len(sent), "skipped_count": skipped, "recipients": sent}
 
 
+def run_daily_compliance_digest(request: Request | None = None) -> dict:
+    with pool.connection() as conn:
+        rep = _build_operational_report(conn)
+    lines = []
+    if rep["permits"]["statutory_overdue"] or rep["permits"]["statutory_warning"]:
+        lines.append(f"• Planning Statutory Clocks: {rep['permits']['statutory_overdue']} overdue, {rep['permits']['statutory_warning']} due <= 14 days")
+    if rep["contractors"]["blocked"] or rep["contractors"]["expiring_soon"]:
+        lines.append(f"• Contractor Licenses: {rep['contractors']['blocked']} blocked/expired, {rep['contractors']['expiring_soon']} expiring <= 30 days")
+    if rep["compliance_programs"]["overdue"] or rep["compliance_programs"]["due_soon"]:
+        lines.append(f"• Rental & Fire Compliance: {rep['compliance_programs']['overdue']} overdue, {rep['compliance_programs']['due_soon']} due <= 30 days")
+    if rep["code_enforcement"]["overdue"]:
+        lines.append(f"• Code Enforcement Deadlines: {rep['code_enforcement']['overdue']} overdue NOV/reinspection case(s)")
+    if not lines:
+        return {"sent": False, "items": 0}
+    send_notification_email(
+        "permits_updated",
+        "[CivicDesk] Daily Municipal Compliance & Deadline Digest",
+        "Daily operational summary of items needing attention:\n\n" + "\n".join(lines),
+        link_path="/app#permits-reports",
+        request=request,
+    )
+    return {"sent": True, "items": len(lines), "summary": lines}
+
+
+@router.post("/reports/send-daily-digest")
+def trigger_daily_digest(
+    request: Request,
+    user: dict = Depends(require_permission("permits.manage")),
+):
+    res = run_daily_compliance_digest(request=request)
+    record_audit(user["username"], "permits.daily_digest", f"Sent={res['sent']}, items={res['items']}")
+    return res
+
+
 @router.get("/parcels/map")
 def get_parcels_map(_: dict = Depends(require_permission("permits.manage"))):
     """Return registered parcels with coordinates, zoning, and permit/code counts for the interactive SVG GIS viewer."""
@@ -2649,6 +2689,7 @@ async def upload_permit_document(
     doc_category: str = Form("Other"),
     title: str = Form(""),
     inspection_id: int | None = Form(None),
+    revision_round: int = Form(1),
     user: dict = Depends(require_permission("permits.submit", "permits.manage")),
 ):
     with pool.connection() as conn:
@@ -2680,9 +2721,9 @@ async def upload_permit_document(
     with pool.connection() as conn:
         conn.execute(
             "INSERT INTO permit_documents "
-            "(permit_id, doc_category, title, filename, content_type, size_bytes, sha256, object_key, uploaded_by, inspection_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (permit_id, clean_cat, clean_title, orig_name, ctype, len(raw), sha, obj_key, user["username"], inspection_id),
+            "(permit_id, doc_category, title, filename, content_type, size_bytes, sha256, object_key, uploaded_by, inspection_id, revision_round) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (permit_id, clean_cat, clean_title, orig_name, ctype, len(raw), sha, obj_key, user["username"], inspection_id, max(1, revision_round)),
         )
         conn.execute("UPDATE permits SET updated_at = now() WHERE id = %s", (permit_id,))
         conn.execute(
@@ -2729,6 +2770,23 @@ def download_permit_document(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+@router.patch("/{permit_id}/documents/{doc_id}/supersede")
+def toggle_supersede_document(
+    permit_id: int,
+    doc_id: int,
+    user: dict = Depends(require_permission("permits.manage")),
+):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "UPDATE permit_documents SET is_superseded = NOT is_superseded "
+            "WHERE id = %s AND permit_id = %s RETURNING id",
+            (doc_id, permit_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Document not found")
+        return _get_permit_or_404(conn, permit_id, include_internal=True)
 
 
 @router.delete("/{permit_id}/documents/{doc_id}")

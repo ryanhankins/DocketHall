@@ -62,6 +62,20 @@ export default function PermitsReportsPage({ onNavigate }) {
         </div>
         <div className="actions">
           <button type="button" className="btn sm" onClick={load}>Refresh</button>
+          <button
+            type="button"
+            className="btn sm"
+            onClick={async () => {
+              try {
+                const res = await api('/api/permits/reports/send-daily-digest', { method: 'POST' });
+                showToast(res.sent ? 'Daily compliance digest sent to staff recipients' : 'No overdue/expiring items to report', 'ok');
+              } catch (err) {
+                showToast(err.message, 'error');
+              }
+            }}
+          >
+            Send Daily Digest Now
+          </button>
           <a className="btn sm primary" href="/api/permits/reports/summary.csv" download="civicdesk-operational-report.csv">
             Export Report CSV
           </a>

@@ -186,6 +186,26 @@ CREATE TABLE IF NOT EXISTS complaint_settings (
     ordinance_presets   JSONB NOT NULL DEFAULT '["Zoning / Land Use","Property Maintenance / Nuisance","Noise / Animal Control","Sign / Right-of-Way","Other / Unknown"]'::jsonb,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS public_works_orders (
+    id                  BIGSERIAL PRIMARY KEY,
+    work_order_number   TEXT NOT NULL UNIQUE,
+    source_complaint_id BIGINT,
+    category            TEXT NOT NULL DEFAULT 'Pothole / Street',
+    asset_id            TEXT NOT NULL DEFAULT '',
+    location            TEXT NOT NULL DEFAULT '',
+    description         TEXT NOT NULL,
+    priority            TEXT NOT NULL DEFAULT 'normal',
+    status              TEXT NOT NULL DEFAULT 'open',
+    assigned_crew       TEXT NOT NULL DEFAULT '',
+    estimated_cost      TEXT NOT NULL DEFAULT '',
+    reporter_name       TEXT NOT NULL DEFAULT '',
+    reporter_email      TEXT NOT NULL DEFAULT '',
+    completion_notes    TEXT NOT NULL DEFAULT '',
+    completed_at        TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS pwo_status_idx ON public_works_orders(status, id DESC);
 """
 
 _DEFAULT_ORDINANCE_PRESETS = [
@@ -223,6 +243,18 @@ def bootstrap() -> None:
         with conn.transaction():
             conn.execute("SELECT pg_advisory_xact_lock(424248)")
             conn.execute(SCHEMA)
+            if conn.execute("SELECT COUNT(*) FROM public_works_orders").fetchone()[0] == 0:
+                yr = date.today().year
+                for idx, wo in enumerate((
+                    (f"WO-{yr}-0001", "Pothole / Street", "STR-MAIN-200", "200 Block Main Street", "Large pothole near storm drain inlet; patch crew scheduled.", "high", "assigned", "Streets Crew A"),
+                    (f"WO-{yr}-0002", "Streetlight", "LT-OAK-04", "Corner of Oak Ave & 4th St", "LED streetlamp flickering at dusk; inspect photocell.", "normal", "open", "Public Works"),
+                ), start=1):
+                    conn.execute(
+                        "INSERT INTO public_works_orders "
+                        "(work_order_number, category, asset_id, location, description, priority, status, assigned_crew) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (work_order_number) DO NOTHING",
+                        wo,
+                    )
 
 
 def _iso(v) -> str:
@@ -821,6 +853,171 @@ def list_complaints_staff(
             "avg_resolution_days": avg_resolution_days,
         },
     }
+
+
+# ------------------------------------------------------------------ Public Works 311 Service Requests & Work Orders
+
+WO_PRIORITIES = ("low", "normal", "high", "emergency")
+WO_STATUSES = ("open", "assigned", "in_progress", "completed", "cancelled")
+
+
+class WorkOrderIn(BaseModel):
+    category: str = "Pothole / Street"
+    asset_id: str = ""
+    location: str = ""
+    description: str
+    priority: str = "normal"
+    assigned_crew: str = ""
+    estimated_cost: str = ""
+    reporter_name: str = ""
+    reporter_email: str = ""
+    source_complaint_id: int | None = None
+
+
+class WorkOrderPatch(BaseModel):
+    status: str | None = None
+    priority: str | None = None
+    assigned_crew: str | None = None
+    asset_id: str | None = None
+    estimated_cost: str | None = None
+    completion_notes: str | None = None
+
+
+_WO_COLS = (
+    "id, work_order_number, source_complaint_id, category, asset_id, location, "
+    "description, priority, status, assigned_crew, estimated_cost, reporter_name, "
+    "reporter_email, completion_notes, completed_at, created_at, updated_at"
+)
+
+
+def _row_to_wo(r) -> dict:
+    return {
+        "id": r[0],
+        "work_order_number": r[1],
+        "source_complaint_id": r[2],
+        "category": r[3],
+        "asset_id": r[4],
+        "location": r[5],
+        "description": r[6],
+        "priority": r[7],
+        "status": r[8],
+        "assigned_crew": r[9],
+        "estimated_cost": r[10],
+        "reporter_name": r[11],
+        "reporter_email": r[12],
+        "completion_notes": r[13],
+        "completed_at": _iso(r[14]),
+        "created_at": _iso(r[15]),
+        "updated_at": _iso(r[16]),
+    }
+
+
+def _create_work_order_row(conn, body: WorkOrderIn) -> dict:
+    desc = body.description.strip()
+    if not desc:
+        raise HTTPException(status_code=400, detail="Description is required")
+    prio = body.priority.strip().lower()
+    if prio not in WO_PRIORITIES:
+        prio = "normal"
+    yr = date.today().year
+    tmp = f"WO-{yr}-{secrets.token_hex(4).upper()}"
+    row = conn.execute(
+        "INSERT INTO public_works_orders "
+        "(work_order_number, source_complaint_id, category, asset_id, location, description, "
+        " priority, assigned_crew, estimated_cost, reporter_name, reporter_email) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        (
+            tmp,
+            body.source_complaint_id,
+            body.category.strip() or "Pothole / Street",
+            body.asset_id.strip(),
+            body.location.strip(),
+            desc,
+            prio,
+            body.assigned_crew.strip(),
+            body.estimated_cost.strip(),
+            body.reporter_name.strip(),
+            body.reporter_email.strip(),
+        ),
+    ).fetchone()
+    final_num = f"WO-{yr}-{row[0]:04d}"
+    full = conn.execute(
+        f"UPDATE public_works_orders SET work_order_number = %s WHERE id = %s RETURNING {_WO_COLS}",
+        (final_num, row[0]),
+    ).fetchone()
+    return _row_to_wo(full)
+
+
+@router.post("/work-orders/public", status_code=201)
+def submit_public_311_request(body: WorkOrderIn):
+    with pool.connection() as conn:
+        return _create_work_order_row(conn, body)
+
+
+@router.get("/work-orders")
+def list_work_orders(
+    status: str = "",
+    _: dict = Depends(require_permission("complaints.manage")),
+):
+    st = status.strip().lower()
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"SELECT {_WO_COLS} FROM public_works_orders WHERE (%s = '' OR status = %s) ORDER BY id DESC",
+            (st, st),
+        ).fetchall()
+    return [_row_to_wo(r) for r in rows]
+
+
+@router.post("/work-orders", status_code=201)
+def create_work_order_staff(body: WorkOrderIn, user: dict = Depends(require_permission("complaints.manage"))):
+    with pool.connection() as conn:
+        wo = _create_work_order_row(conn, body)
+    record_audit(user["username"], "complaints.wo_create", f"{wo['work_order_number']} ({wo['category']})")
+    return wo
+
+
+@router.patch("/work-orders/{wo_id}")
+def update_work_order(wo_id: int, body: WorkOrderPatch, user: dict = Depends(require_permission("complaints.manage"))):
+    if body.status is not None and body.status.strip().lower() not in WO_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid work order status")
+    if body.priority is not None and body.priority.strip().lower() not in WO_PRIORITIES:
+        raise HTTPException(status_code=400, detail="Invalid work order priority")
+    comp_clause = ", completed_at = COALESCE(completed_at, now())" if body.status == "completed" else ""
+    with pool.connection() as conn:
+        row = conn.execute(
+            f"UPDATE public_works_orders SET "
+            f"status = COALESCE(%s, status), "
+            f"priority = COALESCE(%s, priority), "
+            f"assigned_crew = COALESCE(%s, assigned_crew), "
+            f"asset_id = COALESCE(%s, asset_id), "
+            f"estimated_cost = COALESCE(%s, estimated_cost), "
+            f"completion_notes = COALESCE(%s, completion_notes), "
+            f"updated_at = now(){comp_clause} "
+            f"WHERE id = %s RETURNING {_WO_COLS}",
+            (
+                body.status.strip().lower() if body.status is not None else None,
+                body.priority.strip().lower() if body.priority is not None else None,
+                body.assigned_crew.strip() if body.assigned_crew is not None else None,
+                body.asset_id.strip() if body.asset_id is not None else None,
+                body.estimated_cost.strip() if body.estimated_cost is not None else None,
+                body.completion_notes.strip() if body.completion_notes is not None else None,
+                wo_id,
+            ),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Work order not found")
+    record_audit(user["username"], "complaints.wo_update", f"Updated {row[1]} -> {row[8]}")
+    return _row_to_wo(row)
+
+
+@router.delete("/work-orders/{wo_id}")
+def delete_work_order(wo_id: int, user: dict = Depends(require_permission("complaints.manage"))):
+    with pool.connection() as conn:
+        row = conn.execute("DELETE FROM public_works_orders WHERE id = %s RETURNING work_order_number", (wo_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Work order not found")
+    record_audit(user["username"], "complaints.wo_delete", f"Deleted {row[0]}")
+    return {"deleted": True, "id": wo_id}
 
 
 @router.patch("/{complaint_id}")

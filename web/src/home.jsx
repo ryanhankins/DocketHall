@@ -490,7 +490,7 @@ function FormsPublicTab() {
 }
 
 function DirectoryPublicTab() {
-  const [data, setData] = useState({ contacts: [], faqs: [], resources: [] });
+  const [data, setData] = useState({ contacts: [], faqs: [], resources: [], boards: [] });
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
   const [subTab, setSubTab] = useState('all');
@@ -503,13 +503,13 @@ function DirectoryPublicTab() {
     if (resourceCat) params.set('resource_category', resourceCat);
     const qs = params.toString() ? `?${params.toString()}` : '';
     fetch(`/api/directory/public${qs}`)
-      .then((r) => (r.ok ? r.json() : { contacts: [], faqs: [], resources: [] }))
+      .then((r) => (r.ok ? r.json() : { contacts: [], faqs: [], resources: [], boards: [] }))
       .then((d) => {
-        setData({ contacts: d.contacts || [], faqs: d.faqs || [], resources: d.resources || [] });
+        setData({ contacts: d.contacts || [], faqs: d.faqs || [], resources: d.resources || [], boards: d.boards || [] });
         setLoading(false);
       })
       .catch(() => {
-        setData({ contacts: [], faqs: [], resources: [] });
+        setData({ contacts: [], faqs: [], resources: [], boards: [] });
         setLoading(false);
       });
   }, [q, resourceCat]);
@@ -533,6 +533,7 @@ function DirectoryPublicTab() {
 
   const showContacts = subTab === 'all' || subTab === 'contacts';
   const showResources = subTab === 'all' || subTab === 'resources';
+  const showBoards = subTab === 'all' || subTab === 'boards';
   const showFaqs = subTab === 'all' || subTab === 'faqs';
 
   return (
@@ -556,6 +557,7 @@ function DirectoryPublicTab() {
             { id: 'all', label: 'All' },
             { id: 'contacts', label: `Staff & Council (${data.contacts.length})` },
             { id: 'resources', label: `Local Business & Resources (${data.resources.length})` },
+            { id: 'boards', label: `Boards & Commissions (${data.boards.length})` },
             { id: 'faqs', label: `FAQs (${data.faqs.length})` },
           ].map((t) => (
             <button
@@ -668,6 +670,27 @@ function DirectoryPublicTab() {
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {showBoards && data.boards.length > 0 && (
+              <div>
+                <h3 style={{ margin: '0 0 .5rem', fontSize: '1rem' }}>Boards &amp; Commissions</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '.65rem' }}>
+                  {data.boards.map((b) => (
+                    <div key={b.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '.75rem', background: b.is_vacant ? '#fffbeb' : '#fff' }}>
+                      <div className="between" style={{ gap: '.4rem' }}>
+                        <strong>{b.board_name}</strong>
+                        {b.is_vacant && <span className="badge draft">Vacant Seat</span>}
+                      </div>
+                      {b.seat_name && <div className="muted" style={{ fontSize: '.84rem' }}>{b.seat_name}</div>}
+                      {!b.is_vacant && b.member_name && <div style={{ fontSize: '.88rem', marginTop: 4 }}>{b.member_name}</div>}
+                      {(b.term_start || b.term_end) && (
+                        <div className="muted" style={{ fontSize: '.78rem', marginTop: 2 }}>Term: {b.term_start || '—'} – {b.term_end || '—'}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -1530,6 +1553,11 @@ function RecordsPublicTab() {
   const [category, setCategory] = useState('');
   const [year, setYear] = useState('');
   const [loading, setLoading] = useState(true);
+  const [showFoia, setShowFoia] = useState(false);
+  const [foiaForm, setFoiaForm] = useState({ requester_name: '', requester_email: '', requester_phone: '', subject: '', description: '' });
+  const [foiaResult, setFoiaResult] = useState(null);
+  const [foiaLookupNum, setFoiaLookupNum] = useState('');
+  const [foiaLookupRes, setFoiaLookupRes] = useState(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1586,8 +1614,64 @@ function RecordsPublicTab() {
             <option value="">All Years</option>
             {yearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
+          <button type="button" className="btn sm" onClick={() => setShowFoia((v) => !v)}>
+            {showFoia ? 'Hide Data Request' : '+ Request Public Record (FOIA)'}
+          </button>
         </div>
       </div>
+
+      {showFoia && (
+        <div style={{ marginBottom: '1rem', padding: '1rem', border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}>
+          <h3 style={{ marginTop: 0 }}>Submit or Track a Public Records (FOIA / Data Practices) Request</h3>
+          <form
+            className="row"
+            style={{ gap: '.5rem', alignItems: 'flex-end', marginBottom: '.75rem' }}
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const r = await fetch('/api/records/requests/public', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(foiaForm),
+              });
+              const d = await r.json();
+              if (r.ok) {
+                setFoiaResult(d);
+                setFoiaForm({ requester_name: '', requester_email: '', requester_phone: '', subject: '', description: '' });
+              }
+            }}
+          >
+            <input required placeholder="Your Name *" value={foiaForm.requester_name} onChange={(e) => setFoiaForm((f) => ({ ...f, requester_name: e.target.value }))} style={{ flex: 1, minWidth: 150 }} />
+            <input type="email" placeholder="Email" value={foiaForm.requester_email} onChange={(e) => setFoiaForm((f) => ({ ...f, requester_email: e.target.value }))} style={{ flex: 1, minWidth: 160 }} />
+            <input required placeholder="Records Subject *" value={foiaForm.subject} onChange={(e) => setFoiaForm((f) => ({ ...f, subject: e.target.value }))} style={{ flex: 2, minWidth: 200 }} />
+            <input placeholder="Details / Date Range" value={foiaForm.description} onChange={(e) => setFoiaForm((f) => ({ ...f, description: e.target.value }))} style={{ flex: 2, minWidth: 200 }} />
+            <button type="submit" className="btn sm primary">Submit Request</button>
+          </form>
+          {foiaResult && (
+            <div style={{ padding: '.5rem .75rem', background: '#dcfce7', borderRadius: 6, marginBottom: '.65rem', fontSize: '.9rem' }}>
+              Submitted <strong>{foiaResult.request_number}</strong> — Target Response Date: <strong>{foiaResult.due_date}</strong>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input placeholder="Track Request # (e.g. PRR-2026-0001)" value={foiaLookupNum} onChange={(e) => setFoiaLookupNum(e.target.value)} style={{ minWidth: 220 }} />
+            <button
+              type="button"
+              className="btn sm"
+              onClick={async () => {
+                if (!foiaLookupNum.trim()) return;
+                const r = await fetch(`/api/records/requests/public-lookup?request_number=${encodeURIComponent(foiaLookupNum.trim())}`);
+                setFoiaLookupRes(r.ok ? await r.json() : { error: 'Not found' });
+              }}
+            >
+              Check Status
+            </button>
+            {foiaLookupRes && (
+              <span style={{ fontSize: '.88rem' }}>
+                {foiaLookupRes.error ? foiaLookupRes.error : `${foiaLookupRes.request_number}: ${foiaLookupRes.status.replace('_', ' ')} (Due ${foiaLookupRes.due_date || '—'})`}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <p className="muted">Loading public records…</p>
@@ -1630,7 +1714,9 @@ function RecordsPublicTab() {
 }
 
 function ComplaintsPublicTab({ me, onRequireAuth }) {
-  const [subView, setSubView] = useState('log'); // 'log' | 'file'
+  const [subView, setSubView] = useState('log'); // 'log' | 'file' | '311'
+  const [woForm, setWoForm] = useState({ category: 'Pothole / Street', location: '', description: '', reporter_name: '', reporter_email: '' });
+  const [woDone, setWoDone] = useState(null);
   const [items, setItems] = useState([]);
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -1750,10 +1836,52 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
           <button type="button" className={`btn sm${subView === 'file' ? ' primary' : ''}`} onClick={() => setSubView('file')}>
             + File a Complaint (No Account Required)
           </button>
+          <button type="button" className={`btn sm${subView === '311' ? ' primary' : ''}`} onClick={() => setSubView('311')}>
+            + 311 Service Request
+          </button>
         </div>
       </div>
 
-      {subView === 'file' ? (
+      {subView === '311' ? (
+        <form
+          className="card"
+          style={{ display: 'grid', gap: 10 }}
+          onSubmit={async (e) => {
+            e.preventDefault();
+            const r = await fetch('/api/complaints/work-orders/public', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(woForm),
+            });
+            if (r.ok) {
+              setWoDone(await r.json());
+              setWoForm({ category: 'Pothole / Street', location: '', description: '', reporter_name: '', reporter_email: '' });
+            }
+          }}
+        >
+          <h3 style={{ margin: 0 }}>Report a Public Works / 311 Issue</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+            <select value={woForm.category} onChange={(e) => setWoForm((f) => ({ ...f, category: e.target.value }))}>
+              <option value="Pothole / Street">Pothole / Street</option>
+              <option value="Streetlight">Streetlight Outage</option>
+              <option value="Water / Sewer">Water / Sewer</option>
+              <option value="Snow / Brush">Snow / Brush</option>
+              <option value="Parks / Facilities">Parks / Facilities</option>
+              <option value="Other">Other</option>
+            </select>
+            <input placeholder="Location / Nearest Address" value={woForm.location} onChange={(e) => setWoForm((f) => ({ ...f, location: e.target.value }))} />
+            <input placeholder="Your Name (optional)" value={woForm.reporter_name} onChange={(e) => setWoForm((f) => ({ ...f, reporter_name: e.target.value }))} />
+            <input type="email" placeholder="Email (optional)" value={woForm.reporter_email} onChange={(e) => setWoForm((f) => ({ ...f, reporter_email: e.target.value }))} />
+          </div>
+          <textarea required rows={3} placeholder="Describe the maintenance issue..." value={woForm.description} onChange={(e) => setWoForm((f) => ({ ...f, description: e.target.value }))} />
+          <div className="actions"><button type="submit" className="btn primary">Submit 311 Request</button></div>
+          {woDone && (
+            <div style={{ padding: '.6rem .8rem', background: '#dcfce7', borderRadius: 6, fontSize: '.9rem' }}>
+              Submitted Work Order <strong>{woDone.work_order_number}</strong> ({woDone.category}).
+            </div>
+          )}
+        </form>
+      ) : subView === 'file' ? (
         <form className="card" onSubmit={handleFileComplaint} style={{ display: 'grid', gap: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
             <h3 style={{ margin: 0 }}>File a Complaint (No Fee)</h3>
@@ -2337,6 +2465,45 @@ function CalendarPublicTab() {
 }
 
 
+function TransparencySnapshotBar({ onSelectTab }) {
+  const [metrics, setMetrics] = useState([]);
+  useEffect(() => {
+    fetch('/api/public/transparency')
+      .then((r) => (r.ok ? r.json() : { metrics: [] }))
+      .then((d) => setMetrics(Array.isArray(d.metrics) ? d.metrics : []))
+      .catch(() => {});
+  }, []);
+  if (!metrics.length) return null;
+  return (
+    <div className="card" style={{ marginBottom: 0 }}>
+      <div className="between" style={{ marginBottom: '.65rem' }}>
+        <strong style={{ fontSize: '.95rem' }}>City Transparency Snapshot</strong>
+        <span className="muted" style={{ fontSize: '.8rem' }}>Live public counts (YTD &amp; upcoming)</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '.6rem' }}>
+        {metrics.map((m) => (
+          <button
+            key={m.label}
+            type="button"
+            onClick={() => onSelectTab(m.tab)}
+            style={{
+              textAlign: 'left',
+              padding: '.6rem .75rem',
+              borderRadius: 8,
+              border: '1px solid #e2e8f0',
+              background: '#f8fafc',
+              cursor: 'pointer',
+            }}
+          >
+            <div style={{ fontSize: '1.35rem', fontWeight: 700, color: 'var(--cd-primary)' }}>{m.value}</div>
+            <div className="muted" style={{ fontSize: '.78rem' }}>{m.label}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function NotifyMeCard() {
   const [topics, setTopics] = useState([]);
   const [selected, setSelected] = useState([]);
@@ -2665,6 +2832,8 @@ function PublicHomePage() {
                 </div>
               ))}
             </div>
+
+            <TransparencySnapshotBar onSelectTab={selectTab} />
 
             <NotifyMeCard />
           </div>

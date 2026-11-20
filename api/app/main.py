@@ -14,11 +14,13 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from contextlib import asynccontextmanager
+import asyncio
+import os
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from . import audit, auth, backup, branding, docs, integrations, payments, registry, search, subscriptions, tenancy, updates, users
+from . import audit, auth, backup, branding, docs, integrations, payments, permits, registry, search, subscriptions, tenancy, updates, users
 from .db import open_pool, pool
 from .modules import register_builtin_modules
 
@@ -47,7 +49,19 @@ async def lifespan(app: FastAPI):
     tenants = tenancy.list_active_tenants() if tenancy.is_multi_tenant() else [("default", "public")]
     for slug, schema in tenants:
         _bootstrap_tenant_schema(slug, schema)
+    digest_task = None
+    if os.environ.get("DAILY_DIGEST_ENABLED", "").strip().lower() == "true":
+        async def _digest_loop():
+            while True:
+                await asyncio.sleep(86400)
+                try:
+                    permits.run_daily_compliance_digest()
+                except Exception:
+                    pass
+        digest_task = asyncio.create_task(_digest_loop())
     yield
+    if digest_task:
+        digest_task.cancel()
     pool.close()
 
 
