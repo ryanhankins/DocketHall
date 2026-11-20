@@ -38,8 +38,9 @@ AGENDAS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
             "recurrence", "recurrence_month", "source_agenda_id", "source_item_id", "folder",
             "completed_at", "minutes_action", "minutes_motion_by", "minutes_second_by",
             "minutes_vote", "minutes_notes", "video_timestamp",
+            "minutes_roll_call", "ordinance_number",
         ],
-        set(),
+        {"minutes_roll_call"},
         True,
     ),
     (

@@ -134,6 +134,8 @@ ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS minutes_second_by TEXT NOT NUL
 ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS minutes_vote TEXT NOT NULL DEFAULT '';
 ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS minutes_notes TEXT NOT NULL DEFAULT '';
 ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS video_timestamp TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS minutes_roll_call JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE agenda_items ADD COLUMN IF NOT EXISTS ordinance_number TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS agenda_public_comments (
     id              BIGSERIAL PRIMARY KEY,
     agenda_id       BIGINT NOT NULL REFERENCES agendas(id) ON DELETE CASCADE,
@@ -468,7 +470,8 @@ def _load_agenda(conn, agenda_id: int) -> dict | None:
     item_rows = conn.execute(
         "SELECT id, position, title, description, section, presenter, "
         "       recommended_motion, fiscal_impact, revision_status, "
-        "       minutes_action, minutes_motion_by, minutes_second_by, minutes_vote, minutes_notes, video_timestamp "
+        "       minutes_action, minutes_motion_by, minutes_second_by, minutes_vote, minutes_notes, video_timestamp, "
+        "       minutes_roll_call, ordinance_number "
         "FROM agenda_items WHERE agenda_id = %s ORDER BY position, id",
         (agenda_id,),
     ).fetchall()
@@ -536,6 +539,8 @@ def _load_agenda(conn, agenda_id: int) -> dict | None:
             "minutes_vote": it[12],
             "minutes_notes": it[13],
             "video_timestamp": it[14],
+            "minutes_roll_call": it[15] if isinstance(it[15], list) else [],
+            "ordinance_number": it[16] or "",
             "documents": docs_by_item.get(it[0], []),
         }
         for it in item_rows
@@ -695,6 +700,8 @@ class ItemPatch(BaseModel):
     minutes_vote: str | None = None
     minutes_notes: str | None = None
     video_timestamp: str | None = None
+    minutes_roll_call: list[dict[str, str]] | None = None
+    ordinance_number: str | None = None
     direction: str | None = None  # "up" | "down"
     position: int | None = None
 
@@ -2282,6 +2289,68 @@ def list_council_finalized_agendas(_: dict = Depends(get_council_or_staff_user))
     return _query_finalized_agendas()
 
 
+@router.get("/council-members")
+def list_council_roster(_: dict = Depends(get_staff_user)):
+    """Return councilmember names from user accounts and historical roll-call votes."""
+    names: list[str] = []
+    seen: set[str] = set()
+    with pool.connection() as conn:
+        u_rows = conn.execute(
+            "SELECT username FROM users WHERE is_active = TRUE AND role = 'council_member' ORDER BY username"
+        ).fetchall()
+        for r in u_rows:
+            n = (r[0] or "").strip()
+            if n and n.lower() not in seen:
+                seen.add(n.lower())
+                names.append(n)
+        rc_rows = conn.execute(
+            "SELECT minutes_roll_call FROM agenda_items WHERE jsonb_array_length(minutes_roll_call) > 0 ORDER BY id DESC LIMIT 50"
+        ).fetchall()
+        for r in rc_rows:
+            if isinstance(r[0], list):
+                for entry in r[0]:
+                    n = str(entry.get("member") or "").strip()
+                    if n and n.lower() not in seen:
+                        seen.add(n.lower())
+                        names.append(n)
+    return {"members": names}
+
+
+@router.get("/ordinance-history")
+def list_ordinance_passage_history(_: dict = Depends(get_staff_user)):
+    """Return passage history for ordinances and resolutions tracked across meeting agendas."""
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT i.id, i.ordinance_number, i.title, i.minutes_action, i.minutes_motion_by, "
+            "       i.minutes_second_by, i.minutes_vote, i.minutes_roll_call, "
+            "       a.id, a.title, a.body, a.meeting_date "
+            "FROM agenda_items i "
+            "JOIN agendas a ON a.id = i.agenda_id "
+            "WHERE i.ordinance_number <> '' OR i.title ILIKE '%ordinance%' OR i.title ILIKE '%resolution%' "
+            "ORDER BY a.meeting_date DESC NULLS LAST, i.id DESC "
+            "LIMIT 100"
+        ).fetchall()
+    return {
+        "items": [
+            {
+                "item_id": r[0],
+                "ordinance_number": r[1] or "",
+                "title": r[2],
+                "minutes_action": r[3] or "",
+                "minutes_motion_by": r[4] or "",
+                "minutes_second_by": r[5] or "",
+                "minutes_vote": r[6] or "",
+                "minutes_roll_call": r[7] if isinstance(r[7], list) else [],
+                "agenda_id": r[8],
+                "agenda_title": r[9],
+                "body": r[10] or "",
+                "meeting_date": r[11].isoformat() if r[11] else "",
+            }
+            for r in rows
+        ]
+    }
+
+
 @router.get("/{agenda_id}")
 def get_agenda(agenda_id: int, _: dict = Depends(get_staff_user)):
     with pool.connection() as conn:
@@ -2626,8 +2695,23 @@ def update_item(
                 body.minutes_second_by,
                 body.minutes_vote,
                 body.minutes_notes,
+                body.video_timestamp,
+                body.minutes_roll_call,
+                body.ordinance_number,
             )
         ):
+            roll_call_json = None
+            if body.minutes_roll_call is not None:
+                cleaned_rc = [
+                    {
+                        "member": str(entry.get("member") or "").strip(),
+                        "vote": str(entry.get("vote") or "").strip().lower(),
+                    }
+                    for entry in body.minutes_roll_call
+                    if str(entry.get("member") or "").strip()
+                    and str(entry.get("vote") or "").strip().lower() in {"aye", "nay", "abstain", "absent"}
+                ]
+                roll_call_json = json.dumps(cleaned_rc)
             conn.execute(
                 "UPDATE agenda_items SET "
                 "title = COALESCE(%s, title), "
@@ -2642,7 +2726,9 @@ def update_item(
                 "minutes_second_by = COALESCE(%s, minutes_second_by), "
                 "minutes_vote = COALESCE(%s, minutes_vote), "
                 "minutes_notes = COALESCE(%s, minutes_notes), "
-                "video_timestamp = COALESCE(%s, video_timestamp) "
+                "video_timestamp = COALESCE(%s, video_timestamp), "
+                "minutes_roll_call = COALESCE(%s::jsonb, minutes_roll_call), "
+                "ordinance_number = COALESCE(%s, ordinance_number) "
                 "WHERE id = %s",
                 (
                     body.title.strip() if body.title is not None else None,
@@ -2658,6 +2744,8 @@ def update_item(
                     body.minutes_vote.strip() if body.minutes_vote is not None else None,
                     body.minutes_notes.strip() if body.minutes_notes is not None else None,
                     body.video_timestamp.strip() if body.video_timestamp is not None else None,
+                    roll_call_json,
+                    body.ordinance_number.strip() if body.ordinance_number is not None else None,
                     item_id,
                 ),
             )
@@ -3541,3 +3629,48 @@ def check_agenda_document_pdf_compliance(
 ):
     resp = view_document_as_pdf(agenda_id, doc_id, user)
     return check_pdf_compliance(resp.body, f"document_{doc_id}.pdf")
+
+
+@router.post("/{agenda_id}/generate-minutes-draft")
+def generate_minutes_draft(
+    agenda_id: int,
+    user: dict = Depends(get_staff_user),
+):
+    """Auto-populate draft minutes text from attendance, motions, roll-call votes, and ordinances."""
+    with pool.connection() as conn:
+        ag = _load_agenda(conn, agenda_id)
+        if not ag:
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        lines = [
+            f"DRAFT MINUTES — {ag['title']} ({ag.get('body') or 'Governing Body'})",
+            f"Meeting Date: {ag.get('meeting_date') or 'TBD'}  Time: {ag.get('meeting_time') or 'TBD'}",
+        ]
+        if ag.get("minutes_attendance"):
+            lines.append(f"Attendance: {ag['minutes_attendance']}")
+        lines.append("")
+        for it in ag.get("items") or []:
+            ord_tag = f" [{it['ordinance_number']}]" if it.get("ordinance_number") else ""
+            lines.append(f"{it['position']}. {it['title']}{ord_tag}")
+            if it.get("minutes_motion_by") or it.get("minutes_second_by"):
+                lines.append(
+                    f"   Motion: {it.get('minutes_motion_by') or '—'} | Second: {it.get('minutes_second_by') or '—'}"
+                )
+            rc = it.get("minutes_roll_call") or []
+            if rc:
+                tally = ", ".join(f"{e.get('member')}: {str(e.get('vote') or '').upper()}" for e in rc)
+                lines.append(f"   Roll Call ({it.get('minutes_vote') or ''}): {tally}")
+            elif it.get("minutes_vote"):
+                lines.append(f"   Vote: {it['minutes_vote']}")
+            if it.get("minutes_action"):
+                lines.append(f"   Action: {it['minutes_action']}")
+            if it.get("minutes_notes"):
+                lines.append(f"   Notes: {it['minutes_notes']}")
+            lines.append("")
+        draft_text = "\n".join(lines).strip()
+        conn.execute(
+            "UPDATE agendas SET minutes_notes = %s, minutes_status = 'draft', updated_at = now() WHERE id = %s",
+            (draft_text, agenda_id),
+        )
+        updated = _load_agenda(conn, agenda_id)
+    record_audit(user["username"], "agenda.generate_minutes_draft", "agendas", agenda_id, "Auto-generated draft minutes")
+    return updated
