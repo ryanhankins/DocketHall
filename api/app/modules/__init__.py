@@ -19,6 +19,7 @@ from .calendar_module import MODULE as CALENDAR_MODULE
 from .codification_module import MODULE as CODIFICATION_MODULE
 from .complaints_module import MODULE as COMPLAINTS_MODULE
 from .directory_module import MODULE as DIRECTORY_MODULE
+from .forms_module import MODULE as FORMS_MODULE
 from .notices_module import MODULE as NOTICES_MODULE
 from .permits_module import MODULE as PERMITS_MODULE
 from .records_module import MODULE as RECORDS_MODULE
@@ -34,3 +35,4 @@ def register_builtin_modules() -> None:
     register_module(CALENDAR_MODULE)
     register_module(NOTICES_MODULE)
     register_module(DIRECTORY_MODULE)
+    register_module(FORMS_MODULE)

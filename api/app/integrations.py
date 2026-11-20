@@ -298,7 +298,7 @@ def delete_google_cloud_config(_: dict = Depends(require_admin)):
 
 
 # ------------------------------------------------------------------ Outgoing SMTP & Per-Module Notification Routing
-_VALID_NOTIFICATION_MODULES = {"agendas", "permits", "complaints", "calendar", "notices"}
+_VALID_NOTIFICATION_MODULES = {"agendas", "permits", "complaints", "calendar", "notices", "forms"}
 
 
 def _load_email_state(conn) -> dict:
@@ -627,7 +627,7 @@ def delete_email_config(_: dict = Depends(require_admin)):
 
 @router.get("/notification-users")
 def list_notification_users(
-    _: dict = Depends(require_permission("settings.manage", "agendas.manage", "permits.manage", "complaints.manage", "calendar.manage", "notices.manage")),
+    _: dict = Depends(require_permission("settings.manage", "agendas.manage", "permits.manage", "complaints.manage", "calendar.manage", "notices.manage", "forms.manage")),
 ):
     """Return active users that have an email address configured for notification routing."""
     with pool.connection() as conn:

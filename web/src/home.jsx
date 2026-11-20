@@ -20,6 +20,7 @@ import { createRoot } from 'react-dom/client';
 import '../app.css';
 import { ROLE_LABELS, formatDate, formatSize, formatTime12h } from './core/api.js';
 import ServiceIcon from './core/ServiceIcon.jsx';
+import CustomFieldsRenderer from './core/CustomFieldsRenderer.jsx';
 import { CivicDeskLogo, DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
 import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
@@ -74,7 +75,186 @@ const TAB_DEFS = [
     description: 'Find City Council & staff contact info and answers to frequently asked questions.',
     actionLabel: 'View Directory & FAQs →',
   },
+  {
+    id: 'forms',
+    label: 'Forms & Opinion Polls',
+    description: 'Submit city applications, data requests, house-watch forms, and vote in community polls.',
+    actionLabel: 'Open Forms & Polls →',
+  },
 ];
+
+function FormsPublicTab() {
+  const [forms, setForms] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeFormId, setActiveFormId] = useState(null);
+  const [subName, setSubName] = useState('');
+  const [subEmail, setSubEmail] = useState('');
+  const [responses, setResponses] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ text: '', isError: false });
+
+  const loadForms = useCallback(() => {
+    setLoading(true);
+    fetch('/api/forms/public')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => { setForms(Array.isArray(rows) ? rows : []); setLoading(false); })
+      .catch(() => { setForms([]); setLoading(false); });
+  }, []);
+
+  useEffect(() => { loadForms(); }, [loadForms]);
+
+  const activeForm = forms.find((f) => f.id === activeFormId) || null;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!activeForm) return;
+    setBusy(true);
+    setMsg({ text: '', isError: false });
+    try {
+      const r = await fetch(`/api/forms/public/${activeForm.id}/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          submitter_name: subName.trim(),
+          submitter_email: subEmail.trim(),
+          responses,
+        }),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Submission failed');
+      setMsg({
+        text: activeForm.form_kind === 'poll' ? 'Thank you! Your vote has been recorded.' : 'Thank you! Your form has been submitted.',
+        isError: false,
+      });
+      setResponses({});
+      setSubName('');
+      setSubEmail('');
+      if (data.poll_results) {
+        setForms((prev) => prev.map((f) => (f.id === activeForm.id ? { ...f, poll_results: data.poll_results } : f)));
+      }
+    } catch (err) {
+      setMsg({ text: err.message, isError: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <div className="card">
+        <h2 style={{ margin: '0 0 .5rem', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <ServiceIcon id="forms" size={20} badge />
+          <span>City Forms &amp; Community Opinion Polls</span>
+        </h2>
+        {loading ? (
+          <p className="muted">Loading forms &amp; polls…</p>
+        ) : forms.length === 0 ? (
+          <p className="muted">No active forms or polls right now.</p>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '.75rem' }}>
+            {forms.map((frm) => (
+              <div
+                key={frm.id}
+                style={{
+                  border: activeFormId === frm.id ? '2px solid var(--cd-primary)' : '1px solid #e2e8f0',
+                  borderRadius: 8,
+                  padding: '.85rem',
+                  background: '#fff',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '.5rem',
+                }}
+              >
+                <div>
+                  <span className="badge draft" style={{ marginBottom: '.35rem', display: 'inline-block' }}>
+                    {frm.form_kind === 'poll' ? 'Opinion Poll' : 'Online Form'}
+                  </span>
+                  <h3 style={{ margin: '0 0 .25rem', fontSize: '1.02rem' }}>{frm.title}</h3>
+                  {frm.description && <p className="muted" style={{ margin: 0, fontSize: '.86rem' }}>{frm.description}</p>}
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    className={`btn sm ${activeFormId === frm.id ? 'primary' : ''}`}
+                    onClick={() => {
+                      setActiveFormId(frm.id);
+                      setResponses({});
+                      setMsg({ text: '', isError: false });
+                    }}
+                  >
+                    {frm.form_kind === 'poll' ? 'Vote / View Poll' : 'Open Form'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {activeForm && (
+        <div className="card">
+          <div className="between" style={{ marginBottom: '.65rem' }}>
+            <h2 style={{ margin: 0 }}>{activeForm.title}</h2>
+            <button type="button" className="btn sm" onClick={() => setActiveFormId(null)}>Close</button>
+          </div>
+          {activeForm.description && <p className="muted" style={{ marginTop: 0 }}>{activeForm.description}</p>}
+
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '.85rem' }}>
+            {(!activeForm.allow_anonymous || activeForm.form_kind !== 'poll') && (
+              <div className="row">
+                <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                  <label htmlFor="pub-frm-name">Your Name{activeForm.allow_anonymous ? ' (optional)' : ' *'}</label>
+                  <input id="pub-frm-name" required={!activeForm.allow_anonymous} value={subName} onChange={(e) => setSubName(e.target.value)} />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                  <label htmlFor="pub-frm-email">Email{activeForm.allow_anonymous ? ' (optional)' : ' *'}</label>
+                  <input id="pub-frm-email" type="email" required={!activeForm.allow_anonymous} value={subEmail} onChange={(e) => setSubEmail(e.target.value)} />
+                </div>
+              </div>
+            )}
+
+            <CustomFieldsRenderer fields={activeForm.fields || []} value={responses} onChange={setResponses} />
+
+            <div>
+              <button type="submit" className="btn primary" disabled={busy}>
+                {busy ? 'Submitting…' : (activeForm.form_kind === 'poll' ? 'Submit Vote' : 'Submit Form')}
+              </button>
+            </div>
+            {msg.text && <div className={msg.isError ? 'error-msg' : 'ok-msg'} role="status">{msg.text}</div>}
+          </form>
+
+          {activeForm.form_kind === 'poll' && activeForm.show_poll_results && activeForm.poll_results && (
+            <div style={{ marginTop: '1rem', paddingTop: '.85rem', borderTop: '1px solid #e2e8f0' }}>
+              <h3 style={{ margin: '0 0 .5rem', fontSize: '.98rem' }}>
+                Current Poll Results ({activeForm.poll_results.total_votes} {activeForm.poll_results.total_votes === 1 ? 'vote' : 'votes'})
+              </h3>
+              {Object.entries(activeForm.poll_results.tallies || {}).map(([key, counts]) => (
+                <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: '.45rem' }}>
+                  {Object.entries(counts).map(([opt, cnt]) => {
+                    const tot = activeForm.poll_results.total_votes || 0;
+                    const pct = tot > 0 ? Math.round((cnt / tot) * 100) : 0;
+                    return (
+                      <div key={opt} style={{ fontSize: '.86rem' }}>
+                        <div className="between" style={{ marginBottom: 2 }}>
+                          <span>{opt}</span>
+                          <span className="muted">{cnt} ({pct}%)</span>
+                        </div>
+                        <div style={{ height: 8, background: '#e2e8f0', borderRadius: 4, overflow: 'hidden' }}>
+                          <div style={{ width: `${pct}%`, height: '100%', background: 'var(--cd-primary, #2563eb)' }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function DirectoryPublicTab() {
   const [data, setData] = useState({ contacts: [], faqs: [] });
@@ -2102,6 +2282,7 @@ function PublicHomePage() {
             {activeTab === 'calendar' && <CalendarPublicTab />}
             {activeTab === 'notices' && <NoticesPublicTab />}
             {activeTab === 'directory' && <DirectoryPublicTab />}
+            {activeTab === 'forms' && <FormsPublicTab />}
           </div>
         )}
       </main>
