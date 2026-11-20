@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from . import audit, auth, backup, branding, docs, integrations, payments, registry, subscriptions, tenancy, updates, users
+from . import audit, auth, backup, branding, docs, integrations, payments, registry, search, subscriptions, tenancy, updates, users
 from .db import open_pool, pool
 from .modules import register_builtin_modules
 
@@ -81,6 +81,7 @@ app.include_router(subscriptions.router)
 app.include_router(docs.router)
 app.include_router(backup.router)
 app.include_router(registry.router)
+app.include_router(search.router)
 app.include_router(updates.router)
 
 for mod in registry.get_all_registered_modules():

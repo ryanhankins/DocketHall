@@ -89,6 +89,103 @@ const TAB_DEFS = [
   },
 ];
 
+function GlobalSearchBar({ onSelectTab }) {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const runSearch = async (e) => {
+    e.preventDefault();
+    const term = q.trim();
+    if (term.length < 2) {
+      setResults(null);
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/public/search?q=${encodeURIComponent(term)}`);
+      const d = await r.json().catch(() => ({ results: [] }));
+      setResults(Array.isArray(d.results) ? d.results : []);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card" style={{ marginBottom: 0 }}>
+      <form onSubmit={runSearch} className="row" style={{ alignItems: 'center', gap: '.5rem' }}>
+        <input
+          type="search"
+          aria-label="Search all public services"
+          placeholder="Search everything: agendas, City Code, permits, trash, directory, notices…"
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            if (!e.target.value.trim()) setResults(null);
+          }}
+          style={{ flex: 1, minWidth: 240 }}
+        />
+        <button type="submit" className="btn primary" disabled={busy || q.trim().length < 2}>
+          {busy ? 'Searching…' : 'Search'}
+        </button>
+        {results !== null && (
+          <button type="button" className="btn" onClick={() => { setQ(''); setResults(null); }}>
+            Clear
+          </button>
+        )}
+      </form>
+
+      {Array.isArray(results) && (
+        <div style={{ marginTop: '.75rem', borderTop: '1px solid #e2e8f0', paddingTop: '.65rem' }}>
+          {results.length === 0 ? (
+            <p className="muted" style={{ margin: 0 }}>No matching public items found for &ldquo;{q}&rdquo;.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '.4rem', maxHeight: 340, overflowY: 'auto' }}>
+              {results.map((item, idx) => (
+                <button
+                  key={`${item.module_id}-${idx}`}
+                  type="button"
+                  onClick={() => {
+                    if (item.href && item.href !== '/portal' && /^https?:\/\//i.test(item.href)) {
+                      window.open(item.href, '_blank', 'noreferrer');
+                    } else if (item.href === '/portal') {
+                      window.location.href = '/portal';
+                    } else {
+                      onSelectTab(item.tab);
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '.75rem',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '.5rem .65rem',
+                    borderRadius: 6,
+                    border: '1px solid #e2e8f0',
+                    background: '#f8fafc',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem', minWidth: 0 }}>
+                    <ServiceIcon id={item.module_id} size={16} badge />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, fontSize: '.92rem', color: '#0f172a' }}>{item.title}</div>
+                      {item.subtitle && <div className="muted" style={{ fontSize: '.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.subtitle}</div>}
+                    </div>
+                  </div>
+                  <span className="badge draft" style={{ flexShrink: 0 }}>{item.module_label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PagesPublicTab() {
   const [data, setData] = useState({ pages: [], quick_links: [] });
   const [loading, setLoading] = useState(true);
@@ -2427,6 +2524,8 @@ function PublicHomePage() {
                 Explore public city services below — no account required to view finalized agendas, City Code, public records, permit schedules, or to file a complaint.
               </p>
             </div>
+
+            <GlobalSearchBar onSelectTab={selectTab} />
 
             <div
               style={{
