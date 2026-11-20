@@ -1,6 +1,6 @@
-# <img src="web/public/civicdesk-logo.svg" alt="CivicDesk logo" width="32" height="32" align="absmiddle" /> CivicDesk
+# <img src="web/public/dockethall-logo.svg" alt="DocketHall logo" width="32" height="32" align="absmiddle" /> DocketHall
 
-CivicDesk is a self-hosted, modular municipal operations platform built for city clerks, staff, councilmembers, and residents. It combines a **Public Services & Records Portal** with an authenticated **Workspace** for managing meeting agendas, permits, municipal code, public records, code-enforcement complaints, and community calendars.
+DocketHall is a self-hosted, modular municipal operations platform built for city clerks, staff, councilmembers, and residents. It combines a **Public Services & Records Portal** with an authenticated **Workspace** for managing meeting agendas, permits, municipal code, public records, code-enforcement complaints, and community calendars.
 
 ## Key Capabilities
 
@@ -40,7 +40,7 @@ Modules can be enabled or disabled individually under **Administration → Manag
 - **General & Branding**: Custom city title, city logo upload, workspace theme preferences, and configurable backup reminder intervals.
 - **Email & Integrations**:
   - Customer-configurable outgoing **SMTP** server (`smtp_host`, `smtp_port`, sender email, password/App Password, and test email sender).
-  - **Per-Module Notification Routing** inside **Agenda Preferences**, **Permit Preferences**, and **Complaint Preferences**, allowing each event type to notify specific CivicDesk users and/or external email addresses with authenticated deep-links directly to the item.
+  - **Per-Module Notification Routing** inside **Agenda Preferences**, **Permit Preferences**, and **Complaint Preferences**, allowing each event type to notify specific DocketHall users and/or external email addresses with authenticated deep-links directly to the item.
   - **Public Alert Subscribers** management and optional Google Cloud API key validation.
 - **Backup & Restore**: Export and restore full PostgreSQL + MinIO archives.
 
@@ -65,7 +65,7 @@ Run the deployment script. It builds the React/Vite frontend bundle, initializes
 ./scripts/deploy.sh
 ```
 
-### 3. Open CivicDesk
+### 3. Open DocketHall
 
 Once the services are running:
 

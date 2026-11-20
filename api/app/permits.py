@@ -1725,7 +1725,7 @@ def create_permit(
         result = _get_permit_or_404(conn, permit_id, include_internal=has_permission(user, "permits.manage"))
     send_notification_email(
         "permits_submitted",
-        f"[CivicDesk] New Permit Application {final_num}",
+        f"[DocketHall] New Permit Application {final_num}",
         f"Permit {final_num} ({t_row[1]} — {u_row[1]}) was submitted by {user['username']} for {body.property_address.strip()}.",
         link_path=f"/app#permits-review/{permit_id}",
         request=request,
@@ -2558,7 +2558,7 @@ def send_contractor_renewal_reminders(
         issues_txt = "; ".join(c["compliance_issues"]) if c["compliance_issues"] else "Credential expiring within 30 days"
         send_direct_email(
             [email],
-            f"[CivicDesk] Contractor License / COI Renewal Reminder ({c['license_number']})",
+            f"[DocketHall] Contractor License / COI Renewal Reminder ({c['license_number']})",
             f"Hello {c['contact_name'] or c['business_name']},\n\n"
             f"Our municipal licensing records show an upcoming or expired credential for {c['business_name']} ({c['license_number']}):\n"
             f"- Status: {issues_txt}\n"
@@ -2593,7 +2593,7 @@ def send_compliance_program_reminders(
             continue
         send_direct_email(
             [email],
-            f"[CivicDesk] {p['program_type']} Inspection Due — {p['property_address']}",
+            f"[DocketHall] {p['program_type']} Inspection Due — {p['property_address']}",
             f"Hello {p['local_agent_name'] or p['owner_name'] or 'Property Representative'},\n\n"
             f"This is a reminder that your {p['program_type']} compliance inspection for {p['property_address']} "
             f"is {p['due_status'].replace('_', ' ')} (Due Date: {p['next_inspection_date'] or 'TBD'}).\n\n"
@@ -2622,7 +2622,7 @@ def run_daily_compliance_digest(request: Request | None = None) -> dict:
         return {"sent": False, "items": 0}
     send_notification_email(
         "permits_updated",
-        "[CivicDesk] Daily Municipal Compliance & Deadline Digest",
+        "[DocketHall] Daily Municipal Compliance & Deadline Digest",
         "Daily operational summary of items needing attention:\n\n" + "\n".join(lines),
         link_path="/app#permits-reports",
         request=request,
@@ -3230,7 +3230,7 @@ def update_permit(
         record_audit(user["username"], "permit.status_changed", "permits", cur["permit_number"], f"{cur['permit_number']}: {cur['status']} -> {body.status}")
         send_notification_email(
             "permits_updated",
-            f"[CivicDesk] Permit {cur['permit_number']} Status: {body.status}",
+            f"[DocketHall] Permit {cur['permit_number']} Status: {body.status}",
             f"Permit {cur['permit_number']} ({cur['property_address']}) status changed from {cur['status']} to {body.status} by {user['username']}.",
             link_path=f"/app#permits-review/{permit_id}",
             request=request,
@@ -3238,7 +3238,7 @@ def update_permit(
         if applicant_email:
             send_direct_email(
                 [applicant_email],
-                f"[CivicDesk] Permit {cur['permit_number']} Status Updated: {body.status.replace('_', ' ').title()}",
+                f"[DocketHall] Permit {cur['permit_number']} Status Updated: {body.status.replace('_', ' ').title()}",
                 f"Your permit application {cur['permit_number']} ({cur['property_address']}) status was updated to '{body.status.replace('_', ' ')}'.",
                 link_path="/app#my-permits",
                 request=request,
@@ -3412,7 +3412,7 @@ def add_inspection(
     if is_mgr and applicant_email:
         send_direct_email(
             [applicant_email],
-            f"[CivicDesk] Inspection {result.title()} — Permit {permit['permit_number']}",
+            f"[DocketHall] Inspection {result.title()} — Permit {permit['permit_number']}",
             f"An inspection ({body.inspection_type.strip()}) for permit {permit['permit_number']} ({permit['property_address']}) is {result}"
             + (f" for {body.scheduled_date.strip()}" if body.scheduled_date.strip() else "")
             + ".",
@@ -3472,7 +3472,7 @@ def update_inspection(
     if applicant_email:
         send_direct_email(
             [applicant_email],
-            f"[CivicDesk] Inspection Updated ({row[1].title()}) — Permit {permit['permit_number']}",
+            f"[DocketHall] Inspection Updated ({row[1].title()}) — Permit {permit['permit_number']}",
             f"Inspection '{row[0]}' for permit {permit['permit_number']} ({permit['property_address']}) is now marked '{row[1]}'.",
             link_path="/app#my-permits",
             request=request,
@@ -3522,7 +3522,7 @@ def post_permit_message(
     if is_mgr and not internal and applicant_email and user["id"] != permit.get("applicant_user_id"):
         send_direct_email(
             [applicant_email],
-            f"[CivicDesk] New Message on Permit {permit['permit_number']}",
+            f"[DocketHall] New Message on Permit {permit['permit_number']}",
             f"{user['username']} sent a message regarding permit {permit['permit_number']} ({permit['property_address']}):\n\n{text}",
             link_path="/app#my-permits",
             request=request,
@@ -3597,7 +3597,7 @@ def renew_permit(
         result = _get_permit_or_404(conn, new_id, include_internal=has_permission(user, "permits.manage"))
     send_notification_email(
         "permits_submitted",
-        f"[CivicDesk] Renewal Application {final_num} (from {src['permit_number']})",
+        f"[DocketHall] Renewal Application {final_num} (from {src['permit_number']})",
         f"Renewal {final_num} ({src['permit_type_name']} — {src['permit_use_name']}) was submitted by {user['username']}.",
         link_path=f"/app#permits-review/{new_id}",
         request=request,

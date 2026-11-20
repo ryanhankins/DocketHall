@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Pluggable module registry for CivicDesk."""
+"""Pluggable module registry for DocketHall."""
 from dataclasses import dataclass, field
 import os
 from typing import Callable

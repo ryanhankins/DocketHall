@@ -570,7 +570,7 @@ def create_record(
     if rec["is_public"]:
         notify_topic_subscribers(
             "records",
-            f"[CivicDesk] New Public Record Published: {rec['title']}",
+            f"[DocketHall] New Public Record Published: {rec['title']}",
             f"{rec['category']}: {rec['title']} ({rec['doc_number']}) has been published to Public Records.",
             link_path="/#records",
             request=request,

@@ -220,7 +220,7 @@ def create_notice(
     if body.is_published:
         send_notification_email(
             "notices_published",
-            f"[CivicDesk] {title}",
+            f"[DocketHall] {title}",
             f"A new {body.category.replace('_', ' ')} was published: {title}\n\n{body.summary.strip()}",
             link_path="/#notices",
             request=request,

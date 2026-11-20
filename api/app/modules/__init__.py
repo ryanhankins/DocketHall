@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Available CivicDesk feature modules."""
+"""Available DocketHall feature modules."""
 from .agendas_module import MODULE as AGENDAS_MODULE
 from .calendar_module import MODULE as CALENDAR_MODULE
 from .codification_module import MODULE as CODIFICATION_MODULE

@@ -585,7 +585,7 @@ def create_section(body: SectionIn, request: Request, user: dict = Depends(requi
     if body.is_published:
         notify_topic_subscribers(
             "codification",
-            f"[CivicDesk] City Code Added: § {sec_num} — {title}",
+            f"[DocketHall] City Code Added: § {sec_num} — {title}",
             f"Municipal Code Section {sec_num} ({title}) has been published.",
             link_path="/#codification",
             request=request,
@@ -645,7 +645,7 @@ def update_section(section_id: int, body: SectionPatch, request: Request, user: 
     if row[11] and (body.body is not None or body.title is not None or body.ordinance_ref is not None or body.change_summary.strip()):
         notify_topic_subscribers(
             "codification",
-            f"[CivicDesk] City Code Updated: § {row[2]} — {row[3]}",
+            f"[DocketHall] City Code Updated: § {row[2]} — {row[3]}",
             f"Municipal Code Section {row[2]} ({row[3]}) was updated.",
             link_path="/#codification",
             request=request,

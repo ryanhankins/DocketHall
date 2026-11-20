@@ -205,7 +205,7 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
   const [body, setBody] = useState('');
   const [meetingDate, setMeetingDate] = useState('');
   const [quickStartDismissed, setQuickStartDismissed] = useState(() => {
-    try { return localStorage.getItem('civicdesk.agendasQuickStartDismissed') === '1'; } catch { return false; }
+    try { return localStorage.getItem('dockethall.agendasQuickStartDismissed') === '1'; } catch { return false; }
   });
   const [guideOpen, setGuideOpen] = useState(false);
   const [meetingTime, setMeetingTime] = useState('');
@@ -371,7 +371,7 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
                 className="btn sm"
                 onClick={() => {
                   setQuickStartDismissed(true);
-                  try { localStorage.setItem('civicdesk.agendasQuickStartDismissed', '1'); } catch { /* ignore */ }
+                  try { localStorage.setItem('dockethall.agendasQuickStartDismissed', '1'); } catch { /* ignore */ }
                 }}
               >
                 Dismiss

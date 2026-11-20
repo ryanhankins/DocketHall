@@ -49,12 +49,12 @@ CREATE INDEX IF NOT EXISTS core_help_docs_order_idx ON core_help_docs(sort_order
 _SEED_DOCS: list[tuple[str, str, str, str, int, str]] = [
     (
         "getting-started",
-        "Getting Started with CivicDesk",
+        "Getting Started with DocketHall",
         "General",
         "all",
         10,
         """## Overview
-CivicDesk brings meeting agendas, permits, city code, public records, complaints, and calendar reservations into one portal.
+DocketHall brings meeting agendas, permits, city code, public records, complaints, and calendar reservations into one portal.
 
 ## Public Portal vs. Workspace
 - **Public Portal (`/`)**: Anyone can browse finalized meeting agendas, City Code, public records, permit fee schedules, the public calendar, and submit complaints or subscribe to email alerts.

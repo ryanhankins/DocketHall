@@ -141,7 +141,7 @@ export default function ModulesPage({ onModulesChanged }) {
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Modules &amp; Sub-Features</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Enable or disable pluggable CivicDesk modules, or expand a module to toggle finer-grained capabilities. Disabling a module or feature hides its navigation while preserving database records.
+          Enable or disable pluggable DocketHall modules, or expand a module to toggle finer-grained capabilities. Disabling a module or feature hides its navigation while preserving database records.
         </p>
         <table>
           <thead>

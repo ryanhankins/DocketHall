@@ -73,7 +73,7 @@ def _format_time(val: str | None) -> str:
 
 def apply_pdf_accessibility_metadata(writer: PdfWriter, title: str, lang: str = "en-US") -> None:
     """Attach PDF /Title, /DisplayDocTitle, and /Lang metadata for WCAG 2.4.2 & 3.1.1."""
-    clean_title = (title or "CivicDesk Document").strip()
+    clean_title = (title or "DocketHall Document").strip()
     writer.add_metadata({"/Title": clean_title})
     writer._root_object.update({
         NameObject("/Lang"): TextStringObject(lang),
@@ -85,13 +85,13 @@ def apply_pdf_accessibility_metadata(writer: PdfWriter, title: str, lang: str = 
 
 def _html_to_pdf_bytes(
     body_html: str,
-    title: str = "CivicDesk Document",
+    title: str = "DocketHall Document",
     include_page_numbers: bool = True,
     watermark_draft: bool = False,
     lang: str = "en-US",
 ) -> bytes:
     """Render semantic HTML to a Tagged PDF/UA-1 document using WeasyPrint."""
-    clean_title = _esc((title or "CivicDesk Document").strip())
+    clean_title = _esc((title or "DocketHall Document").strip())
     page_footer = (
         '@bottom-right { content: "Page " counter(page) " of " counter(pages); font-size: 9pt; color: #475569; }'
         if include_page_numbers else ""
@@ -187,7 +187,7 @@ def _agenda_header_html(agenda: dict, prefs: dict, logo_bytes: bytes | None) -> 
     return "\n".join(p for p in parts if p)
 
 
-def _render_flowables(flowables: list, title: str = "CivicDesk Document") -> bytes:
+def _render_flowables(flowables: list, title: str = "DocketHall Document") -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,

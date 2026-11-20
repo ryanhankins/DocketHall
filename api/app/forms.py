@@ -434,7 +434,7 @@ def submit_public_form(form_id: int, body: FormSubmitIn, request: Request):
 
     send_notification_email(
         "forms_submitted",
-        f"[CivicDesk] New Submission: {f_row[2]}",
+        f"[DocketHall] New Submission: {f_row[2]}",
         f"A new response was submitted for '{f_row[2]}' by {sname or 'Anonymous'}.",
         link_path="/app#forms-manage",
         request=request,

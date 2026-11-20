@@ -214,7 +214,7 @@ def update_backup_settings(body: BackupSettingsIn, _: dict = Depends(get_staff_u
 
 @router.get("/export")
 def export_archive(user: dict = Depends(get_staff_user)):
-    """Export all CivicDesk data in a human-readable and machine-reconstructible .zip archive."""
+    """Export all DocketHall data in a human-readable and machine-reconstructible .zip archive."""
     include_users = user["role"] == "admin"
     table_data: dict[str, list[dict]] = {}
     with pool.connection() as conn:
@@ -360,14 +360,14 @@ def export_archive(user: dict = Depends(get_staff_user)):
             zf.writestr("manifest.json", json.dumps(manifest, indent=2))
             zf.writestr(
                 "README.txt",
-                "CivicDesk Full Archive\n"
+                "DocketHall Full Archive\n"
                 "======================\n\n"
                 "- human/         Human-readable agendas (Markdown), todos/backlog (CSV),\n"
                 "                 council submissions (CSV), preferences, and templates.\n"
                 "- data/          Machine-reconstructible JSON table exports.\n"
                 "- files/         Uploaded document attachments and logo from object storage.\n"
                 "- manifest.json  Archive metadata and SHA-256 file checksums.\n\n"
-                "To restore onto a fresh CivicDesk instance:\n"
+                "To restore onto a fresh DocketHall instance:\n"
                 "Sign in as admin -> Manage Users -> Backup & Restore -> upload this .zip.\n",
             )
     except Exception:
@@ -392,7 +392,7 @@ async def import_archive(
     file: UploadFile = File(...),
     user: dict = Depends(get_staff_user),
 ):
-    """Reconstruct CivicDesk database and MinIO files from a backup .zip archive."""
+    """Reconstruct DocketHall database and MinIO files from a backup .zip archive."""
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
     tmp_path = tmp.name
     try:

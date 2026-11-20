@@ -19,7 +19,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../app.css';
 import ServiceIcon from './core/ServiceIcon.jsx';
-import { CivicDeskLogo, DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { DocketHallLogo, DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
 
 function PublicPermitsPortal() {
@@ -36,7 +36,7 @@ function PublicPermitsPortal() {
       if (b) {
         setBranding(b);
         applyTheme(b);
-        document.title = b.city_title ? `${b.city_title} - Permits Portal` : 'Permits Portal - CivicDesk';
+        document.title = b.city_title ? `${b.city_title} - Permits Portal` : 'Permits Portal - DocketHall';
       }
     }).catch(() => {});
     fetch('/api/permits/public/catalog').then(r => (r.ok ? r.json() : null)).then(c => {
@@ -87,7 +87,7 @@ function PublicPermitsPortal() {
           )}
           {branding.city_title && <span>{branding.city_title}</span>}
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
-            <CivicDeskLogo size={24} />
+            <DocketHallLogo size={24} />
             <span>Permits Portal</span>
           </span>
         </a>

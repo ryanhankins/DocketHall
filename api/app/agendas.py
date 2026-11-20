@@ -1903,7 +1903,7 @@ def create_council_submission(
         ).fetchone()
     send_notification_email(
         "agendas_council_submission",
-        f"[CivicDesk] New Council Submission: {title}",
+        f"[DocketHall] New Council Submission: {title}",
         f"{user['username']} submitted a proposed agenda item: {title}.",
         link_path="/app#council",
         request=request,
@@ -2352,14 +2352,14 @@ def update_agenda(agenda_id: int, body: AgendaPatch, request: Request, user: dic
         record_audit(user["username"], "agenda.finalized", "agendas", agenda_id, f"Finalized agenda '{loaded['title']}'")
         send_notification_email(
             "agendas_finalized",
-            f"[CivicDesk] Agenda Finalized: {loaded['title']}",
+            f"[DocketHall] Agenda Finalized: {loaded['title']}",
             f"Agenda '{loaded['title']}' ({loaded['body']}, {loaded['meeting_date']}) was finalized by {user['username']}.",
             link_path=f"/app#agendas/{agenda_id}",
             request=request,
         )
         notify_topic_subscribers(
             "agendas",
-            f"[CivicDesk] New Meeting Agenda Published: {loaded['title']}",
+            f"[DocketHall] New Meeting Agenda Published: {loaded['title']}",
             f"A finalized agenda for {loaded['body']} ({loaded['title']}, {loaded['meeting_date']}) has been published.",
             link_path="/#agendas",
             request=request,

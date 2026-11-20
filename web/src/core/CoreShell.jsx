@@ -19,7 +19,7 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { ROLE_LABELS, api, downloadBackupArchive, hasPermission, todayIso } from './api.js';
 import { loadEnabledFrontendModules } from './registry.js';
 import ServiceIcon from './ServiceIcon.jsx';
-import { CivicDeskLogo } from './PublicChrome.jsx';
+import { DocketHallLogo } from './PublicChrome.jsx';
 import { applyTheme } from './theme.js';
 import { useToast } from './toast.jsx';
 
@@ -43,7 +43,7 @@ export default function CoreShell() {
   const [hash, setHash] = useState(() => location.hash.replace(/^#/, ''));
   const [openSubmenus, setOpenSubmenus] = useState(() => {
     try {
-      const saved = localStorage.getItem('civicdesk.openSubmenus');
+      const saved = localStorage.getItem('dockethall.openSubmenus');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') return parsed;
@@ -58,7 +58,7 @@ export default function CoreShell() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('civicdesk.openSubmenus', JSON.stringify(openSubmenus));
+      localStorage.setItem('dockethall.openSubmenus', JSON.stringify(openSubmenus));
     } catch { /* ignore storage errors */ }
   }, [openSubmenus]);
 
@@ -90,7 +90,7 @@ export default function CoreShell() {
       hasLogo: hasLogo ?? prev.hasLogo,
       logoVer: logoVer ?? prev.logoVer,
     }));
-    document.title = t ? `${t} - CivicDesk` : 'CivicDesk';
+    document.title = t ? `${t} - DocketHall` : 'DocketHall';
   }, []);
 
   const refreshBackupBanner = useCallback(async () => {
@@ -316,8 +316,8 @@ export default function CoreShell() {
           )}
           {branding.cityTitle && <span id="brand-city-title">{branding.cityTitle}</span>}
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
-            <CivicDeskLogo size={24} />
-            <span>CivicDesk</span>
+            <DocketHallLogo size={24} />
+            <span>DocketHall</span>
           </span>
         </a>
         <div className="user-bar">
@@ -329,7 +329,7 @@ export default function CoreShell() {
               type="button"
               className={`btn sm${activeSection === 'help' ? ' primary' : ''}`}
               onClick={() => navigate('help')}
-              title="Open CivicDesk User Guide & Documentation"
+              title="Open DocketHall User Guide & Documentation"
               style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}
             >
               <svg

@@ -161,7 +161,7 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
         </p>
         <form onSubmit={handleSave}>
           <div className="field" style={{ marginBottom: '.9rem' }}>
-            <label htmlFor="pref-city-title">City Title (appears before CivicDesk at the top of each page)</label>
+            <label htmlFor="pref-city-title">City Title (appears before DocketHall at the top of each page)</label>
             <input
               id="pref-city-title"
               placeholder="e.g. City of Northfield"
@@ -466,7 +466,7 @@ function SystemUpdatesCard() {
   }, [state]);
 
   const startUpgrade = async () => {
-    if (!window.confirm('Pull the latest CivicDesk release from GitHub and restart services? Your database and uploaded files will be preserved.')) {
+    if (!window.confirm('Pull the latest DocketHall release from GitHub and restart services? Your database and uploaded files will be preserved.')) {
       return;
     }
     setTriggering(true);
@@ -487,7 +487,7 @@ function SystemUpdatesCard() {
         <div>
           <h2 style={{ margin: 0 }}>System Version &amp; Updates</h2>
           <p className="muted" style={{ margin: '.2rem 0 0', fontSize: '.86rem' }}>
-            Check GitHub for newer CivicDesk releases without affecting your database or uploaded files.
+            Check GitHub for newer DocketHall releases without affecting your database or uploaded files.
           </p>
         </div>
         <div className="actions">

@@ -384,10 +384,10 @@ def request_password_reset(body: PasswordResetRequestIn, request: Request):
             reset_url = f"{base_url}/?reset={raw_token}"
             send_direct_email(
                 [uemail],
-                "[CivicDesk] Password Reset Request",
+                "[DocketHall] Password Reset Request",
                 (
                     f"Hello {uname},\n\n"
-                    "A password reset was requested for your CivicDesk account.\n"
+                    "A password reset was requested for your DocketHall account.\n"
                     f"Open this link within 30 minutes to set a new password:\n{reset_url}\n\n"
                     "If you did not request this, you can safely ignore this email."
                 ),

@@ -27,7 +27,7 @@ export const DEFAULT_THEME = {
 export const THEME_PRESETS = [
   {
     id: 'default',
-    label: 'CivicDesk Blue (Default)',
+    label: 'DocketHall Blue (Default)',
     colors: { ...DEFAULT_THEME },
   },
   {

@@ -109,7 +109,7 @@ def _stripe_request(method: str, path: str, secret_key: str, form_data: dict | N
     auth_b64 = base64.b64encode(f"{secret_key}:".encode("utf-8")).decode("ascii")
     headers = {
         "Authorization": f"Basic {auth_b64}",
-        "User-Agent": "CivicDesk-Payments",
+        "User-Agent": "DocketHall-Payments",
     }
     data = None
     if form_data is not None:

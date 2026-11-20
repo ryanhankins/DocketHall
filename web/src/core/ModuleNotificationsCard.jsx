@@ -102,7 +102,7 @@ export default function ModuleNotificationsCard({ moduleId, title = 'Email Notif
         <div>
           <h2 style={{ margin: 0 }}>{title}</h2>
           <p className="muted" style={{ margin: '4px 0 0', fontSize: '.88rem' }}>
-            Choose which CivicDesk users and additional email addresses receive each notification type.
+            Choose which DocketHall users and additional email addresses receive each notification type.
             Outgoing SMTP server settings are configured under Admin → Integrations.
           </p>
         </div>
@@ -137,7 +137,7 @@ export default function ModuleNotificationsCard({ moduleId, title = 'Email Notif
 
                 <div>
                   <div style={{ fontSize: '.82rem', fontWeight: 600, marginBottom: '.35rem' }}>
-                    Notify CivicDesk Users
+                    Notify DocketHall Users
                   </div>
                   {users.length === 0 ? (
                     <div className="muted" style={{ fontSize: '.82rem' }}>

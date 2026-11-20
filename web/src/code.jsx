@@ -19,7 +19,7 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../app.css';
 import ServiceIcon from './core/ServiceIcon.jsx';
-import { CivicDeskLogo, DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { DocketHallLogo, DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
 import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
 
@@ -42,7 +42,7 @@ function PublicCityCode() {
       if (b) {
         setBranding(b);
         applyTheme(b);
-        document.title = b.city_title ? `${b.city_title} - City Code` : 'City Code - CivicDesk';
+        document.title = b.city_title ? `${b.city_title} - City Code` : 'City Code - DocketHall';
       }
     }).catch(() => {});
   }, []);
@@ -71,7 +71,7 @@ function PublicCityCode() {
           )}
           {branding.city_title && <span>{branding.city_title}</span>}
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
-            <CivicDeskLogo size={24} />
+            <DocketHallLogo size={24} />
             <span>City Code</span>
           </span>
         </a>

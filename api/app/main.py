@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
     pool.close()
 
 
-app = FastAPI(title="CivicDesk API", lifespan=lifespan)
+app = FastAPI(title="DocketHall API", lifespan=lifespan)
 
 
 @app.middleware("http")

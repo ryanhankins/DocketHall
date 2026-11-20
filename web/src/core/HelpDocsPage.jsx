@@ -17,7 +17,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, hasPermission } from './api.js';
-import { CivicDeskLogo } from './PublicChrome.jsx';
+import { DocketHallLogo } from './PublicChrome.jsx';
 import { useToast } from './toast.jsx';
 
 const AUDIENCE_LABELS = {
@@ -231,11 +231,11 @@ export default function HelpDocsPage({ me }) {
       <div className="between" style={{ marginBottom: '1rem' }}>
         <div>
           <h1 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '.5rem' }}>
-            <CivicDeskLogo size={28} />
+            <DocketHallLogo size={28} />
             <span>User Guide &amp; Documentation</span>
           </h1>
           <p className="muted" style={{ margin: '.25rem 0 0' }}>
-            Instructions for using CivicDesk across roles and modules.
+            Instructions for using DocketHall across roles and modules.
           </p>
         </div>
         {canManage && !editing && (
