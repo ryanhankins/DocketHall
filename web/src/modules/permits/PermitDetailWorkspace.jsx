@@ -50,6 +50,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
   const [linkCandidates, setLinkCandidates] = useState([]);
   const [linkTargetId, setLinkTargetId] = useState('');
   const [linkRel, setLinkRel] = useState('enabled_by');
+  const [paymentsEnabled, setPaymentsEnabled] = useState(false);
 
   // Workflow form
   const [wfName, setWfName] = useState('');
@@ -109,7 +110,29 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
         setLinkCandidates((Array.isArray(rows) ? rows : []).filter((r) => r.id !== permit.id));
       })
       .catch(() => {});
+    api('/api/payments/config')
+      .then((cfg) => setPaymentsEnabled(Boolean(cfg?.enabled)))
+      .catch(() => {});
   }, [permit.id, permit.permit_type_id]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sid = params.get('session_id');
+    if (params.get('payment') === 'success' && sid) {
+      api('/api/payments/verify-session', {
+        method: 'POST',
+        body: JSON.stringify({ session_id: sid }),
+      })
+        .then((res) => {
+          if (res?.paid && res?.item_type === 'permit' && res?.item_id === permit.id) {
+            showToast('Payment confirmed!', 'ok');
+            api(`/api/permits/${permit.id}`).then((u) => onUpdated?.(u)).catch(() => {});
+          }
+          window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+        })
+        .catch(() => {});
+    }
+  }, [permit.id, onUpdated, showToast]);
 
   const workflow = permit.workflow_steps || [];
   const inspections = permit.inspections || [];
@@ -403,6 +426,31 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                 <div style={{ fontSize: '.9rem', lineHeight: 1.6 }}>
                   <div><strong>Status:</strong> {permit.status.replace('_', ' ')}</div>
                   <div><strong>Fee:</strong> {permit.fee_amount || 'TBD'} ({permit.payment_status})</div>
+                  {paymentsEnabled && permit.payment_status === 'unpaid' && /\d/.test(permit.fee_amount || '') && (
+                    <div style={{ margin: '.45rem 0' }}>
+                      <button
+                        type="button"
+                        className="btn sm primary"
+                        disabled={busy}
+                        onClick={async () => {
+                          setBusy(true);
+                          try {
+                            const res = await api('/api/payments/checkout', {
+                              method: 'POST',
+                              body: JSON.stringify({ item_type: 'permit', item_id: permit.id }),
+                            });
+                            if (res.checkout_url) window.location.href = res.checkout_url;
+                          } catch (err) {
+                            showToast(err.message, 'error');
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                      >
+                        Pay Fee Online ({permit.fee_amount})
+                      </button>
+                    </div>
+                  )}
                   <div><strong>Assigned Reviewer:</strong> {permit.assigned_to || 'Unassigned'}</div>
                   {permit.expires_at && (() => {
                     const exp = permitExpiryInfo(permit.expires_at);

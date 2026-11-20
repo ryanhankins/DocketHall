@@ -496,6 +496,148 @@ export default function IntegrationsPage() {
           </table>
         )}
       </div>
+
+      <StripePaymentsCard showToast={showToast} />
     </section>
+  );
+}
+
+function StripePaymentsCard({ showToast }) {
+  const [cfg, setCfg] = useState(null);
+  const [secretKey, setSecretKey] = useState('');
+  const [pubKey, setPubKey] = useState('');
+  const [webhookSecret, setWebhookSecret] = useState('');
+  const [currency, setCurrency] = useState('usd');
+  const [enabled, setEnabled] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState({ text: '', isError: false });
+
+  useEffect(() => {
+    api('/api/payments/admin/stripe')
+      .then((d) => {
+        setCfg(d);
+        setPubKey(d.publishable_key || '');
+        setCurrency(d.currency || 'usd');
+        setEnabled(d.has_secret_key ? Boolean(d.enabled) : true);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setBusy(true);
+    setMsg({ text: '', isError: false });
+    try {
+      const payload = {
+        publishable_key: pubKey.trim(),
+        currency: currency.trim() || 'usd',
+        enabled,
+        validate_key: true,
+      };
+      if (secretKey.trim()) payload.secret_key = secretKey.trim();
+      if (webhookSecret.trim()) payload.webhook_secret = webhookSecret.trim();
+      const updated = await api('/api/payments/admin/stripe', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      setCfg(updated);
+      setSecretKey('');
+      setWebhookSecret('');
+      const okText = updated.last_status || 'Stripe settings saved';
+      setMsg({ text: okText, isError: false });
+      showToast(okText, 'ok');
+    } catch (err) {
+      setMsg({ text: err.message, isError: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="between" style={{ marginBottom: '.6rem', flexWrap: 'wrap', gap: '.5rem' }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Online Payments (Stripe Checkout)</h2>
+          <p className="muted" style={{ margin: '.2rem 0 0', fontSize: '.88rem' }}>
+            Allow applicants and residents to pay permit fees and hall rental fees online via Stripe.
+          </p>
+        </div>
+        {cfg && (
+          <span className={`badge ${cfg.enabled && cfg.has_secret_key ? 'active' : 'disabled'}`}>
+            {cfg.enabled && cfg.has_secret_key ? 'Enabled' : 'Not Configured'}
+          </span>
+        )}
+      </div>
+
+      {cfg?.last_status && (
+        <div className="muted" style={{ fontSize: '.82rem', marginBottom: '.65rem' }}>
+          Status: {cfg.last_status}{cfg.secret_key_masked ? ` · Key: ${cfg.secret_key_masked}` : ''}
+        </div>
+      )}
+
+      <form onSubmit={handleSave} style={{ display: 'grid', gap: '.7rem' }}>
+        <div className="row">
+          <div className="field" style={{ flex: 2, minWidth: 220 }}>
+            <label htmlFor="stripe-sk">
+              {cfg?.has_secret_key ? 'Replace Stripe Secret Key (leave blank to keep current)' : 'Stripe Secret Key (sk_test_... or sk_live_...)'}
+            </label>
+            <input
+              id="stripe-sk"
+              type="password"
+              autoComplete="off"
+              placeholder={cfg?.has_secret_key ? 'Enter new secret key to replace…' : 'sk_test_... or sk_live_...'}
+              value={secretKey}
+              onChange={(e) => setSecretKey(e.target.value)}
+            />
+          </div>
+          <div className="field" style={{ flex: 1, minWidth: 160 }}>
+            <label htmlFor="stripe-cur">Currency</label>
+            <select id="stripe-cur" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+              <option value="usd">USD ($)</option>
+              <option value="cad">CAD ($)</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="row">
+          <div className="field" style={{ flex: 1, minWidth: 220 }}>
+            <label htmlFor="stripe-wh">
+              {cfg?.has_webhook_secret ? 'Replace Webhook Secret (whsec_..., optional)' : 'Webhook Signing Secret (whsec_..., optional)'}
+            </label>
+            <input
+              id="stripe-wh"
+              type="password"
+              autoComplete="off"
+              placeholder={cfg?.has_webhook_secret ? 'Saved (enter to replace)' : 'whsec_...'}
+              value={webhookSecret}
+              onChange={(e) => setWebhookSecret(e.target.value)}
+            />
+          </div>
+          <div className="field" style={{ flex: 1, minWidth: 220 }}>
+            <label>Webhook Endpoint URL (for Stripe Dashboard)</label>
+            <input readOnly value={`${window.location.origin}/api/payments/webhook`} />
+          </div>
+        </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: '.5rem', fontSize: '.9rem', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            style={{ width: 'auto', flexShrink: 0 }}
+            checked={enabled}
+            onChange={(e) => setEnabled(e.target.checked)}
+          />
+          <span>Enable Stripe online payments for Permits and Facility Rentals</span>
+        </label>
+
+        <div>
+          <button type="submit" className="btn primary" disabled={busy}>
+            {busy ? 'Validating…' : 'Save & Validate Stripe'}
+          </button>
+        </div>
+        {msg.text && (
+          <div className={msg.isError ? 'error-msg' : 'ok-msg'} role="status">{msg.text}</div>
+        )}
+      </form>
+    </div>
   );
 }

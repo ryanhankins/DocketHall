@@ -1296,6 +1296,30 @@ function CalendarPublicTab() {
   const [reqNotes, setReqNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ text: '', isError: false });
+  const [paymentsEnabled, setPaymentsEnabled] = useState(false);
+  const [lastReservation, setLastReservation] = useState(null);
+
+  useEffect(() => {
+    fetch('/api/payments/config')
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((d) => setPaymentsEnabled(Boolean(d?.enabled)))
+      .catch(() => {});
+    const params = new URLSearchParams(window.location.search);
+    const sid = params.get('session_id');
+    if (params.get('payment') === 'success' && sid) {
+      fetch('/api/payments/verify-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sid }),
+      })
+        .then((r) => (r.ok ? r.json() : {}))
+        .then((res) => {
+          if (res?.paid) setMsg({ text: 'Payment received! Thank you.', isError: false });
+          window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+        })
+        .catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -1373,6 +1397,7 @@ function CalendarPublicTab() {
         text: `Request ${res.reservation_number} submitted for ${res.facility_name} on ${res.event_date}. Staff will confirm shortly.`,
         isError: false,
       });
+      setLastReservation(res);
       setEvTitle('');
       setReqNotes('');
     } catch (err) {
@@ -1566,6 +1591,34 @@ function CalendarPublicTab() {
                 {msg.text}
               </div>
             )}
+            {paymentsEnabled && lastReservation && /\d/.test(lastReservation.fee_amount || '') && (
+              <div style={{ marginTop: '.4rem' }}>
+                <button
+                  type="button"
+                  className="btn sm primary"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      const r = await fetch('/api/payments/checkout', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ item_type: 'reservation', item_id: lastReservation.id }),
+                      });
+                      const data = await r.json().catch(() => ({}));
+                      if (!r.ok) throw new Error(data.detail || 'Could not start checkout');
+                      if (data.checkout_url) window.location.href = data.checkout_url;
+                    } catch (err) {
+                      setMsg({ text: err.message, isError: true });
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Pay Rental Fee Online ({lastReservation.fee_amount})
+                </button>
+              </div>
+            )}
           </form>
         </div>
       )}
@@ -1580,6 +1633,30 @@ function NotifyMeCard() {
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ text: '', isError: false });
+  const [paymentsEnabled, setPaymentsEnabled] = useState(false);
+  const [lastReservation, setLastReservation] = useState(null);
+
+  useEffect(() => {
+    fetch('/api/payments/config')
+      .then((r) => (r.ok ? r.json() : {}))
+      .then((d) => setPaymentsEnabled(Boolean(d?.enabled)))
+      .catch(() => {});
+    const params = new URLSearchParams(window.location.search);
+    const sid = params.get('session_id');
+    if (params.get('payment') === 'success' && sid) {
+      fetch('/api/payments/verify-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sid }),
+      })
+        .then((r) => (r.ok ? r.json() : {}))
+        .then((res) => {
+          if (res?.paid) setMsg({ text: 'Payment received! Thank you.', isError: false });
+          window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+        })
+        .catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     fetch('/api/subscriptions/topics')
