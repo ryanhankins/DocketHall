@@ -1625,38 +1625,6 @@ function RecordsPublicTab() {
           </tbody>
         </table>
       )}
-
-      {activeMedia && (
-        <div style={{ marginTop: '1rem', padding: '.85rem', border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}>
-          <div className="between" style={{ marginBottom: '.6rem', flexWrap: 'wrap', gap: '.5rem' }}>
-            <strong>{activeMedia.title} — Meeting Recording</strong>
-            <div className="actions">
-              <a className="btn sm" href={activeMedia.media_url} target="_blank" rel="noreferrer">Open in New Tab</a>
-              <button type="button" className="btn sm" onClick={() => setActiveMedia(null)}>Close</button>
-            </div>
-          </div>
-          {activeMedia.media_type === 'audio' ? (
-            <audio controls style={{ width: '100%' }} src={activeMedia.media_url} />
-          ) : (() => {
-            const embed = toEmbedUrl(activeMedia.media_url);
-            return embed ? (
-              <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: 6 }}>
-                <iframe
-                  title={activeMedia.title}
-                  src={embed}
-                  style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 0 }}
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                  allowFullScreen
-                />
-              </div>
-            ) : (
-              <p className="muted" style={{ margin: 0 }}>
-                External recording link: <a href={activeMedia.media_url} target="_blank" rel="noreferrer">{activeMedia.media_url}</a>
-              </p>
-            );
-          })()}
-        </div>
-      )}
     </div>
   );
 }
