@@ -14,6 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """Global Public Portal search across all enabled modules."""
+from datetime import date
+
 from fastapi import APIRouter
 
 from .db import pool
@@ -152,13 +154,21 @@ def global_public_search(q: str = ""):
                 })
 
         if "records" in enabled:
+            today = date.today()
+            added = 0
             for r in conn.execute(
-                "SELECT title, category, record_number FROM public_records "
-                "WHERE is_public = TRUE AND (auto_unpublish_on_expire = FALSE OR expires_at IS NULL OR expires_at >= CURRENT_DATE) "
-                "AND (title ILIKE %s OR description ILIKE %s OR record_number ILIKE %s) "
-                "ORDER BY id DESC LIMIT 6",
-                (like, like, like),
+                "SELECT title, category, doc_number, expiration_date, auto_unpublish_on_expire "
+                "FROM repository_documents WHERE is_public = TRUE "
+                "AND (title ILIKE %s OR notes ILIKE %s OR tags ILIKE %s OR doc_number ILIKE %s) "
+                "ORDER BY id DESC LIMIT 12",
+                (like, like, like, like),
             ).fetchall():
+                if r[4] and r[3]:
+                    try:
+                        if date.fromisoformat(r[3]) < today:
+                            continue
+                    except ValueError:
+                        pass
                 results.append({
                     "module_id": "records",
                     "module_label": "Public Record",
@@ -166,6 +176,9 @@ def global_public_search(q: str = ""):
                     "subtitle": " · ".join(x for x in (r[1], r[2]) if x),
                     "tab": "records",
                 })
+                added += 1
+                if added >= 6:
+                    break
 
         if "calendar" in enabled:
             for r in conn.execute(
