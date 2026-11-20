@@ -961,12 +961,12 @@ function ComplaintsPublicTab({ me, onRequireAuth }) {
           </div>
           <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: 12, display: 'grid', gap: 8 }}>
             <strong>Complainant Privacy &amp; Contact (Confidential — Never in Public Log)</strong>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input type="checkbox" checked={isAnonymous} onChange={(e) => setIsAnonymous(e.target.checked)} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <input type="checkbox" style={{ width: 'auto', flexShrink: 0 }} checked={isAnonymous} onChange={(e) => setIsAnonymous(e.target.checked)} />
               <span>File anonymously (accepted at staff discretion)</span>
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input type="checkbox" checked={isRealProperty} onChange={(e) => setIsRealProperty(e.target.checked)} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+              <input type="checkbox" style={{ width: 'auto', flexShrink: 0 }} checked={isRealProperty} onChange={(e) => setIsRealProperty(e.target.checked)} />
               <span>Complaint involves the use of real property (confidential complainant protection)</span>
             </label>
             {!isAnonymous && (

@@ -152,9 +152,10 @@ export default function ComplaintsFilePage({ me, onNavigate }) {
           }}
         >
           <strong>Complainant Privacy &amp; Contact (Confidential)</strong>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
             <input
               type="checkbox"
+              style={{ width: 'auto', flexShrink: 0 }}
               checked={isAnonymous}
               onChange={(e) => setIsAnonymous(e.target.checked)}
             />
@@ -162,9 +163,10 @@ export default function ComplaintsFilePage({ me, onNavigate }) {
               File anonymously (accepted at staff discretion; no personal contact stored)
             </span>
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
             <input
               type="checkbox"
+              style={{ width: 'auto', flexShrink: 0 }}
               checked={isRealProperty}
               onChange={(e) => setIsRealProperty(e.target.checked)}
             />

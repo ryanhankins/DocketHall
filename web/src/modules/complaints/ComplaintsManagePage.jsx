@@ -606,9 +606,10 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                   <option value="correspondence">Correspondence</option>
                   <option value="other">Other</option>
                 </select>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
                   <input
                     type="checkbox"
+                    style={{ width: 'auto', flexShrink: 0 }}
                     checked={docConfidential}
                     onChange={(e) => setDocConfidential(e.target.checked)}
                   />

@@ -408,17 +408,19 @@ export default function RecordsPage({ me }) {
               onChange={(e) => setNewForm({ ...newForm, notes: e.target.value })}
             />
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
             <input
               type="checkbox"
+              style={{ width: 'auto', flexShrink: 0 }}
               checked={newForm.is_public}
               onChange={(e) => setNewForm({ ...newForm, is_public: e.target.checked })}
             />
             <span>Publish to public repository endpoint</span>
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
             <input
               type="checkbox"
+              style={{ width: 'auto', flexShrink: 0 }}
               checked={newForm.auto_unpublish_on_expire}
               onChange={(e) => setNewForm({ ...newForm, auto_unpublish_on_expire: e.target.checked })}
             />
@@ -472,9 +474,10 @@ export default function RecordsPage({ me }) {
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 14, cursor: 'pointer' }}>
           <input
             type="checkbox"
+            style={{ width: 'auto', flexShrink: 0 }}
             checked={expiringOnly}
             onChange={(e) => setExpiringOnly(e.target.checked)}
           />
@@ -678,18 +681,20 @@ export default function RecordsPage({ me }) {
                   onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
                 />
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input
                   type="checkbox"
+                  style={{ width: 'auto', flexShrink: 0 }}
                   disabled={!canManage}
                   checked={editForm.is_public}
                   onChange={(e) => setEditForm({ ...editForm, is_public: e.target.checked })}
                 />
                 <span>Publicly visible</span>
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input
                   type="checkbox"
+                  style={{ width: 'auto', flexShrink: 0 }}
                   disabled={!canManage}
                   checked={editForm.auto_unpublish_on_expire}
                   onChange={(e) => setEditForm({ ...editForm, auto_unpublish_on_expire: e.target.checked })}

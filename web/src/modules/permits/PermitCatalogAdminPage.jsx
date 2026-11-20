@@ -368,14 +368,14 @@ function PermitCategoryCard({ permitType, uses, onReload, showToast, expandSigna
           </div>
           <div className="field" style={{ marginBottom: '.55rem' }}>
             <label>Required Standard Fields</label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.35rem .8rem', padding: '.4rem .55rem', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 4 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: '.4rem .9rem', alignItems: 'start', padding: '.55rem .65rem', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 4 }}>
               {PERMIT_FIELD_OPTIONS.map(([fk, fl]) => {
                 const checked = catReqFields.includes(fk);
                 return (
-                  <label key={fk} style={{ display: 'inline-flex', alignItems: 'center', gap: '.25rem', fontSize: '.8rem', cursor: 'pointer' }}>
+                  <label key={fk} style={{ display: 'flex', alignItems: 'flex-start', gap: '.4rem', fontSize: '.82rem', cursor: 'pointer', lineHeight: 1.3 }}>
                     <input
                       type="checkbox"
-                      style={{ width: 'auto' }}
+                      style={{ width: 'auto', margin: '0.15rem 0 0', flexShrink: 0 }}
                       checked={checked}
                       onChange={() => setCatReqFields(prev => (checked ? prev.filter(x => x !== fk) : [...prev, fk]))}
                     />

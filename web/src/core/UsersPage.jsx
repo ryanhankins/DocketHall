@@ -165,12 +165,12 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
             <div className="muted" style={{ fontSize: '.8rem', marginBottom: '.35rem' }}>
               Additional Module Permissions (optional, beyond role preset):
             </div>
-            <div className="actions">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '.45rem 1rem', alignItems: 'start' }}>
               {permissionsCatalog.map(p => (
-                <label key={p.key} style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem', fontSize: '.86rem', cursor: 'pointer' }}>
+                <label key={p.key} style={{ display: 'flex', alignItems: 'flex-start', gap: '.45rem', fontSize: '.86rem', cursor: 'pointer', lineHeight: 1.35 }}>
                   <input
                     type="checkbox"
-                    style={{ width: 'auto' }}
+                    style={{ width: 'auto', margin: '0.18rem 0 0', flexShrink: 0 }}
                     checked={newPerms.includes(p.key)}
                     onChange={() => toggleNewPerm(p.key)}
                   />
