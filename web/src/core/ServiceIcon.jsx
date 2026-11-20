@@ -25,6 +25,7 @@ const SERVICE_STYLES = {
   complaints: { color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
   calendar: { color: '#0284c7', bg: '#f0f9ff', border: '#bae6fd' },
   notices: { color: '#0d9488', bg: '#f0fdfa', border: '#99f6e4' },
+  directory: { color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc' },
   alerts: { color: '#4f46e5', bg: '#eef2ff', border: '#c7d2fe' },
 };
 
@@ -107,6 +108,16 @@ function renderGlyph(id, size) {
         <svg {...props}>
           <path d="m3 11 18-5v12L3 14v-3z" />
           <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+        </svg>
+      );
+    case 'directory':
+      // Users / directory & FAQ
+      return (
+        <svg {...props}>
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
       );
     default:

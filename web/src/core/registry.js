@@ -30,6 +30,7 @@ const MODULE_LOADERS = {
   complaints: () => import('../modules/complaints/index.jsx'),
   calendar: () => import('../modules/calendar/index.jsx'),
   notices: () => import('../modules/notices/index.jsx'),
+  directory: () => import('../modules/directory/index.jsx'),
 };
 
 export async function loadEnabledFrontendModules(enabledModuleIds) {

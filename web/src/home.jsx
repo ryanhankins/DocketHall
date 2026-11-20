@@ -68,7 +68,131 @@ const TAB_DEFS = [
     description: 'Read city news flashes, public hearing notices, open RFPs/bids, and job postings.',
     actionLabel: 'View Notices & Bids →',
   },
+  {
+    id: 'directory',
+    label: 'Staff, Council & FAQs',
+    description: 'Find City Council & staff contact info and answers to frequently asked questions.',
+    actionLabel: 'View Directory & FAQs →',
+  },
 ];
+
+function DirectoryPublicTab() {
+  const [data, setData] = useState({ contacts: [], faqs: [] });
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState('');
+
+  const load = useCallback(() => {
+    setLoading(true);
+    const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
+    fetch(`/api/directory/public${qs}`)
+      .then((r) => (r.ok ? r.json() : { contacts: [], faqs: [] }))
+      .then((d) => { setData({ contacts: d.contacts || [], faqs: d.faqs || [] }); setLoading(false); })
+      .catch(() => { setData({ contacts: [], faqs: [] }); setLoading(false); });
+  }, [q]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const elected = data.contacts.filter((c) => c.is_elected);
+  const staff = data.contacts.filter((c) => !c.is_elected);
+  const faqGroups = [];
+  const groupMap = new Map();
+  for (const fq of data.faqs) {
+    const cat = fq.category || 'General';
+    if (!groupMap.has(cat)) {
+      const g = { category: cat, items: [] };
+      groupMap.set(cat, g);
+      faqGroups.push(g);
+    }
+    groupMap.get(cat).items.push(fq);
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <div className="card">
+        <div className="between" style={{ marginBottom: '.75rem', flexWrap: 'wrap', gap: '.5rem' }}>
+          <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <ServiceIcon id="directory" size={20} badge />
+            <span>Staff &amp; Council Directory + FAQs</span>
+          </h2>
+          <input
+            placeholder="Search contacts or FAQs…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            style={{ minWidth: 220 }}
+          />
+        </div>
+
+        {loading ? (
+          <p className="muted">Loading directory &amp; FAQs…</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            {elected.length > 0 && (
+              <div>
+                <h3 style={{ margin: '0 0 .5rem', fontSize: '1rem' }}>City Council &amp; Elected Officials</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '.65rem' }}>
+                  {elected.map((c) => (
+                    <div key={c.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '.75rem', background: '#f8fafc' }}>
+                      <strong>{c.name}</strong>
+                      {c.title_role && <div className="muted" style={{ fontSize: '.85rem' }}>{c.title_role}</div>}
+                      {c.email && <div style={{ fontSize: '.84rem', marginTop: 4 }}><a href={`mailto:${c.email}`}>{c.email}</a></div>}
+                      {c.phone && <div style={{ fontSize: '.84rem' }}><a href={`tel:${c.phone}`}>{c.phone}</a></div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {staff.length > 0 && (
+              <div>
+                <h3 style={{ margin: '0 0 .5rem', fontSize: '1rem' }}>City Staff &amp; Departments</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '.65rem' }}>
+                  {staff.map((c) => (
+                    <div key={c.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '.75rem', background: '#fff' }}>
+                      <strong>{c.name}</strong>
+                      {(c.title_role || c.department) && (
+                        <div className="muted" style={{ fontSize: '.85rem' }}>
+                          {[c.title_role, c.department].filter(Boolean).join(' · ')}
+                        </div>
+                      )}
+                      {c.email && <div style={{ fontSize: '.84rem', marginTop: 4 }}><a href={`mailto:${c.email}`}>{c.email}</a></div>}
+                      {c.phone && <div style={{ fontSize: '.84rem' }}><a href={`tel:${c.phone}`}>{c.phone}</a></div>}
+                      {c.office_hours && <div className="muted" style={{ fontSize: '.8rem', marginTop: 2 }}>Hours: {c.office_hours}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {faqGroups.length > 0 && (
+              <div>
+                <h3 style={{ margin: '0 0 .5rem', fontSize: '1rem' }}>Frequently Asked Questions</h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '.65rem' }}>
+                  {faqGroups.map((grp) => (
+                    <div key={grp.category} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '.75rem', background: '#fff' }}>
+                      <div style={{ fontSize: '.8rem', fontWeight: 700, textTransform: 'uppercase', color: '#475569', marginBottom: '.4rem' }}>
+                        {grp.category}
+                      </div>
+                      {grp.items.map((fq) => (
+                        <details key={fq.id} style={{ borderTop: '1px solid #f1f5f9', padding: '.4rem 0' }}>
+                          <summary style={{ cursor: 'pointer', fontWeight: 600, fontSize: '.92rem' }}>{fq.question}</summary>
+                          <p style={{ margin: '.4rem 0 .2rem', color: '#334e68', fontSize: '.9rem', whiteSpace: 'pre-wrap' }}>{fq.answer}</p>
+                        </details>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {data.contacts.length === 0 && data.faqs.length === 0 && (
+              <p className="muted">No directory entries or FAQs published yet.</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function NoticesPublicTab() {
   const [items, setItems] = useState([]);
@@ -1977,6 +2101,7 @@ function PublicHomePage() {
             {activeTab === 'complaints' && <ComplaintsPublicTab me={me} onRequireAuth={openAuth} />}
             {activeTab === 'calendar' && <CalendarPublicTab />}
             {activeTab === 'notices' && <NoticesPublicTab />}
+            {activeTab === 'directory' && <DirectoryPublicTab />}
           </div>
         )}
       </main>
