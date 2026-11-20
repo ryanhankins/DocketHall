@@ -20,7 +20,7 @@ import os
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from . import audit, auth, backup, branding, docs, integrations, my_account, payments, permits, registry, search, subscriptions, tenancy, updates, users
+from . import audit, auth, backup, branding, docs, integrations, my_account, payments, pdf_check, permits, registry, search, subscriptions, tenancy, updates, users
 from .db import open_pool, pool
 from .modules import register_builtin_modules
 
@@ -91,6 +91,7 @@ app.include_router(users.router)
 app.include_router(branding.router)
 app.include_router(integrations.router)
 app.include_router(payments.router)
+app.include_router(pdf_check.router)
 app.include_router(my_account.router)
 app.include_router(subscriptions.router)
 app.include_router(docs.router)

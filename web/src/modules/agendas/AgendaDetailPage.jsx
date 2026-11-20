@@ -18,6 +18,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, categoryBadgeClass, toTimeInputValue } from '../../core/api.js';
 import { InlineEditable } from '../../core/InlineEditable.jsx';
+import PdfComplianceButton from '../../core/PdfComplianceButton.jsx';
 import { useToast } from '../../core/toast.jsx';
 import { recurrenceLabel } from './BacklogPage.jsx';
 import AgendaItemsTab from './AgendaItemsTab.jsx';
@@ -200,9 +201,12 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
             Save as Template
           </button>
           <a className="btn" href={`/api/agendas/${agenda.id}/packet.pdf?summary=1`} target="_blank" rel="noreferrer">View Summary PDF</a>
+          <PdfComplianceButton url={`/api/agendas/${agenda.id}/packet.pdf/compliance?summary=1`} title="Summary PDF" label="Check Summary" className="btn" />
           <a className="btn primary" href={`/api/agendas/${agenda.id}/packet.pdf`} target="_blank" rel="noreferrer">View Packet PDF</a>
+          <PdfComplianceButton url={`/api/agendas/${agenda.id}/packet.pdf/compliance`} title="Packet PDF" label="Check Packet" className="btn" />
           <a className="btn" href={`/api/agendas/${agenda.id}/packet.pdf?download=1`} target="_blank" rel="noreferrer">Download PDF</a>
           <a className="btn" href={`/api/agendas/${agenda.id}/minutes.pdf`} target="_blank" rel="noreferrer">Minutes PDF</a>
+          <PdfComplianceButton url={`/api/agendas/${agenda.id}/minutes.pdf/compliance`} title="Minutes PDF" label="Check Minutes" className="btn" />
           <a className="btn" href={`/api/agendas/${agenda.id}/minutes.pdf?download=1`} target="_blank" rel="noreferrer">Download Minutes</a>
         </div>
       </div>

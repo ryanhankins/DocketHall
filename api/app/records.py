@@ -27,6 +27,7 @@ from pydantic import BaseModel
 
 from .agendas import _bucket, _minio, _remove_minio_objects
 from .audit import record_audit
+from .pdf_check import check_pdf_compliance
 from .auth import require_permission
 from .db import pool
 from .tenancy import tenant_object_key
@@ -699,6 +700,27 @@ def download_record_file(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+@router.get("/files/{file_id}/compliance")
+def check_record_file_compliance(
+    file_id: int,
+    _: dict = Depends(require_permission("records.view", "records.manage")),
+):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT filename, content_type, object_key FROM repository_files WHERE id = %s",
+            (file_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="File not found")
+    obj = _minio().get_object(_bucket(), row[2])
+    try:
+        data = obj.read()
+    finally:
+        obj.close()
+        obj.release_conn()
+    return check_pdf_compliance(data, row[0] or f"file_{file_id}.pdf")
 
 
 @router.delete("/{doc_id}/files/{file_id}")

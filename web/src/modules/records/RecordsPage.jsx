@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, formatDate, formatSize, hasPermission } from '../../core/api.js';
+import PdfComplianceButton from '../../core/PdfComplianceButton.jsx';
 import { useToast } from '../../core/toast.jsx';
 
 const CATEGORIES = [
@@ -879,15 +880,20 @@ export default function RecordsPage({ me }) {
                           {formatSize(f.size_bytes)} · {formatDate(f.created_at)}
                         </div>
                       </div>
-                      {canManage && (
-                        <button
-                          type="button"
-                          className="btn sm danger"
-                          onClick={() => handleDeleteFile(f.id)}
-                        >
-                          Remove
-                        </button>
-                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        {(f.content_type === 'application/pdf' || /\.pdf$/i.test(f.filename || '')) && (
+                          <PdfComplianceButton url={`/api/records/files/${f.id}/compliance`} title={f.filename} label="Check PDF" />
+                        )}
+                        {canManage && (
+                          <button
+                            type="button"
+                            className="btn sm danger"
+                            onClick={() => handleDeleteFile(f.id)}
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>

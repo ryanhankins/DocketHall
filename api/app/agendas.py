@@ -37,6 +37,7 @@ from .audit import record_audit
 from .auth import current_user, has_permission
 from .db import _read_secret, pool
 from .integrations import send_notification_email
+from .pdf_check import check_pdf_compliance
 from .storage import get_storage_client
 from .subscriptions import notify_topic_subscribers
 from .tenancy import tenant_object_key
@@ -3299,3 +3300,47 @@ def generate_minutes_pdf(
             raise HTTPException(status_code=403, detail="Access restricted to finalized agendas")
         prefs = _load_preferences(conn)
     return _build_minutes_response(agenda, prefs, agenda_id, download)
+
+
+@router.get("/{agenda_id}/packet.pdf/compliance")
+def check_agenda_packet_pdf_compliance(
+    agenda_id: int,
+    summary: bool = False,
+    user: dict = Depends(get_council_or_staff_user),
+):
+    with pool.connection() as conn:
+        agenda = _load_agenda(conn, agenda_id)
+        if not agenda:
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        if not has_permission(user, "agendas.manage") and not _is_council_finalized(conn, agenda_id):
+            raise HTTPException(status_code=403, detail="Access restricted to finalized agendas")
+        prefs = _load_preferences(conn)
+    resp = _build_packet_response(agenda, prefs, agenda_id, summary, False)
+    suffix = "Summary" if summary else "Packet"
+    return check_pdf_compliance(resp.body, f"{agenda['title']} ({suffix}).pdf")
+
+
+@router.get("/{agenda_id}/minutes.pdf/compliance")
+def check_agenda_minutes_pdf_compliance(
+    agenda_id: int,
+    user: dict = Depends(get_council_or_staff_user),
+):
+    with pool.connection() as conn:
+        agenda = _load_agenda(conn, agenda_id)
+        if not agenda:
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        if not has_permission(user, "agendas.manage") and not _is_council_finalized(conn, agenda_id):
+            raise HTTPException(status_code=403, detail="Access restricted to finalized agendas")
+        prefs = _load_preferences(conn)
+    resp = _build_minutes_response(agenda, prefs, agenda_id, False)
+    return check_pdf_compliance(resp.body, f"{agenda['title']} (Minutes).pdf")
+
+
+@router.get("/{agenda_id}/documents/{doc_id}/compliance")
+def check_agenda_document_pdf_compliance(
+    agenda_id: int,
+    doc_id: int,
+    user: dict = Depends(get_staff_user),
+):
+    resp = view_document_as_pdf(agenda_id, doc_id, user)
+    return check_pdf_compliance(resp.body, f"document_{doc_id}.pdf")
