@@ -53,6 +53,8 @@ jobs:
         with:
           context: ./api
           push: true
+          build-args: |
+            CIVICDESK_COMMIT=${{ github.sha }}
           tags: |
             ghcr.io/${{ steps.meta.outputs.owner }}/civicdesk-api:${{ steps.meta.outputs.tag }}
             ghcr.io/${{ steps.meta.outputs.owner }}/civicdesk-api:sha-${{ github.sha }}

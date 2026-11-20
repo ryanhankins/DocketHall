@@ -404,6 +404,142 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
           )}
         </form>
       </div>
+
+      <SystemUpdatesCard />
     </section>
+  );
+}
+
+function SystemUpdatesCard() {
+  const [info, setInfo] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [triggering, setTriggering] = useState(false);
+  const [err, setErr] = useState('');
+
+  const loadUpdates = async () => {
+    setLoading(true);
+    setErr('');
+    try {
+      const data = await api('/api/system/updates');
+      setInfo(data);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadUpdates();
+  }, []);
+
+  const state = info?.upgrade_status?.state;
+  useEffect(() => {
+    if (state !== 'queued' && state !== 'running') return undefined;
+    const t = setInterval(loadUpdates, 3000);
+    return () => clearInterval(t);
+  }, [state]);
+
+  const startUpgrade = async () => {
+    if (!window.confirm('Pull the latest CivicDesk release from GitHub and restart services? Your database and uploaded files will be preserved.')) {
+      return;
+    }
+    setTriggering(true);
+    setErr('');
+    try {
+      await api('/api/system/upgrade', { method: 'POST' });
+      await loadUpdates();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setTriggering(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="between" style={{ marginBottom: '.65rem', flexWrap: 'wrap', gap: '.5rem' }}>
+        <div>
+          <h2 style={{ margin: 0 }}>System Version &amp; Updates</h2>
+          <p className="muted" style={{ margin: '.2rem 0 0', fontSize: '.86rem' }}>
+            Check GitHub for newer CivicDesk releases without affecting your database or uploaded files.
+          </p>
+        </div>
+        <div className="actions">
+          <button type="button" className="btn sm" disabled={loading} onClick={loadUpdates}>
+            {loading ? 'Checking…' : 'Check for Updates'}
+          </button>
+          {info?.upgrade_supported && (
+            <button
+              type="button"
+              className="btn sm primary"
+              disabled={triggering || state === 'queued' || state === 'running'}
+              onClick={startUpgrade}
+            >
+              {state === 'queued' || state === 'running' ? 'Upgrading…' : 'Upgrade Now'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {err && <div className="error-msg" role="alert" style={{ marginBottom: '.65rem' }}>{err}</div>}
+
+      {info && (
+        <div style={{ fontSize: '.9rem', display: 'grid', gap: '.45rem' }}>
+          <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div><strong>Running Commit:</strong> <code>{info.current_commit}</code></div>
+            <div><strong>Latest on GitHub:</strong> <code>{info.latest_commit}</code></div>
+            <div>
+              {info.update_available ? (
+                <span className="badge" style={{ background: '#fef3c7', color: '#92400e' }}>Update Available</span>
+              ) : info.current_commit !== 'unknown' && info.latest_commit !== 'unknown' ? (
+                <span className="badge active">Up to Date</span>
+              ) : null}
+            </div>
+          </div>
+
+          {info.github_error && (
+            <div className="muted" style={{ fontSize: '.82rem' }}>GitHub check note: {info.github_error}</div>
+          )}
+
+          {info.upgrade_status && info.upgrade_status.state && info.upgrade_status.state !== 'idle' && (
+            <div style={{ padding: '.55rem .75rem', borderRadius: 6, background: '#f8fafc', border: '1px solid #e2e8f0', fontSize: '.84rem' }}>
+              <strong>Upgrade Status:</strong> {info.upgrade_status.state}
+              {info.upgrade_status.message ? ` — ${info.upgrade_status.message}` : ''}
+            </div>
+          )}
+
+          {info.upgrade_log && (
+            <details>
+              <summary style={{ cursor: 'pointer', fontSize: '.82rem', color: '#2563eb' }}>View Upgrade Log</summary>
+              <pre style={{ marginTop: '.4rem', padding: '.6rem', background: '#0f172a', color: '#e2e8f0', borderRadius: 6, fontSize: '.76rem', overflowX: 'auto', maxHeight: 240 }}>
+                {info.upgrade_log}
+              </pre>
+            </details>
+          )}
+
+          {Array.isArray(info.recent_commits) && info.recent_commits.length > 0 && (
+            <details style={{ marginTop: '.25rem' }}>
+              <summary style={{ cursor: 'pointer', fontSize: '.84rem', color: '#2563eb' }}>
+                Recent GitHub Commits ({info.repo})
+              </summary>
+              <ul style={{ margin: '.4rem 0 0 1.1rem', padding: 0, fontSize: '.82rem', lineHeight: 1.55 }}>
+                {info.recent_commits.map((c) => (
+                  <li key={c.full_sha}>
+                    <code>{c.sha}</code> — {c.message}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {!info.upgrade_supported && (
+            <div className="muted" style={{ fontSize: '.8rem', marginTop: '.25rem' }}>
+              In-app 1-click upgrade activates automatically on VPS deployments installed via <code>scripts/install-vps.sh</code>.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

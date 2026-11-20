@@ -76,10 +76,15 @@ else
   (cd web && ([ -d node_modules ] || npm ci) && npm run build)
 
   echo "==> Building images"
+  COMMIT_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
   IMAGES="api:api web:web minio:minio minio-init:minio/init"
   for pair in $IMAGES; do
     name="${pair%%:*}"; ctx="${pair#*:}"
-    docker build -q -t "${CIVICDESK_REGISTRY}civicdesk-${name}:${CIVICDESK_TAG}" "$ctx"
+    if [ "$name" = "api" ]; then
+      docker build -q --build-arg "CIVICDESK_COMMIT=${COMMIT_SHA}" -t "${CIVICDESK_REGISTRY}civicdesk-${name}:${CIVICDESK_TAG}" "$ctx"
+    else
+      docker build -q -t "${CIVICDESK_REGISTRY}civicdesk-${name}:${CIVICDESK_TAG}" "$ctx"
+    fi
     if [ -n "$CIVICDESK_REGISTRY" ]; then docker push "${CIVICDESK_REGISTRY}civicdesk-${name}:${CIVICDESK_TAG}"; fi
   done
 fi

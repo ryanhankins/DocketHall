@@ -71,12 +71,15 @@ services:
       MINIO_BUCKET: records
       MINIO_ACCESS_KEY_FILE: /run/secrets/minio_root_user
       MINIO_SECRET_KEY_FILE: /run/secrets/minio_root_password
+      CIVICDESK_UPGRADE_DIR: /upgrade
+      CIVICDESK_GITHUB_REPO: "${CIVICDESK_GITHUB_REPO:-ryanhankins/CivicDesk}"
     secrets:
       - postgres_password
       - minio_root_user
       - minio_root_password
     volumes:
       - records_data:/data/records
+      - ${CIVICDESK_UPGRADE_SOURCE:-upgrade_data}:/upgrade
     networks: [civicdesk]
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
@@ -165,6 +168,7 @@ volumes:
   records_data:
   pgdata:
   minio_data:
+  upgrade_data:
 
 configs:
   db_init:

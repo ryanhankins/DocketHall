@@ -106,11 +106,60 @@ EOF
   systemctl reload caddy
 fi
 
-echo "==> Deploying CivicDesk stack"
-cd "$INSTALL_DIR"
-./scripts/deploy.sh
+echo "==> Setting up host-assisted in-app updater"
+UPGRADE_DIR="/var/lib/civicdesk-upgrade"
+mkdir -p "$UPGRADE_DIR"
+chown 10001:10001 "$UPGRADE_DIR"
+chmod 755 "$UPGRADE_DIR"
+touch "${UPGRADE_DIR}/.host-watcher-enabled"
+export CIVICDESK_UPGRADE_SOURCE="$UPGRADE_DIR"
 
 mkdir -p /etc/civicdesk /var/log/civicdesk
+cat >/etc/civicdesk/upgrade.env <<EOF
+DOMAIN=${DOMAIN:-}
+STORAGE_BACKEND=${STORAGE_BACKEND:-local}
+MINIO_REPLICAS=${MINIO_REPLICAS:-0}
+SEED_CITY_PROFILE=${SEED_CITY_PROFILE:-}
+MULTI_TENANT=${MULTI_TENANT:-false}
+TENANT_BASE_DOMAIN=${TENANT_BASE_DOMAIN:-}
+CIVICDESK_PULL_ONLY=${CIVICDESK_PULL_ONLY:-true}
+CIVICDESK_REGISTRY=${CIVICDESK_REGISTRY:-ghcr.io/ryanhankins/}
+CIVICDESK_TAG=${CIVICDESK_TAG:-latest}
+CIVICDESK_UPGRADE_SOURCE=${UPGRADE_DIR}
+COOKIE_SECURE=${COOKIE_SECURE:-false}
+APP_BASE_URL=${APP_BASE_URL:-}
+EOF
+chmod 600 /etc/civicdesk/upgrade.env
+
+echo "==> Deploying CivicDesk stack"
+cd "$INSTALL_DIR"
+chmod +x "${INSTALL_DIR}/scripts/upgrade.sh"
+./scripts/deploy.sh
+
+cat >/etc/systemd/system/civicdesk-upgrade.service <<EOF
+[Unit]
+Description=CivicDesk Host-Assisted Upgrade
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=${INSTALL_DIR}/scripts/upgrade.sh
+EOF
+
+cat >/etc/systemd/system/civicdesk-upgrade.path <<EOF
+[Unit]
+Description=Watch for CivicDesk In-App Upgrade Requests
+
+[Path]
+PathExists=${UPGRADE_DIR}/request.json
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now civicdesk-upgrade.path
+
 cat >/etc/civicdesk/backup.env <<EOF
 STACK_NAME=${STACK_NAME:-civicdesk}
 RESTIC_REPOSITORY=${RESTIC_REPOSITORY:-}
