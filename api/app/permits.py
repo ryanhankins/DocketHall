@@ -1061,6 +1061,34 @@ def get_public_catalog():
         return _load_catalog(conn, active_only=True)
 
 
+@router.get("/public/lookup")
+def public_permit_lookup(q: str = ""):
+    term = q.strip()
+    if len(term) < 2:
+        return []
+    like = f"%{term}%"
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT permit_number, permit_type_name, permit_use_name, property_address, status, created_at, issued_at "
+            "FROM permits "
+            "WHERE permit_number ILIKE %s OR property_address ILIKE %s "
+            "ORDER BY id DESC LIMIT 25",
+            (like, like),
+        ).fetchall()
+    return [
+        {
+            "permit_number": r[0],
+            "permit_type_name": r[1],
+            "permit_use_name": r[2],
+            "property_address": r[3],
+            "status": r[4],
+            "created_at": r[5].isoformat() if r[5] else None,
+            "issued_at": r[6].isoformat() if r[6] else None,
+        }
+        for r in rows
+    ]
+
+
 # ------------------------------------------------------------------ applicant endpoints
 @router.get("/mine")
 def list_my_permits(user: dict = Depends(require_permission("permits.submit", "permits.manage"))):

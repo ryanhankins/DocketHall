@@ -20,6 +20,7 @@ from typing import Literal
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from .auth import require_permission
@@ -385,6 +386,65 @@ def _compute_reservation_fee(rental_mode: str, start_min: int, end_min: int, dai
     if dep and _parse_money_float(dep) not in (None, 0.0):
         return f"{base} + {dep} deposit"
     return base
+
+
+@router.get("/public/ics")
+def download_event_ics(kind: Literal["meeting", "event"], item_id: int):
+    with pool.connection() as conn:
+        if kind == "meeting":
+            row = conn.execute(
+                "SELECT title, meeting_date, meeting_time, body FROM agendas "
+                "WHERE id = %s AND status = 'finalized' AND meeting_date IS NOT NULL",
+                (item_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Meeting not found")
+            title, ev_date, start_t, desc = row[0], row[1], row[2] or "", row[3] or ""
+            loc = "City Hall"
+        else:
+            row = conn.execute(
+                "SELECT title, event_date, start_time, location, description "
+                "FROM calendar_events WHERE id = %s AND is_public = TRUE",
+                (item_id,),
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Event not found")
+            title, ev_date, start_t, loc, desc = row[0], row[1], row[2] or "", row[3] or "City Hall", row[4] or ""
+
+    d_str = ev_date.strftime("%Y%m%d")
+    t_clean = "".join(c for c in start_t if c.isdigit())
+    if len(t_clean) >= 4:
+        dtstart = f"DTSTART:{d_str}T{t_clean[:4]}00"
+        end_hr = min(23, int(t_clean[:2]) + 1)
+        dtend = f"DTEND:{d_str}T{end_hr:02d}{t_clean[2:4]}00"
+    else:
+        dtstart = f"DTSTART;VALUE=DATE:{d_str}"
+        dtend = f"DTEND;VALUE=DATE:{d_str}"
+
+    def _ics_esc(s: str) -> str:
+        return str(s or "").replace("\\", "\\\\").replace(",", "\\,").replace(";", "\\;").replace("\n", "\\n")
+
+    ics = "\r\n".join([
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//CivicDesk//City Calendar//EN",
+        "BEGIN:VEVENT",
+        f"UID:{kind}-{item_id}@civicdesk",
+        f"DTSTAMP:{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}",
+        dtstart,
+        dtend,
+        f"SUMMARY:{_ics_esc(title)}",
+        f"LOCATION:{_ics_esc(loc)}",
+        f"DESCRIPTION:{_ics_esc(desc)}",
+        "END:VEVENT",
+        "END:VCALENDAR",
+        "",
+    ])
+    return Response(
+        content=ics.encode("utf-8"),
+        media_type="text/calendar",
+        headers={"Content-Disposition": f'attachment; filename="{kind}-{item_id}.ics"'},
+    )
 
 
 @router.post("/reservations/public", status_code=201)

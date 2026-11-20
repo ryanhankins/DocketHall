@@ -15,15 +15,21 @@
 
 """News Flash, Public Notices, Bids/RFPs, and Job Postings module."""
 from datetime import date
+import os
+import re
 from typing import Literal
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel
 
+from .agendas import _bucket, _minio
 from .audit import record_audit
 from .auth import require_permission
 from .db import pool
 from .integrations import send_notification_email
+from .tenancy import tenant_object_key
 
 NOTICE_CATEGORIES = ("news", "public_notice", "bid", "job")
 
@@ -37,6 +43,8 @@ CREATE TABLE IF NOT EXISTS city_notices (
     department      TEXT NOT NULL DEFAULT '',
     contact_info    TEXT NOT NULL DEFAULT '',
     attachment_url  TEXT NOT NULL DEFAULT '',
+    attachment_key  TEXT NOT NULL DEFAULT '',
+    attachment_filename TEXT NOT NULL DEFAULT '',
     publish_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at      DATE,
     deadline_at     DATE,
@@ -46,6 +54,8 @@ CREATE TABLE IF NOT EXISTS city_notices (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE city_notices ADD COLUMN IF NOT EXISTS attachment_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE city_notices ADD COLUMN IF NOT EXISTS attachment_filename TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS city_notices_cat_idx ON city_notices(category, is_published, publish_at DESC);
 """
 
@@ -278,3 +288,56 @@ def delete_notice(
             raise HTTPException(status_code=404, detail="Notice not found")
     record_audit(user["username"], "notice.delete", f"Deleted notice #{notice_id}: {row[1]}")
     return {"deleted": True, "id": notice_id}
+
+
+_SAFE_FILE_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+@router.post("/{notice_id}/attachment")
+async def upload_notice_attachment(
+    notice_id: int,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_permission("notices.manage")),
+):
+    raw = await file.read()
+    if not raw or len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File must be non-empty and under 25 MB")
+    orig = _SAFE_FILE_RE.sub("_", os.path.basename(file.filename or "attachment.pdf")) or "attachment.pdf"
+    obj_key = tenant_object_key(f"notices/{notice_id}/{uuid.uuid4().hex[:12]}-{orig}")
+    ctype = file.content_type or "application/octet-stream"
+    _minio().put_object(_bucket(), obj_key, __import__("io").BytesIO(raw), length=len(raw), content_type=ctype)
+    public_url = f"/api/notices/public/{notice_id}/attachment"
+    with pool.connection() as conn:
+        row = conn.execute(
+            f"UPDATE city_notices SET attachment_key = %s, attachment_filename = %s, attachment_url = %s, updated_at = now() "
+            f"WHERE id = %s RETURNING {_COLS}",
+            (obj_key, orig, public_url, notice_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Notice not found")
+    record_audit(user["username"], "notice.attachment", f"Uploaded {orig} to notice #{notice_id}")
+    return _row_to_notice(row)
+
+
+@router.get("/public/{notice_id}/attachment")
+def download_notice_attachment(notice_id: int):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT attachment_key, attachment_filename, is_published FROM city_notices WHERE id = %s",
+            (notice_id,),
+        ).fetchone()
+    if not row or not row[0] or not row[2]:
+        raise HTTPException(status_code=404, detail="Attachment not found")
+    resp = _minio().get_object(_bucket(), row[0])
+    try:
+        data = resp.read()
+    finally:
+        resp.close()
+        resp.release_conn()
+    fname = row[1] or f"notice-{notice_id}.pdf"
+    media = "application/pdf" if fname.lower().endswith(".pdf") else "application/octet-stream"
+    return Response(
+        content=data,
+        media_type=media,
+        headers={"Content-Disposition": f'inline; filename="{fname}"'},
+    )

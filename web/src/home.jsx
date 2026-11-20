@@ -1982,6 +1982,37 @@ function CalendarPublicTab() {
             })}
           </div>
         )}
+
+        {(data.items || []).filter((it) => it.kind === 'meeting' || it.kind === 'event').length > 0 && (
+          <div style={{ marginTop: '1rem', paddingTop: '.85rem', borderTop: '1px solid #e2e8f0' }}>
+            <strong style={{ fontSize: '.92rem', display: 'block', marginBottom: '.45rem' }}>
+              Meetings &amp; City Events This Month
+            </strong>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '.35rem' }}>
+              {(data.items || [])
+                .filter((it) => it.kind === 'meeting' || it.kind === 'event')
+                .map((it) => {
+                  const rawId = String(it.uid || '').split('-')[1];
+                  return (
+                    <div key={it.uid} className="between" style={{ fontSize: '.86rem', padding: '.3rem .5rem', background: '#f8fafc', borderRadius: 6, gap: '.5rem' }}>
+                      <div>
+                        <strong>{it.event_date}</strong>
+                        {it.start_time ? ` · ${formatTime12h(it.start_time)}` : ''} — {it.title}
+                      </div>
+                      {rawId && (
+                        <a
+                          className="btn sm"
+                          href={`/api/calendar/public/ics?kind=${encodeURIComponent(it.kind)}&item_id=${encodeURIComponent(rawId)}`}
+                        >
+                          + Add to Calendar (.ics)
+                        </a>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
       </div>
 
       {(data.facilities || []).length > 0 && (

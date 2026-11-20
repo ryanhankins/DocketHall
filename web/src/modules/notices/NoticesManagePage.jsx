@@ -57,6 +57,7 @@ export default function NoticesManagePage() {
   const [q, setQ] = useState('');
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [editingId, setEditingId] = useState(null);
+  const [attachFile, setAttachFile] = useState(null);
   const [saving, setSaving] = useState(false);
   const showToast = useToast();
 
@@ -89,18 +90,25 @@ export default function NoticesManagePage() {
         deadline_at: form.deadline_at || '',
         expires_at: form.expires_at || '',
       };
+      let saved;
       if (editingId) {
-        await api(`/api/notices/${editingId}`, {
+        saved = await api(`/api/notices/${editingId}`, {
           method: 'PATCH',
           body: JSON.stringify(payload),
         });
         showToast('Post updated', 'ok');
       } else {
-        await api('/api/notices', {
+        saved = await api('/api/notices', {
           method: 'POST',
           body: JSON.stringify(payload),
         });
         showToast('Post created', 'ok');
+      }
+      if (attachFile && saved?.id) {
+        const fd = new FormData();
+        fd.append('file', attachFile);
+        await api(`/api/notices/${saved.id}/attachment`, { method: 'POST', body: fd });
+        setAttachFile(null);
       }
       setForm({ ...EMPTY_FORM });
       setEditingId(null);
@@ -206,12 +214,18 @@ export default function NoticesManagePage() {
               />
             </div>
             <div className="field" style={{ flex: 1, minWidth: 200 }}>
-              <label htmlFor="notice-url">Attachment / PDF URL (optional)</label>
+              <label htmlFor="notice-url">Attachment / PDF (URL or Upload)</label>
               <input
                 id="notice-url"
-                placeholder="https://... or /api/records/..."
+                placeholder="https://... or upload below"
                 value={form.attachment_url}
                 onChange={(e) => setForm((f) => ({ ...f, attachment_url: e.target.value }))}
+              />
+              <input
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+                style={{ marginTop: 4, fontSize: '.8rem' }}
+                onChange={(e) => setAttachFile(e.target.files?.[0] || null)}
               />
             </div>
             <div className="field" style={{ minWidth: 150 }}>

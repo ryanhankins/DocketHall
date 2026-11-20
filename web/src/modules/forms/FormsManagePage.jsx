@@ -354,6 +354,15 @@ export default function FormsManagePage() {
                         <option value="reviewed">Reviewed</option>
                         <option value="archived">Archived</option>
                       </select>
+                      <a
+                        className="btn sm"
+                        href={`/api/forms/submissions/${s.id}/pdf`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ marginLeft: '.4rem' }}
+                      >
+                        PDF
+                      </a>
                     </td>
                   </tr>
                 ))}

@@ -22,7 +22,8 @@ NOTICES_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         "city_notices",
         [
             "id", "title", "category", "summary", "body", "department",
-            "contact_info", "attachment_url", "publish_at", "expires_at",
+            "contact_info", "attachment_url", "attachment_key", "attachment_filename",
+            "publish_at", "expires_at",
             "deadline_at", "is_pinned", "is_published", "created_by",
             "created_at", "updated_at",
         ],

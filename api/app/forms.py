@@ -20,9 +20,15 @@ import io
 import json
 from typing import Any, Literal
 
+from xml.sax.saxutils import escape as _xml_escape
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from .audit import record_audit
 from .auth import require_permission
@@ -602,4 +608,62 @@ def export_submissions_csv(form_id: int, _: dict = Depends(require_permission("f
         content=buf.getvalue().encode("utf-8"),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="form-{form_id}-submissions.csv"'},
+    )
+
+
+@router.get("/submissions/{sub_id}/pdf")
+def get_submission_pdf(sub_id: int, _: dict = Depends(require_permission("forms.manage"))):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT s.id, s.submitter_name, s.submitter_email, s.responses, s.status, s.created_at, "
+            "       f.title, f.form_kind, f.fields "
+            "FROM city_form_submissions s JOIN city_forms f ON f.id = s.form_id WHERE s.id = %s",
+            (sub_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    resp = dict(row[3]) if isinstance(row[3], dict) else {}
+    fields = list(row[8]) if isinstance(row[8], list) else []
+    label_map = {f["key"]: f.get("label") or f["key"] for f in fields if isinstance(f, dict) and f.get("key")}
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=letter, title=f"Submission #{sub_id}")
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph(f"<b>{_xml_escape(str(row[6]))}</b>", styles["Title"]),
+        Paragraph(f"Submission #{sub_id} · Status: <b>{_xml_escape(str(row[4]))}</b>", styles["Normal"]),
+        Spacer(1, 10),
+    ]
+    meta_rows = [
+        ["Submitter", row[1] or "Anonymous"],
+        ["Email", row[2] or "—"],
+        ["Submitted At", row[5].isoformat() if row[5] else "—"],
+    ]
+    t = Table(meta_rows, colWidths=[130, 370])
+    t.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f1f5f9")),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("PADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(t)
+    story.extend([Spacer(1, 14), Paragraph("<b>Submitted Responses</b>", styles["Heading3"])])
+    ordered_keys = [k for k in label_map if k in resp] + [k for k in resp if k not in label_map]
+    for k in ordered_keys:
+        lbl = label_map.get(k, k.replace("_", " ").title())
+        val = resp.get(k)
+        if isinstance(val, dict):
+            if "answer" in val:
+                txt = f"{str(val.get('answer') or '—').upper()} — {val.get('explanation') or ''}".strip(" —")
+            else:
+                txt = json.dumps(val)
+        else:
+            txt = str(val or "—")
+        story.append(Paragraph(f"<b>{_xml_escape(str(lbl))}:</b> {_xml_escape(txt)}", styles["Normal"]))
+        story.append(Spacer(1, 6))
+    doc.build(story)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="submission-{sub_id}.pdf"'},
     )

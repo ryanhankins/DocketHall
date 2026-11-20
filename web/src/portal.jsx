@@ -208,8 +208,73 @@ function PublicPermitsPortal() {
             </div>
           )}
         </div>
+
+        <PermitLookupCard />
       </main>
       <PublicFooter branding={branding} />
+    </div>
+  );
+}
+
+function PermitLookupCard() {
+  const [q, setQ] = useState('');
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const searchPermits = async (e) => {
+    e.preventDefault();
+    if (q.trim().length < 2) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/permits/public/lookup?q=${encodeURIComponent(q.trim())}`);
+      const d = await r.json().catch(() => []);
+      setRows(Array.isArray(d) ? d : []);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <h2 style={{ marginTop: 0 }}>Check Permit Status</h2>
+      <p className="muted" style={{ marginTop: 0, fontSize: '.88rem' }}>
+        Look up public permit status by Permit # (e.g. <code>PRM-2026-0001</code>) or street address.
+      </p>
+      <form onSubmit={searchPermits} className="row" style={{ alignItems: 'flex-end', marginBottom: '.75rem' }}>
+        <div className="field" style={{ flex: 2, minWidth: 220 }}>
+          <label htmlFor="permit-lookup-q">Permit # or Property Address</label>
+          <input
+            id="permit-lookup-q"
+            placeholder="e.g. PRM-2026- or 123 Lake Ave"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+        <button type="submit" className="btn primary" disabled={busy || q.trim().length < 2}>
+          {busy ? 'Searching…' : 'Check Status'}
+        </button>
+      </form>
+      {Array.isArray(rows) && (
+        rows.length === 0 ? (
+          <p className="muted" style={{ margin: 0 }}>No matching permits found.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr><th>Permit #</th><th>Type / Use</th><th>Property Address</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              {rows.map((p) => (
+                <tr key={p.permit_number}>
+                  <td><strong>{p.permit_number}</strong></td>
+                  <td>{p.permit_type_name} — {p.permit_use_name}</td>
+                  <td>{p.property_address || '—'}</td>
+                  <td><span className="badge draft">{String(p.status || '').replace('_', ' ')}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )
+      )}
     </div>
   );
 }
