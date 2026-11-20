@@ -387,7 +387,17 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                     )}
                     {permit.permit_kind !== 'annual_license' && (
                       <>
-                        <div><strong>Parcel / Owner:</strong> {permit.parcel_id || '—'} / {permit.owner_name || '—'}</div>
+                        <div>
+                          <strong>Parcel / Owner:</strong> {permit.parcel_id || '—'} / {permit.owner_name || '—'}
+                          {isManager && (permit.parcel_id || permit.property_address) && (
+                            <a
+                              href={`#properties?parcel=${encodeURIComponent(permit.parcel_id || '')}&address=${encodeURIComponent(permit.property_address || '')}`}
+                              style={{ marginLeft: '.5rem', fontSize: '.82rem' }}
+                            >
+                              Property 360° &rarr;
+                            </a>
+                          )}
+                        </div>
                         <div>
                           <strong>Contractor:</strong> {permit.contractor_name || '—'} (Lic: {permit.contractor_license || '—'})
                           {contractorCheck?.matched && (

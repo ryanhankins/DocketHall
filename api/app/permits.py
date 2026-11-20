@@ -2337,6 +2337,172 @@ def export_operational_report_csv(_: dict = Depends(require_permission("permits.
     )
 
 
+@router.get("/parcels/profile")
+def get_property_profile(
+    parcel_id: str = "",
+    address: str = "",
+    _: dict = Depends(require_permission("permits.manage")),
+):
+    """Unified Property / Parcel 360° view linking Permits, Inspections, Compliance Programs, and Code Enforcement."""
+    pid = parcel_id.strip()
+    addr = address.strip()
+    if not pid and not addr:
+        raise HTTPException(status_code=400, detail="Provide parcel_id or address")
+
+    addr_like = f"%{addr}%" if addr else ""
+    with pool.connection() as conn:
+        parcel_row = None
+        if pid:
+            parcel_row = conn.execute(
+                "SELECT id, parcel_id, address, building_name, suite_name, owner_name, lot, block, section, notes "
+                "FROM permit_parcels WHERE LOWER(parcel_id) = LOWER(%s) LIMIT 1",
+                (pid,),
+            ).fetchone()
+        if not parcel_row and addr:
+            parcel_row = conn.execute(
+                "SELECT id, parcel_id, address, building_name, suite_name, owner_name, lot, block, section, notes "
+                "FROM permit_parcels WHERE address ILIKE %s ORDER BY id ASC LIMIT 1",
+                (addr_like,),
+            ).fetchone()
+
+        eff_pid = pid or (parcel_row[1] if parcel_row else "")
+        eff_addr = addr or (parcel_row[2] if parcel_row else "")
+        eff_addr_like = f"%{eff_addr}%" if eff_addr else ""
+
+        p_clauses = []
+        p_params: list = []
+        if eff_pid:
+            p_clauses.append("LOWER(parcel_id) = LOWER(%s)")
+            p_params.append(eff_pid)
+        if eff_addr_like:
+            p_clauses.append("property_address ILIKE %s")
+            p_params.append(eff_addr_like)
+
+        permits_rows = conn.execute(
+            "SELECT id, permit_number, permit_type_name, permit_use_name, status, "
+            "       applicant_name, contractor_name, contractor_license, property_address, "
+            "       parcel_id, estimated_value, fee_amount, payment_status, created_at, issued_at "
+            f"FROM permits WHERE ({' OR '.join(p_clauses)}) ORDER BY id DESC",
+            p_params,
+        ).fetchall() if p_clauses else []
+
+        permit_ids = [r[0] for r in permits_rows]
+        insp_rows = conn.execute(
+            "SELECT i.id, i.permit_id, p.permit_number, i.inspection_type, i.scheduled_date, "
+            "       i.inspector, i.result, i.notes, i.completed_at "
+            "FROM permit_inspections i JOIN permits p ON p.id = i.permit_id "
+            "WHERE i.permit_id = ANY(%s) ORDER BY i.id DESC",
+            (permit_ids,),
+        ).fetchall() if permit_ids else []
+
+        comp_clauses = []
+        comp_params: list = []
+        if eff_pid:
+            comp_clauses.append("LOWER(parcel_id) = LOWER(%s)")
+            comp_params.append(eff_pid)
+        if eff_addr_like:
+            comp_clauses.append("property_address ILIKE %s")
+            comp_params.append(eff_addr_like)
+        comp_rows = conn.execute(
+            f"SELECT {_COMP_COLS} FROM recurring_compliance_programs "
+            f"WHERE ({' OR '.join(comp_clauses)}) ORDER BY id DESC",
+            comp_params,
+        ).fetchall() if comp_clauses else []
+
+        code_cases: list[dict] = []
+        if eff_addr_like:
+            try:
+                ce_rows = conn.execute(
+                    "SELECT id, complaint_number, subject_property_address, ordinance_section, "
+                    "       status, enforcement_stage, nov_compliance_deadline, reinspection_date, "
+                    "       citation_amount, conduct_description, created_at "
+                    "FROM complaints WHERE subject_property_address ILIKE %s ORDER BY id DESC",
+                    (eff_addr_like,),
+                ).fetchall()
+                for cr in ce_rows:
+                    code_cases.append({
+                        "id": cr[0],
+                        "complaint_number": cr[1],
+                        "subject_property_address": cr[2],
+                        "ordinance_section": cr[3],
+                        "status": cr[4],
+                        "enforcement_stage": cr[5] or "intake",
+                        "nov_compliance_deadline": cr[6] or "",
+                        "reinspection_date": cr[7] or "",
+                        "citation_amount": cr[8] or "",
+                        "conduct_description": cr[9] or "",
+                        "created_at": cr[10].isoformat() if cr[10] else None,
+                    })
+            except Exception:
+                pass
+
+    return {
+        "parcel": (
+            {
+                "id": parcel_row[0],
+                "parcel_id": parcel_row[1],
+                "address": parcel_row[2],
+                "building_name": parcel_row[3],
+                "suite_name": parcel_row[4],
+                "owner_name": parcel_row[5],
+                "lot": parcel_row[6],
+                "block": parcel_row[7],
+                "section": parcel_row[8],
+                "notes": parcel_row[9],
+            }
+            if parcel_row
+            else {
+                "id": None,
+                "parcel_id": eff_pid,
+                "address": eff_addr,
+                "building_name": "",
+                "suite_name": "",
+                "owner_name": "",
+                "lot": "",
+                "block": "",
+                "section": "",
+                "notes": "",
+            }
+        ),
+        "permits": [
+            {
+                "id": r[0],
+                "permit_number": r[1],
+                "permit_type_name": r[2],
+                "permit_use_name": r[3],
+                "status": r[4],
+                "applicant_name": r[5],
+                "contractor_name": r[6],
+                "contractor_license": r[7],
+                "property_address": r[8],
+                "parcel_id": r[9],
+                "estimated_value": r[10],
+                "fee_amount": r[11],
+                "payment_status": r[12],
+                "created_at": r[13].isoformat() if r[13] else None,
+                "issued_at": r[14].isoformat() if r[14] else None,
+            }
+            for r in permits_rows
+        ],
+        "inspections": [
+            {
+                "id": r[0],
+                "permit_id": r[1],
+                "permit_number": r[2],
+                "inspection_type": r[3],
+                "scheduled_date": r[4],
+                "inspector": r[5],
+                "result": r[6],
+                "notes": r[7],
+                "completed_at": r[8].isoformat() if r[8] else None,
+            }
+            for r in insp_rows
+        ],
+        "compliance_programs": [_row_to_comp_program(r) for r in comp_rows],
+        "code_enforcement": code_cases,
+    }
+
+
 @router.get("/{permit_id}")
 def get_permit(
     permit_id: int,

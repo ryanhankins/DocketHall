@@ -168,6 +168,7 @@ MODULE = CivicModule(
             "permission": "permits.manage",
             "items": [
                 {"section": "permits-review", "label": "Permit Review Queue", "permission": "permits.manage"},
+                {"section": "properties", "label": "Property 360° Lookup", "permission": "permits.manage"},
                 {"section": "permits-reports", "label": "Reports & Revenue", "permission": "permits.manage"},
                 {"section": "contractors", "label": "Contractors & Licenses", "permission": "permits.manage"},
                 {"section": "compliance-programs", "label": "Rental & Fire Compliance", "permission": "permits.manage"},
