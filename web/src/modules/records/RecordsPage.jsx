@@ -288,7 +288,26 @@ export default function RecordsPage({ me }) {
 
       {showFoia && (
         <div className="card">
-          <h3 style={{ marginTop: 0 }}>Public Records / FOIA Requests ({foiaItems.length})</h3>
+          <div className="between" style={{ marginBottom: '.65rem' }}>
+            <h3 style={{ margin: 0 }}>Public Records / FOIA Requests ({foiaItems.length})</h3>
+            {foiaItems.length > 0 && (
+              <button
+                type="button"
+                className="btn sm"
+                onClick={() => {
+                  const rows = [['Request #', 'Requester', 'Email', 'Subject', 'Assigned To', 'Due Date', 'Status']];
+                  foiaItems.forEach((f) => rows.push([f.request_number, f.requester_name, f.requester_email, f.subject, f.assigned_to || '', f.due_date || '', f.status]));
+                  const csv = rows.map((r) => r.map((v) => `"${String(v || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+                  const a = document.createElement('a');
+                  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+                  a.download = 'foia-requests.csv';
+                  a.click();
+                }}
+              >
+                Export FOIA CSV
+              </button>
+            )}
+          </div>
           {!foiaItems.length ? (
             <p className="muted" style={{ margin: 0 }}>No FOIA / public data requests submitted yet.</p>
           ) : (
@@ -356,6 +375,44 @@ export default function RecordsPage({ me }) {
                         <option value="fulfilled">Fulfilled</option>
                         <option value="denied">Denied / Exempt</option>
                       </select>
+                      {canManage && (
+                        <div className="actions" style={{ marginTop: 4 }}>
+                          <button
+                            type="button"
+                            className="btn sm"
+                            onClick={async () => {
+                              const assigned = window.prompt('Assigned To:', fr.assigned_to || '');
+                              if (assigned === null) return;
+                              const due = window.prompt('Due Date (YYYY-MM-DD):', fr.due_date || '');
+                              if (due === null) return;
+                              const fee = window.prompt('Fee Estimate:', fr.fee_estimate || '');
+                              if (fee === null) return;
+                              const rnotes = window.prompt('Response Notes:', fr.response_notes || '');
+                              if (rnotes === null) return;
+                              const updated = await api(`/api/records/requests/${fr.id}`, {
+                                method: 'PATCH',
+                                body: JSON.stringify({ assigned_to: assigned, due_date: due, fee_estimate: fee, response_notes: rnotes }),
+                              });
+                              setFoiaItems((prev) => prev.map((x) => (x.id === fr.id ? updated : x)));
+                              showToast('FOIA details saved', 'ok');
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="btn sm danger"
+                            onClick={async () => {
+                              if (!window.confirm(`Delete ${fr.request_number}?`)) return;
+                              await api(`/api/records/requests/${fr.id}`, { method: 'DELETE' });
+                              setFoiaItems((prev) => prev.filter((x) => x.id !== fr.id));
+                              showToast('FOIA request deleted', 'ok');
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}

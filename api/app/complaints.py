@@ -949,9 +949,17 @@ def _create_work_order_row(conn, body: WorkOrderIn) -> dict:
 
 
 @router.post("/work-orders/public", status_code=201)
-def submit_public_311_request(body: WorkOrderIn):
+def submit_public_311_request(body: WorkOrderIn, request: Request):
     with pool.connection() as conn:
-        return _create_work_order_row(conn, body)
+        wo = _create_work_order_row(conn, body)
+    send_notification_email(
+        "complaints_submitted",
+        f"[DocketHall] New 311 Request: {wo['work_order_number']}",
+        f"Category: {wo['category']}\nLocation: {wo['location']}\nDescription: {wo['description']}",
+        link_path="/app#complaints-manage",
+        request=request,
+    )
+    return wo
 
 
 @router.get("/work-orders/public-lookup")
@@ -1033,6 +1041,14 @@ def update_work_order(wo_id: int, body: WorkOrderPatch, user: dict = Depends(req
         if not row:
             raise HTTPException(status_code=404, detail="Work order not found")
     record_audit(user["username"], "complaints.wo_update", f"Updated {row[1]} -> {row[8]}")
+    if row[5] and "@" in row[5] and body.status in ("in_progress", "completed"):
+        from .integrations import send_direct_email
+        send_direct_email(
+            [row[5]],
+            f"[DocketHall] 311 Request {row[1]} — {row[8].replace('_', ' ').title()}",
+            f"Hello {row[4] or 'Resident'},\n\nYour 311 service request ({row[1]} at {row[3]}) is now '{row[8]}'.\n\n{row[10] or ''}",
+            link_path="/#complaints",
+        )
     return _row_to_wo(row)
 
 
@@ -1148,6 +1164,18 @@ def update_complaint(
             act = _fetch_activity(conn, complaint_id, include_internal=True)
             reinsps = _fetch_reinspections(conn, complaint_id)
             code_sec = _fetch_linked_code_section(conn, row[32] if len(row) > 32 else None)
+    if body.status is not None and row[8]:
+        try:
+            from .integrations import send_direct_email
+            send_direct_email(
+                to_email=row[8],
+                subject=f"Code Complaint {row[1]} Status Updated: {body.status}",
+                text_body=f"Your complaint {row[1]} status has been updated to: {body.status}.\n\n{body.final_resolution or ''}".strip(),
+                related_entity_type="complaint",
+                related_entity_id=str(complaint_id),
+            )
+        except Exception:
+            pass
     return _serialize_private(
         row,
         docs=docs,

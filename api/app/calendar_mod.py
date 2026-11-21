@@ -447,6 +447,35 @@ def download_event_ics(kind: Literal["meeting", "event"], item_id: int):
     )
 
 
+@router.get("/reservations/public-lookup")
+def lookup_public_reservation(reservation_number: str = ""):
+    num = reservation_number.strip().upper()
+    if not num:
+        raise HTTPException(status_code=400, detail="Reservation number is required")
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT reservation_number, facility_name, event_date, rental_mode, start_time, end_time, "
+            "       event_title, fee_amount, payment_status, status, staff_notes "
+            "FROM facility_reservations WHERE UPPER(reservation_number) = %s",
+            (num,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    return {
+        "reservation_number": row[0],
+        "facility_name": row[1],
+        "event_date": row[2].isoformat() if row[2] else "",
+        "rental_mode": row[3] or "full_day",
+        "start_time": row[4] or "",
+        "end_time": row[5] or "",
+        "event_title": row[6] or "",
+        "fee_amount": row[7] or "",
+        "payment_status": row[8] or "unpaid",
+        "status": row[9] or "pending",
+        "staff_notes": row[10] or "",
+    }
+
+
 @router.post("/reservations/public", status_code=201)
 def create_public_reservation(body: PublicReservationIn, request: Request):
     name = body.requester_name.strip()

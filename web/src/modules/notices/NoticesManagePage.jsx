@@ -61,6 +61,7 @@ export default function NoticesManagePage() {
   const [attachFile, setAttachFile] = useState(null);
   const [pdfWarn, setPdfWarn] = useState('');
   const [saving, setSaving] = useState(false);
+  const [respPanel, setRespPanel] = useState(null);
   const showToast = useToast();
 
   const loadItems = useCallback(async () => {
@@ -370,14 +371,9 @@ export default function NoticesManagePage() {
                           onClick={async () => {
                             try {
                               const d = await api(`/api/notices/${n.id}/responses`);
-                              const list = d.items || [];
-                              if (!list.length) {
-                                window.alert(`No ${n.category === 'job' ? 'applications' : 'plan-holders'} submitted yet for "${n.title}".`);
-                              } else {
-                                window.alert(list.map((r) => `${r.applicant_name}${r.organization ? ` (${r.organization})` : ''} — ${r.applicant_email || r.applicant_phone || 'No contact'}\n${r.cover_note || ''}`).join('\n\n'));
-                              }
+                              setRespPanel({ notice: n, items: d.items || [] });
                             } catch (e) {
-                              window.alert(e.message || 'Failed to load responses');
+                              showToast(e.message || 'Failed to load responses', 'error');
                             }
                           }}
                         >
@@ -416,6 +412,56 @@ export default function NoticesManagePage() {
           </table>
         )}
       </div>
+
+      {respPanel && (
+        <div className="card">
+          <div className="between" style={{ marginBottom: '.65rem', flexWrap: 'wrap', gap: '.5rem' }}>
+            <h2 style={{ margin: 0 }}>
+              {respPanel.notice.category === 'job' ? 'Job Applications' : 'Registered Bid Plan-Holders'} — {respPanel.notice.title} ({respPanel.items.length})
+            </h2>
+            <div className="actions">
+              {respPanel.items.length > 0 && (
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={() => {
+                    const rows = [['Name', 'Email', 'Phone', 'Organization', 'Note', 'Submitted']];
+                    respPanel.items.forEach((r) => rows.push([r.applicant_name, r.applicant_email, r.applicant_phone, r.organization, r.cover_note, r.created_at || '']));
+                    const csv = rows.map((r) => r.map((v) => `"${String(v || '').replace(/"/g, '""')}"`).join(',')).join('\n');
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+                    a.download = `notice-${respPanel.notice.id}-responses.csv`;
+                    a.click();
+                  }}
+                >
+                  Export CSV
+                </button>
+              )}
+              <button type="button" className="btn sm" onClick={() => setRespPanel(null)}>Close</button>
+            </div>
+          </div>
+          {!respPanel.items.length ? (
+            <p className="muted" style={{ margin: 0 }}>No responses submitted yet.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr><th>Name</th><th>Contact</th><th>Organization</th><th>Note</th><th>Submitted</th></tr>
+              </thead>
+              <tbody>
+                {respPanel.items.map((r) => (
+                  <tr key={r.id}>
+                    <td><strong>{r.applicant_name}</strong></td>
+                    <td>{[r.applicant_email, r.applicant_phone].filter(Boolean).join(' · ') || '—'}</td>
+                    <td>{r.organization || '—'}</td>
+                    <td>{r.cover_note || '—'}</td>
+                    <td className="muted">{formatDate(r.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       <ModuleNotificationsCard
         moduleId="notices"

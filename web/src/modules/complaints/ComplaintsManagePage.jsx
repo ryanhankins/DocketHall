@@ -347,6 +347,50 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                         <option value="completed">Completed</option>
                         <option value="cancelled">Cancelled</option>
                       </select>
+                      <div className="actions" style={{ marginTop: 4 }}>
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={async () => {
+                            const crew = window.prompt('Assigned Crew:', wo.assigned_crew || '');
+                            if (crew === null) return;
+                            const prio = window.prompt('Priority (low, normal, high, emergency):', wo.priority || 'normal');
+                            if (prio === null) return;
+                            const asset = window.prompt('Asset ID (optional):', wo.asset_id || '');
+                            if (asset === null) return;
+                            const cost = window.prompt('Estimated Cost (optional):', wo.estimated_cost || '');
+                            if (cost === null) return;
+                            const notes = window.prompt('Completion / Staff Notes:', wo.completion_notes || '');
+                            if (notes === null) return;
+                            const updated = await api(`/api/complaints/work-orders/${wo.id}`, {
+                              method: 'PATCH',
+                              body: JSON.stringify({
+                                assigned_crew: crew,
+                                priority: prio,
+                                asset_id: asset,
+                                estimated_cost: cost,
+                                completion_notes: notes,
+                              }),
+                            });
+                            setWoList((prev) => prev.map((x) => (x.id === wo.id ? updated : x)));
+                            showToast('Work order details saved', 'ok');
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="btn sm danger"
+                          onClick={async () => {
+                            if (!window.confirm(`Delete work order ${wo.work_order_number}?`)) return;
+                            await api(`/api/complaints/work-orders/${wo.id}`, { method: 'DELETE' });
+                            setWoList((prev) => prev.filter((x) => x.id !== wo.id));
+                            showToast('Work order deleted', 'ok');
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

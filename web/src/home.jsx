@@ -2394,6 +2394,9 @@ function CalendarPublicTab({ features = {} }) {
   const [msg, setMsg] = useState({ text: '', isError: false });
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [lastReservation, setLastReservation] = useState(null);
+  const [resLookupNum, setResLookupNum] = useState('');
+  const [resLookupRes, setResLookupRes] = useState(null);
+  const [resLookupErr, setResLookupErr] = useState('');
 
   useEffect(() => {
     fetch('/api/payments/config')
@@ -2756,6 +2759,44 @@ function CalendarPublicTab({ features = {} }) {
               </div>
             )}
           </form>
+
+          <div style={{ marginTop: '1rem', paddingTop: '.85rem', borderTop: '1px solid #e2e8f0', maxWidth: 680 }}>
+            <strong style={{ fontSize: '.92rem', display: 'block', marginBottom: '.4rem' }}>Check Existing Reservation Status</strong>
+            <form
+              className="row"
+              style={{ gap: '.5rem' }}
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setResLookupErr('');
+                setResLookupRes(null);
+                try {
+                  const r = await fetch(`/api/calendar/reservations/public-lookup?reservation_number=${encodeURIComponent(resLookupNum.trim())}`);
+                  const d = await r.json().catch(() => ({}));
+                  if (!r.ok) throw new Error(d.detail || 'Reservation not found');
+                  setResLookupRes(d);
+                } catch (ex) {
+                  setResLookupErr(ex.message || 'Not found');
+                }
+              }}
+            >
+              <input
+                placeholder="Enter Reservation # (e.g. RES-2026-0001)"
+                value={resLookupNum}
+                onChange={(e) => setResLookupNum(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <button type="submit" className="btn sm">Check Status</button>
+            </form>
+            {resLookupErr && <div className="error-msg" style={{ marginTop: '.4rem' }}>{resLookupErr}</div>}
+            {resLookupRes && (
+              <div style={{ marginTop: '.5rem', padding: '.6rem', border: '1px solid #cbd5e1', borderRadius: 6, background: '#f8fafc', fontSize: '.88rem' }}>
+                <strong>{resLookupRes.reservation_number}</strong> — {resLookupRes.facility_name} on {resLookupRes.event_date}{' '}
+                <span className="badge draft">{resLookupRes.status}</span>{' '}
+                <span className="badge">{resLookupRes.payment_status} ({resLookupRes.fee_amount || '$0'})</span>
+                {resLookupRes.staff_notes && <div className="muted" style={{ marginTop: '.25rem' }}>Staff note: {resLookupRes.staff_notes}</div>}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -2985,6 +3026,9 @@ function NotifyMeCard() {
   const [msg, setMsg] = useState({ text: '', isError: false });
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [lastReservation, setLastReservation] = useState(null);
+  const [resLookupNum, setResLookupNum] = useState('');
+  const [resLookupRes, setResLookupRes] = useState(null);
+  const [resLookupErr, setResLookupErr] = useState('');
 
   useEffect(() => {
     fetch('/api/payments/config')

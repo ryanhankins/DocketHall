@@ -353,6 +353,16 @@ def submit_public_foia_request(body: FoiaRequestIn):
             f"UPDATE public_records_requests SET request_number = %s WHERE id = %s RETURNING {_FOIA_COLS}",
             (final_num, row[0]),
         ).fetchone()
+    try:
+        from .integrations import send_notification_email
+        send_notification_email(
+            "records_foia",
+            f"[DocketHall] New FOIA Request {full[1]}: {subj}",
+            f"Requester: {name} ({body.requester_email.strip() or 'no email'})\nDue: {due}\n\n{body.description.strip()}",
+            link_path="/app#records",
+        )
+    except Exception:
+        pass
     return {
         "request_number": full[1],
         "subject": full[5],
@@ -485,6 +495,14 @@ def update_foia_request(
         if not row:
             raise HTTPException(status_code=404, detail="Records request not found")
     record_audit(user["username"], "records.foia_update", f"Updated {row[1]} -> {row[8]}")
+    if row[3] and "@" in row[3] and body.status in ("ready", "fulfilled", "denied"):
+        from .integrations import send_direct_email
+        send_direct_email(
+            [row[3]],
+            f"[DocketHall] Public Records Request {row[1]} — {row[8].replace('_', ' ').title()}",
+            f"Hello {row[2]},\n\nYour public records request ({row[1]}: {row[5]}) is now marked '{row[8]}'.\n\n{row[12] or ''}",
+            link_path="/#records",
+        )
     return _row_to_foia(row)
 
 
@@ -588,6 +606,8 @@ def update_record(
     if body.status is not None and body.status not in RECORD_STATUSES:
         raise HTTPException(status_code=400, detail="Invalid status")
     with pool.connection() as conn:
+        prev = conn.execute("SELECT is_public FROM repository_documents WHERE id = %s", (doc_id,)).fetchone()
+        was_public = bool(prev and prev[0])
         row = conn.execute(
             "UPDATE repository_documents SET "
             "doc_number = COALESCE(%s, doc_number), "
@@ -622,7 +642,14 @@ def update_record(
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Repository record not found")
-        return _get_record_or_404(conn, doc_id)
+        rec = _get_record_or_404(conn, doc_id)
+    if not was_public and rec.get("is_public"):
+        try:
+            from .subscriptions import notify_topic_subscribers
+            notify_topic_subscribers("records", f"New Public Record: {rec['title']}", f"{rec['category']} — {rec['title']}", link_path="/#records")
+        except Exception:
+            pass
+    return rec
 
 
 @router.delete("/{doc_id}")

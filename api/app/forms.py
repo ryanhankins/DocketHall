@@ -439,6 +439,15 @@ def submit_public_form(form_id: int, body: FormSubmitIn, request: Request):
         link_path="/app#forms-manage",
         request=request,
     )
+    if semail and "@" in semail:
+        from .integrations import send_direct_email
+        send_direct_email(
+            [semail],
+            f"[DocketHall] Confirmation: {f_row[2]}",
+            f"Hello {sname or 'Resident'},\n\nThank you for submitting '{f_row[2]}'. Your confirmation ID is #{s_row[0]}.",
+            link_path="/#forms",
+            request=request,
+        )
     return {
         "id": s_row[0],
         "form_id": form_id,

@@ -244,6 +244,7 @@ def create_notice(
 def update_notice(
     notice_id: int,
     body: NoticePatch,
+    request: Request,
     user: dict = Depends(require_permission("notices.manage")),
 ):
     exp_date = _parse_optional_date(body.expires_at) if body.expires_at is not None else None
@@ -251,6 +252,8 @@ def update_notice(
     clear_exp = body.expires_at is not None and not body.expires_at.strip()
     clear_dead = body.deadline_at is not None and not body.deadline_at.strip()
     with pool.connection() as conn:
+        prev = conn.execute("SELECT is_published FROM city_notices WHERE id = %s", (notice_id,)).fetchone()
+        was_published = bool(prev and prev[0])
         row = conn.execute(
             f"UPDATE city_notices SET "
             "title = COALESCE(%s, title), "
@@ -286,6 +289,14 @@ def update_notice(
         if not row:
             raise HTTPException(status_code=404, detail="Notice not found")
     record_audit(user["username"], "notice.update", f"Updated notice #{notice_id}")
+    if not was_published and row[14]:
+        send_notification_email(
+            "notices_published",
+            f"[DocketHall] {row[1]}",
+            f"A {row[2].replace('_', ' ')} was published: {row[1]}\n\n{row[3] or ''}",
+            link_path="/#notices",
+            request=request,
+        )
     return _row_to_notice(row)
 
 
@@ -364,13 +375,13 @@ class NoticeResponseIn(BaseModel):
 
 
 @router.post("/public/{notice_id}/respond", status_code=201)
-def submit_notice_response(notice_id: int, body: NoticeResponseIn):
+def submit_notice_response(notice_id: int, body: NoticeResponseIn, request: Request):
     name = body.applicant_name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Your name is required")
     with pool.connection() as conn:
         n = conn.execute(
-            "SELECT id, category, is_published FROM city_notices WHERE id = %s",
+            "SELECT id, category, is_published, title FROM city_notices WHERE id = %s",
             (notice_id,),
         ).fetchone()
         if not n or not n[2]:
@@ -393,6 +404,13 @@ def submit_notice_response(notice_id: int, body: NoticeResponseIn):
                 body.cover_note.strip(),
             ),
         ).fetchone()
+    send_notification_email(
+        "notices_published",
+        f"[DocketHall] New {'Job Application' if n[1] == 'job' else 'Bid Plan-Holder'}: {n[3]}",
+        f"Submitted by {name} ({body.applicant_email.strip() or body.applicant_phone.strip() or 'no contact'}).",
+        link_path="/app#notices-manage",
+        request=request,
+    )
     return {
         "id": row[0],
         "notice_id": row[1],

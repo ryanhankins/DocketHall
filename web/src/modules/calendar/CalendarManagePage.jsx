@@ -25,6 +25,7 @@ export default function CalendarManagePage() {
   const [reservations, setReservations] = useState([]);
   const [events, setEvents] = useState([]);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [editingEvId, setEditingEvId] = useState(null);
 
   const [evForm, setEvForm] = useState({
     title: '',
@@ -97,6 +98,8 @@ export default function CalendarManagePage() {
                     <td>
                       <div><strong>{r.facility_name}</strong></div>
                       {r.event_title && <div className="muted" style={{ fontSize: '.82rem' }}>{r.event_title}</div>}
+                      {r.notes && <div className="muted" style={{ fontSize: '.78rem' }}>Note: {r.notes}</div>}
+                      {r.staff_notes && <div style={{ fontSize: '.78rem', color: '#0369a1' }}>Staff: {r.staff_notes}</div>}
                     </td>
                     <td>
                       <div>{r.event_date}</div>
@@ -177,6 +180,40 @@ export default function CalendarManagePage() {
                         )}
                         <button
                           type="button"
+                          className="btn sm"
+                          onClick={async () => {
+                            const fee = window.prompt(`Fee amount for ${r.reservation_number}:`, r.fee_amount || '');
+                            if (fee === null) return;
+                            const snote = window.prompt(`Staff notes for ${r.reservation_number}:`, r.staff_notes || '');
+                            if (snote === null) return;
+                            await api(`/api/calendar/reservations/${r.id}`, {
+                              method: 'PATCH',
+                              body: JSON.stringify({ fee_amount: fee, staff_notes: snote }),
+                            });
+                            showToast(`Updated ${r.reservation_number}`, 'ok');
+                            await loadAll();
+                          }}
+                        >
+                          Edit Notes/Fee
+                        </button>
+                        {r.status !== 'cancelled' && (
+                          <button
+                            type="button"
+                            className="btn sm"
+                            onClick={async () => {
+                              await api(`/api/calendar/reservations/${r.id}`, {
+                                method: 'PATCH',
+                                body: JSON.stringify({ status: 'cancelled' }),
+                              });
+                              showToast(`${r.reservation_number} cancelled`, 'ok');
+                              await loadAll();
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        )}
+                        <button
+                          type="button"
                           className="btn sm danger"
                           onClick={async () => {
                             if (!confirm(`Delete reservation ${r.reservation_number}?`)) return;
@@ -204,10 +241,20 @@ export default function CalendarManagePage() {
             onSubmit={async (e) => {
               e.preventDefault();
               try {
-                await api('/api/calendar/events', {
-                  method: 'POST',
-                  body: JSON.stringify(evForm),
-                });
+                if (editingEvId) {
+                  await api(`/api/calendar/events/${editingEvId}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify(evForm),
+                  });
+                  showToast('Calendar event updated', 'ok');
+                } else {
+                  await api('/api/calendar/events', {
+                    method: 'POST',
+                    body: JSON.stringify(evForm),
+                  });
+                  showToast('Calendar event added', 'ok');
+                }
+                setEditingEvId(null);
                 setEvForm({
                   title: '',
                   event_date: '',
@@ -218,7 +265,6 @@ export default function CalendarManagePage() {
                   description: '',
                   is_public: true,
                 });
-                showToast('Calendar event added', 'ok');
                 await loadAll();
               } catch (err) {
                 showToast(err.message, 'error');
@@ -247,21 +293,41 @@ export default function CalendarManagePage() {
               </div>
             </div>
             <div className="row">
-              <div className="field" style={{ minWidth: 130 }}>
-                <label>Start Time (optional)</label>
+              <div className="field" style={{ minWidth: 120 }}>
+                <label>Start Time</label>
                 <input placeholder="e.g. 9:00 AM" value={evForm.start_time} onChange={(e) => setEvForm(f => ({ ...f, start_time: e.target.value }))} />
               </div>
-              <div className="field" style={{ flex: 1, minWidth: 180 }}>
-                <label>Location (optional)</label>
+              <div className="field" style={{ minWidth: 120 }}>
+                <label>End Time</label>
+                <input placeholder="e.g. 5:00 PM" value={evForm.end_time} onChange={(e) => setEvForm(f => ({ ...f, end_time: e.target.value }))} />
+              </div>
+              <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                <label>Location</label>
                 <input placeholder="e.g. Community Center" value={evForm.location} onChange={(e) => setEvForm(f => ({ ...f, location: e.target.value }))} />
               </div>
-              <div className="field" style={{ flex: 2, minWidth: 220 }}>
+              <div className="field" style={{ flex: 2, minWidth: 200 }}>
                 <label>Notes / Description</label>
                 <input value={evForm.description} onChange={(e) => setEvForm(f => ({ ...f, description: e.target.value }))} />
               </div>
             </div>
-            <div>
-              <button type="submit" className="btn sm primary">Add Calendar Event</button>
+            <div className="actions" style={{ alignItems: 'center' }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem', marginRight: '.5rem' }}>
+                <input type="checkbox" checked={!!evForm.is_public} onChange={(e) => setEvForm(f => ({ ...f, is_public: e.target.checked }))} />
+                Public Event
+              </label>
+              <button type="submit" className="btn sm primary">{editingEvId ? 'Save Event' : 'Add Calendar Event'}</button>
+              {editingEvId && (
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={() => {
+                    setEditingEvId(null);
+                    setEvForm({ title: '', event_date: '', start_time: '', end_time: '', location: '', category: 'Community Event', description: '', is_public: true });
+                  }}
+                >
+                  Cancel Edit
+                </button>
+              )}
             </div>
           </form>
 
@@ -270,7 +336,7 @@ export default function CalendarManagePage() {
           ) : (
             <table>
               <thead>
-                <tr><th>Date</th><th>Title</th><th>Category</th><th>Time / Location</th><th>Action</th></tr>
+                <tr><th>Date</th><th>Title</th><th>Category</th><th>Time / Location</th><th>Visibility</th><th>Action</th></tr>
               </thead>
               <tbody>
                 {events.map((ev) => (
@@ -278,18 +344,40 @@ export default function CalendarManagePage() {
                     <td>{ev.event_date}</td>
                     <td><strong>{ev.title}</strong></td>
                     <td><span className="badge draft">{ev.category}</span></td>
-                    <td className="muted">{[ev.start_time, ev.location].filter(Boolean).join(' · ') || '—'}</td>
+                    <td className="muted">{[[ev.start_time, ev.end_time].filter(Boolean).join('–'), ev.location].filter(Boolean).join(' · ') || '—'}</td>
+                    <td><span className={`badge ${ev.is_public ? 'active' : 'draft'}`}>{ev.is_public ? 'Public' : 'Internal'}</span></td>
                     <td>
-                      <button
-                        type="button"
-                        className="btn sm danger"
-                        onClick={async () => {
-                          await api(`/api/calendar/events/${ev.id}`, { method: 'DELETE' });
-                          await loadAll();
-                        }}
-                      >
-                        Remove
-                      </button>
+                      <div className="actions">
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={() => {
+                            setEditingEvId(ev.id);
+                            setEvForm({
+                              title: ev.title || '',
+                              event_date: ev.event_date || '',
+                              start_time: ev.start_time || '',
+                              end_time: ev.end_time || '',
+                              location: ev.location || '',
+                              category: ev.category || 'Community Event',
+                              description: ev.description || '',
+                              is_public: ev.is_public !== false,
+                            });
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="btn sm danger"
+                          onClick={async () => {
+                            await api(`/api/calendar/events/${ev.id}`, { method: 'DELETE' });
+                            await loadAll();
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -363,6 +363,21 @@ export default function FormsManagePage() {
                       >
                         PDF
                       </a>
+                      <div style={{ marginTop: '.35rem' }}>
+                        <input
+                          style={{ fontSize: '.78rem', padding: '3px 6px', width: 170 }}
+                          placeholder="Staff notes…"
+                          defaultValue={s.staff_notes || ''}
+                          onBlur={async (e) => {
+                            const val = e.target.value;
+                            if (val === (s.staff_notes || '')) return;
+                            await api(`/api/forms/submissions/${s.id}`, {
+                              method: 'PATCH',
+                              body: JSON.stringify({ staff_notes: val }),
+                            });
+                          }}
+                        />
+                      </div>
                     </td>
                   </tr>
                 ))}

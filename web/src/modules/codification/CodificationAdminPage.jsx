@@ -331,10 +331,61 @@ export default function CodificationAdminPage() {
 
       {chapters.map(c => (
         <details key={c.id} className="card" open={!!search.trim()}>
-          <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '.6rem' }}>
-            <span className="badge active">{c.code_prefix}</span>
-            <span>{c.title}</span>
-            <span className="muted" style={{ fontWeight: 400 }}>({(c.sections || []).length} sections)</span>
+          <summary style={{ cursor: 'pointer', fontWeight: 700, fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '.6rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem' }}>
+              <span className="badge active">{c.code_prefix}</span>
+              <span>{c.title}</span>
+              <span className="badge draft">{c.is_published !== false ? 'Published' : 'Hidden'}</span>
+              <span className="muted" style={{ fontWeight: 400 }}>({(c.sections || []).length} sections)</span>
+            </div>
+            <div className="actions" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                className="btn sm"
+                onClick={async (e) => {
+                  e.preventDefault();
+                  const prefix = window.prompt('Chapter Prefix:', c.code_prefix || '');
+                  if (prefix === null) return;
+                  const title = window.prompt('Chapter Title:', c.title || '');
+                  if (title === null) return;
+                  await api(`/api/codification/chapters/${c.id}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ code_prefix: prefix.trim(), title: title.trim() }),
+                  });
+                  showToast('Chapter updated', 'ok');
+                  await loadAll();
+                }}
+              >
+                Edit Chapter
+              </button>
+              <button
+                type="button"
+                className="btn sm"
+                onClick={async (e) => {
+                  e.preventDefault();
+                  await api(`/api/codification/chapters/${c.id}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ is_published: c.is_published === false }),
+                  });
+                  await loadAll();
+                }}
+              >
+                {c.is_published !== false ? 'Hide' : 'Publish'}
+              </button>
+              <button
+                type="button"
+                className="btn sm danger"
+                onClick={async (e) => {
+                  e.preventDefault();
+                  if (!window.confirm(`Delete chapter "${c.code_prefix} — ${c.title}" and all its sections?`)) return;
+                  await api(`/api/codification/chapters/${c.id}`, { method: 'DELETE' });
+                  showToast('Chapter deleted', 'ok');
+                  await loadAll();
+                }}
+              >
+                Delete
+              </button>
+            </div>
           </summary>
           <div style={{ marginTop: '.85rem' }}>
             <table>
