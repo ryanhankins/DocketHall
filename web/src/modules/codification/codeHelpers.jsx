@@ -21,6 +21,31 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+export function slugifyAnchor(raw) {
+  const clean = String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return clean ? `sub-${clean}` : 'sub-item';
+}
+
+const MINOR_WORDS = new Set(['a', 'an', 'and', 'as', 'at', 'by', 'for', 'from', 'in', 'of', 'on', 'or', 'the', 'to', 'with']);
+
+function toReadableHeading(raw) {
+  const clean = String(raw || '').replace(/[.:]+$/, '').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  if (clean !== clean.toUpperCase()) return clean;
+  const words = clean.split(' ');
+  return words
+    .map((w, idx) => {
+      const lw = w.toLowerCase();
+      if (idx > 0 && idx < words.length - 1 && MINOR_WORDS.has(lw)) return lw;
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
 export function HighlightText({ text, query }) {
   const str = String(text || '');
   const q = String(query || '').trim();
@@ -67,6 +92,7 @@ export function buildSectionMap(chapters) {
       if (key) {
         map.set(key, {
           ...sec,
+          chapter_id: ch.id,
           chapter_prefix: ch.code_prefix,
           chapter_title: ch.title,
         });
@@ -76,7 +102,95 @@ export function buildSectionMap(chapters) {
   return map;
 }
 
-const CROSS_REF_RE = /((?:§+|Sections?|Secs?\.?)\s*([0-9]+(?:\.[0-9A-Za-z-]+)*))/gi;
+const ARTICLE_BLOCK_RE = /^(ARTICLE|DIVISION|PART)\s+([IVXLCM0-9]+)\.?\s*(?:[-–—.]\s*)?(.*)$/i;
+const SUBSECTION_PUNCT_RE = /^((?:Sec(?:tion)?\.?|§)\s*[0-9]+(?:[-.][0-9A-Za-z]+)*|\d{2,4}\.\d{2,4}[A-Za-z]?|\d{1,3}-\d{1,4}[A-Za-z]?)\.?\s+([A-Z][A-Za-z0-9\s,&/'()-]{1,90}?[.:])\s*(.*)$/;
+const SUBSECTION_CAPS_RE = /^(\d{2,4}\.\d{2,4}[A-Za-z]?|\d{1,3}-\d{1,4}[A-Za-z]?)\.?\s+([A-Z][A-Z0-9\s,&/'()-]{2,80}?)\s+(?=[A-Z][a-z])(.*)$/;
+const SUBD_HEAD_RE = /^(Subd(?:ivision)?\.?\s*\d+[A-Za-z]?)\.?\s+([A-Z][A-Za-z0-9\s,&/'()-]{1,80}?[.:])\s*(.*)$/i;
+const HISTORY_BLOCK_RE = /^["'(]?(?:AMENDED|ADOPTED|ENACTED|REPEALED|ADDED|UPDATED)\s+BY\s+ORD|^\((?:Ord\.?|Code\s+\d{4}|Prior\s+Code|Res\.?|State\s+Law)/i;
+const ORDAINING_BLOCK_RE = /^The\s+(?:City\s+)?Council\s+of\s+.+does\s+ordain/i;
+const CLAUSE_L1_RE = /^(\([a-z]{1,2}\)|Subd\.?\s*\d+\.?|[A-Z]\.)\s+(.*)$/i;
+const CLAUSE_L2_RE = /^(\(\d{1,3}\)|\d{1,3}\.)\s+(.*)$/;
+const CLAUSE_L3_RE = /^(\([A-Z]{1,2}\)|\([ivxlcdm]{1,5}\)|[•●▪▫◦-])\s+(.*)$/;
+
+export function parseStructuredCodeBody(body) {
+  const raw = String(body || '').trim();
+  if (!raw) return [];
+  const rawBlocks = raw.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+  const out = [];
+
+  for (const block of rawBlocks) {
+    let m;
+    if ((m = block.match(ARTICLE_BLOCK_RE))) {
+      out.push({
+        type: 'article',
+        label: `${m[1].toUpperCase()} ${m[2].toUpperCase()}${m[3]?.trim() ? ` — ${toReadableHeading(m[3])}` : ''}`,
+        raw: block,
+      });
+      continue;
+    }
+
+    if ((m = block.match(HISTORY_BLOCK_RE))) {
+      out.push({ type: 'history', text: block });
+      continue;
+    }
+
+    if (ORDAINING_BLOCK_RE.test(block)) {
+      out.push({ type: 'ordaining', text: block });
+      continue;
+    }
+
+    if ((m = block.match(SUBSECTION_PUNCT_RE)) || (m = block.match(SUBD_HEAD_RE)) || (m = block.match(SUBSECTION_CAPS_RE))) {
+      const num = m[1].trim();
+      const heading = m[2].trim();
+      const rest = (m[3] || '').trim();
+      out.push({
+        type: 'subsection',
+        id: slugifyAnchor(num),
+        number: num,
+        heading,
+        readableHeading: toReadableHeading(heading),
+        text: rest,
+      });
+      continue;
+    }
+
+    if ((m = block.match(CLAUSE_L3_RE))) {
+      // Distinguish Roman numeral or uppercase paren (A) from lowercase (a) when needed
+      if (/^\([a-z]\)/.test(m[1]) && !/^\([ivx]+\)$/.test(m[1])) {
+        out.push({ type: 'clause', level: 1, marker: m[1], text: m[2] });
+      } else {
+        out.push({ type: 'clause', level: 3, marker: m[1], text: m[2] });
+      }
+      continue;
+    }
+
+    if ((m = block.match(CLAUSE_L2_RE))) {
+      out.push({ type: 'clause', level: 2, marker: m[1], text: m[2] });
+      continue;
+    }
+
+    if ((m = block.match(CLAUSE_L1_RE))) {
+      out.push({ type: 'clause', level: 1, marker: m[1], text: m[2] });
+      continue;
+    }
+
+    out.push({ type: 'paragraph', text: block });
+  }
+  return out;
+}
+
+export function extractSubsectionsForToc(section) {
+  const blocks = parseStructuredCodeBody(section?.body || '');
+  return blocks
+    .filter((b) => b.type === 'subsection')
+    .map((b) => ({
+      id: b.id,
+      number: b.number,
+      label: b.readableHeading || b.heading,
+    }));
+}
+
+const CROSS_REF_RE = /((?:§+|Sections?|Secs?\.?|Chapters?|Ch\.?)\s*([0-9]+(?:[-.][0-9A-Za-z]+)*))/gi;
 
 export function LinkedCodeBody({ text, sectionMap, currentSectionId, onSelectSection, query }) {
   const str = String(text || '');
@@ -88,8 +202,14 @@ export function LinkedCodeBody({ text, sectionMap, currentSectionId, onSelectSec
   while ((match = CROSS_REF_RE.exec(str)) !== null) {
     const fullMatch = match[1];
     const refNum = match[2].toLowerCase();
-    const target = sectionMap?.get(refNum);
-    if (!target || target.id === currentSectionId) continue;
+    let target = sectionMap?.get(refNum);
+    let anchorId = null;
+    if (!target && refNum.includes('.')) {
+      const baseNum = refNum.split('.')[0];
+      target = sectionMap?.get(baseNum);
+      if (target) anchorId = slugifyAnchor(refNum);
+    }
+    if (!target || (target.id === currentSectionId && !anchorId)) continue;
     if (match.index > lastIdx) {
       nodes.push(
         <HighlightText key={`t-${lastIdx}`} text={str.slice(lastIdx, match.index)} query={query} />,
@@ -102,7 +222,7 @@ export function LinkedCodeBody({ text, sectionMap, currentSectionId, onSelectSec
         className="link-btn"
         style={{ display: 'inline', padding: 0, font: 'inherit', fontWeight: 600 }}
         title={`Jump to Section ${target.section_number}: ${target.title}`}
-        onClick={() => onSelectSection(target)}
+        onClick={() => onSelectSection?.(target, anchorId)}
       >
         <HighlightText text={fullMatch} query={query} />
       </button>,
@@ -113,4 +233,106 @@ export function LinkedCodeBody({ text, sectionMap, currentSectionId, onSelectSec
     nodes.push(<HighlightText key={`t-${lastIdx}`} text={str.slice(lastIdx)} query={query} />);
   }
   return <>{nodes}</>;
+}
+
+export function StructuredCodeBody({
+  text,
+  sectionMap,
+  currentSectionId,
+  onSelectSection,
+  query = '',
+  onCopyAnchor,
+}) {
+  const blocks = parseStructuredCodeBody(text);
+  if (!blocks.length) return null;
+  return (
+    <div className="muni-body">
+      {blocks.map((blk, idx) => {
+        if (blk.type === 'article') {
+          return (
+            <h4 key={idx} className="muni-article-heading">
+              <HighlightText text={blk.label} query={query} />
+            </h4>
+          );
+        }
+        if (blk.type === 'history') {
+          return (
+            <p key={idx} className="muni-history">
+              <HighlightText text={blk.text} query={query} />
+            </p>
+          );
+        }
+        if (blk.type === 'ordaining') {
+          return (
+            <p key={idx} className="muni-ordaining">
+              <HighlightText text={blk.text} query={query} />
+            </p>
+          );
+        }
+        if (blk.type === 'subsection') {
+          return (
+            <div key={idx} id={blk.id} className="muni-subsection">
+              <div className="muni-subsection-head">
+                <strong className="muni-sub-num">
+                  <HighlightText text={blk.number} query={query} />
+                </strong>{' '}
+                <strong className="muni-sub-title">
+                  <HighlightText text={blk.heading} query={query} />
+                </strong>
+                {onCopyAnchor && (
+                  <button
+                    type="button"
+                    className="muni-anchor-btn"
+                    title={`Copy direct link to ${blk.number}`}
+                    aria-label={`Copy link to subsection ${blk.number}`}
+                    onClick={() => onCopyAnchor(blk.id)}
+                  >
+                    #
+                  </button>
+                )}
+              </div>
+              {blk.text && (
+                <p className="muni-subsection-text">
+                  <LinkedCodeBody
+                    text={blk.text}
+                    sectionMap={sectionMap}
+                    currentSectionId={currentSectionId}
+                    onSelectSection={onSelectSection}
+                    query={query}
+                  />
+                </p>
+              )}
+            </div>
+          );
+        }
+        if (blk.type === 'clause') {
+          return (
+            <div key={idx} className={`muni-clause muni-clause-l${blk.level}`}>
+              <span className="muni-clause-marker">{blk.marker}</span>
+              <div className="muni-clause-body">
+                <LinkedCodeBody
+                  text={blk.text}
+                  sectionMap={sectionMap}
+                  currentSectionId={currentSectionId}
+                  onSelectSection={onSelectSection}
+                  query={query}
+                />
+              </div>
+            </div>
+          );
+        }
+        return (
+          <p key={idx} className="muni-para">
+            <LinkedCodeBody
+              text={blk.text}
+              sectionMap={sectionMap}
+              currentSectionId={currentSectionId}
+              onSelectSection={onSelectSection}
+              query={query}
+            />
+          </p>
+        );
+      })}
+    </div>
+  );
 }

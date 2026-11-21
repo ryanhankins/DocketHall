@@ -18,9 +18,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { api, formatDate } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
+import { StructuredCodeBody, buildSectionMap } from './codeHelpers.jsx';
 
-function SectionEditor({ section, onBack, onSaved }) {
+function SectionEditor({ section, allSectionsMap, onBack, onSaved }) {
   const [secNum, setSecNum] = useState(section.section_number);
+  const [article, setArticle] = useState(section.article || '');
   const [title, setTitle] = useState(section.title);
   const [ordinance, setOrdinance] = useState(section.ordinance_ref || '');
   const [effDate, setEffDate] = useState(section.effective_date || '');
@@ -31,6 +33,7 @@ function SectionEditor({ section, onBack, onSaved }) {
   const [changeSummary, setChangeSummary] = useState('');
   const [revisions, setRevisions] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
   const showToast = useToast();
 
   const loadRevisions = useCallback(async () => {
@@ -50,6 +53,7 @@ function SectionEditor({ section, onBack, onSaved }) {
         method: 'PATCH',
         body: JSON.stringify({
           section_number: secNum.trim(),
+          article: article.trim(),
           title: title.trim(),
           ordinance_ref: ordinance.trim(),
           effective_date: effDate.trim(),
@@ -80,22 +84,26 @@ function SectionEditor({ section, onBack, onSaved }) {
         </div>
         <div className="actions">
           <a className="btn sm" href={`/api/codification/sections/${section.id}/pdf`} target="_blank" rel="noreferrer">View Section PDF</a>
-          <a className="btn sm" href="/code" target="_blank" rel="noreferrer">Public City Code</a>
+          <a className="btn sm" href={`/code?sec=${encodeURIComponent(section.section_number)}`} target="_blank" rel="noreferrer">Public Reader</a>
         </div>
       </div>
 
       <div className="card">
         <form onSubmit={handleSave}>
           <div className="row" style={{ marginBottom: '.75rem' }}>
-            <div className="field" style={{ minWidth: '120px' }}>
+            <div className="field" style={{ minWidth: '110px' }}>
               <label>Section #</label>
               <input required value={secNum} onChange={(e) => setSecNum(e.target.value)} />
             </div>
-            <div className="field" style={{ flex: 2, minWidth: '220px' }}>
+            <div className="field" style={{ flex: 2, minWidth: '210px' }}>
               <label>Section Title</label>
               <input required value={title} onChange={(e) => setTitle(e.target.value)} />
             </div>
             <div className="field" style={{ flex: 1, minWidth: '150px' }}>
+              <label>Article / Division (optional)</label>
+              <input placeholder="e.g. Article I — In General" value={article} onChange={(e) => setArticle(e.target.value)} />
+            </div>
+            <div className="field" style={{ minWidth: '130px' }}>
               <label>Ordinance Ref</label>
               <input placeholder="e.g. Ord. 2024-03" value={ordinance} onChange={(e) => setOrdinance(e.target.value)} />
             </div>
@@ -116,8 +124,66 @@ function SectionEditor({ section, onBack, onSaved }) {
           </div>
 
           <div className="field" style={{ marginBottom: '.75rem' }}>
-            <label>Codified Text</label>
-            <textarea rows={10} placeholder="Enter full codified ordinance text here..." value={body} onChange={(e) => setBody(e.target.value)} />
+            <div className="between" style={{ marginBottom: '.3rem' }}>
+              <label style={{ margin: 0 }}>Codified Text</label>
+              <div className="actions">
+                <button
+                  type="button"
+                  className={`btn sm${!previewMode ? ' primary' : ''}`}
+                  onClick={() => setPreviewMode(false)}
+                >
+                  Edit Text
+                </button>
+                <button
+                  type="button"
+                  className={`btn sm${previewMode ? ' primary' : ''}`}
+                  onClick={() => setPreviewMode(true)}
+                >
+                  Municode Preview
+                </button>
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={busy || !body.trim()}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      // Save current text briefly only if user wants clean reformat via API after or clean current DB body:
+                      const res = await api(`/api/codification/sections/${section.id}/reformat`, { method: 'POST' });
+                      if (res.body) {
+                        setBody(res.body);
+                        if (!ordinance.trim() && res.ordinance_ref) setOrdinance(res.ordinance_ref);
+                        if (!effDate.trim() && res.effective_date) setEffDate(res.effective_date);
+                        if (!changeSummary.trim()) setChangeSummary('Cleaned & formatted code structure');
+                        showToast(`Formatted (${res.subsection_count} subsections detected) — review and Save Section`, 'ok');
+                      }
+                    } catch (err) {
+                      showToast(err.message, 'error');
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  Clean &amp; Format Text
+                </button>
+              </div>
+            </div>
+            {previewMode ? (
+              <div style={{ border: '1px solid #cbd5e1', borderRadius: 6, padding: '1rem 1.25rem', background: '#fff', minHeight: 220 }}>
+                {body.trim() ? (
+                  <StructuredCodeBody
+                    text={body}
+                    sectionMap={allSectionsMap}
+                    currentSectionId={section.id}
+                    onSelectSection={() => {}}
+                  />
+                ) : (
+                  <p className="muted" style={{ margin: 0 }}>No body text yet.</p>
+                )}
+              </div>
+            ) : (
+              <textarea rows={12} placeholder="Enter full codified ordinance text here..." value={body} onChange={(e) => setBody(e.target.value)} />
+            )}
           </div>
 
           <div className="row" style={{ marginBottom: '.85rem', alignItems: 'center' }}>
@@ -144,8 +210,10 @@ function SectionEditor({ section, onBack, onSaved }) {
                     const res = await api(`/api/codification/sections/${section.id}/extract-pdf`, { method: 'POST' });
                     if (res.text) {
                       setBody(res.text);
-                      if (!changeSummary.trim()) setChangeSummary(`Imported text from PDF (${res.pages} page(s))`);
-                      showToast(`Extracted text from ${res.pages} PDF page(s) — review and click Save Section`, 'ok');
+                      if (!ordinance.trim() && res.ordinance_ref) setOrdinance(res.ordinance_ref);
+                      if (!effDate.trim() && res.effective_date) setEffDate(res.effective_date);
+                      if (!changeSummary.trim()) setChangeSummary(`Imported formatted text from PDF (${res.pages} page(s))`);
+                      showToast(`Extracted & formatted ${res.pages} PDF page(s) — review and click Save Section`, 'ok');
                     } else {
                       showToast('No extractable text found in PDF (it may be a scanned image)', 'error');
                     }
@@ -168,9 +236,17 @@ function SectionEditor({ section, onBack, onSaved }) {
                   if (!f) return;
                   const fd = new FormData();
                   fd.append('file', f);
+                  fd.append('auto_extract', 'true');
                   try {
-                    await api(`/api/codification/sections/${section.id}/pdf`, { method: 'POST', body: fd });
-                    showToast('Official PDF uploaded', 'ok');
+                    const res = await api(`/api/codification/sections/${section.id}/pdf`, { method: 'POST', body: fd });
+                    if (res.extracted && res.body) {
+                      setBody(res.body);
+                      if (!ordinance.trim() && res.ordinance_ref) setOrdinance(res.ordinance_ref);
+                      if (!effDate.trim() && res.effective_date) setEffDate(res.effective_date);
+                      showToast(`PDF uploaded & auto-imported (${res.pages} page(s))`, 'ok');
+                    } else {
+                      showToast('Official PDF uploaded', 'ok');
+                    }
                     await loadRevisions();
                     await onSaved();
                   } catch (err) {
@@ -181,7 +257,7 @@ function SectionEditor({ section, onBack, onSaved }) {
                 }}
               />
               <button type="button" className="btn sm" onClick={() => document.getElementById(`sec-pdf-up-${section.id}`)?.click()}>
-                Upload Official PDF
+                Upload &amp; Auto-Extract PDF
               </button>
             </div>
           </div>
@@ -236,6 +312,14 @@ export default function CodificationAdminPage() {
   const [newSecTitle, setNewSecTitle] = useState('');
   const [editingChapter, setEditingChapter] = useState(null);
   const [savingChapter, setSavingChapter] = useState(false);
+  const [importFiles, setImportFiles] = useState([]);
+  const [importTargetChapId, setImportTargetChapId] = useState('');
+  const [importOverwrite, setImportOverwrite] = useState(true);
+  const [importPreview, setImportPreview] = useState(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [bulkOnlyEmpty, setBulkOnlyEmpty] = useState(true);
+  const [bulkReformat, setBulkReformat] = useState(true);
+  const [bulkResult, setBulkResult] = useState(null);
   const showToast = useToast();
 
   const loadCode = useCallback(async (q = '') => {
@@ -249,10 +333,63 @@ export default function CodificationAdminPage() {
     loadCode(search).catch(e => showToast(e.message, 'error'));
   }, [loadCode, search, showToast]);
 
+  const runPdfImport = async (commit) => {
+    if (!importFiles.length) return;
+    setImportBusy(true);
+    try {
+      const fd = new FormData();
+      for (const f of importFiles) fd.append('files', f);
+      fd.append('commit', String(commit));
+      fd.append('overwrite_existing', String(importOverwrite));
+      if (importTargetChapId) fd.append('target_chapter_id', importTargetChapId);
+      const res = await api('/api/codification/import-pdfs', { method: 'POST', body: fd });
+      if (!commit) {
+        setImportPreview(res);
+        showToast(`Analyzed ${res.files_processed} PDF(s) — ${res.total_sections} section(s) detected`, 'ok');
+      } else {
+        setImportPreview(null);
+        setImportFiles([]);
+        const inp = document.getElementById('codification-bulk-files');
+        if (inp) inp.value = '';
+        showToast(
+          `Imported: ${res.chapters_created} chapter(s) created, ${res.sections_created} section(s) created, ${res.sections_updated} updated`,
+          'ok',
+        );
+        await loadCode(search);
+      }
+    } catch (err) {
+      showToast(err.message || 'PDF import failed', 'error');
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const runBulkLinkedImport = async () => {
+    setImportBusy(true);
+    setBulkResult(null);
+    try {
+      const res = await api('/api/codification/import-linked-pdfs', {
+        method: 'POST',
+        body: JSON.stringify({
+          only_empty: bulkOnlyEmpty,
+          reformat_existing: bulkReformat,
+        }),
+      });
+      setBulkResult(res);
+      showToast(`Imported ${res.imported}, reformatted ${res.reformatted}`, 'ok');
+      await loadCode(search);
+    } catch (err) {
+      showToast(err.message || 'Linked PDF auto-import failed', 'error');
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
   if (editingSec) {
     return (
       <SectionEditor
         section={editingSec}
+        allSectionsMap={buildSectionMap(chapters)}
         onBack={() => setEditingSec(null)}
         onSaved={() => loadCode(search)}
       />
@@ -263,7 +400,114 @@ export default function CodificationAdminPage() {
     <section id="section-codification-admin">
       <div className="between" style={{ marginBottom: '1rem' }}>
         <h1 style={{ margin: 0 }}>City Code &amp; Codification</h1>
-        <a href="/code" target="_blank" rel="noreferrer" className="btn sm">Open Public City Code</a>
+        <a href="/code" target="_blank" rel="noreferrer" className="btn sm">Open Municode Public Reader</a>
+      </div>
+
+      <div className="card">
+        <h2 style={{ marginTop: 0 }}>Automatic PDF Import &amp; Municode Formatter</h2>
+        <p className="muted" style={{ marginTop: 0, fontSize: '.9rem' }}>
+          Upload either multiple per-section PDFs (e.g. <code>Section-101-Adoption.pdf</code>) or an entire multi-chapter Code of Ordinances PDF book. DocketHall strips running page headers, reflows wrapped lines, detects chapters/articles/subsections, and formats them into the Municode reader automatically.
+        </p>
+
+        <div className="row" style={{ alignItems: 'flex-end', marginBottom: '.75rem' }}>
+          <div className="field" style={{ flex: 2, minWidth: '240px' }}>
+            <label htmlFor="codification-bulk-files">Select PDF File(s)</label>
+            <input
+              id="codification-bulk-files"
+              type="file"
+              multiple
+              accept="application/pdf,.pdf"
+              onChange={(e) => {
+                setImportFiles(Array.from(e.target.files || []));
+                setImportPreview(null);
+              }}
+            />
+          </div>
+          <div className="field" style={{ flex: 1, minWidth: '180px' }}>
+            <label htmlFor="codification-import-target">Target Chapter</label>
+            <select id="codification-import-target" value={importTargetChapId} onChange={(e) => setImportTargetChapId(e.target.value)}>
+              <option value="">Auto-detect from PDFs / filenames</option>
+              {chapters.map(c => (
+                <option key={c.id} value={c.id}>{c.code_prefix} — {c.title}</option>
+              ))}
+            </select>
+          </div>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem', marginBottom: '.35rem', fontSize: '.88rem' }}>
+            <input type="checkbox" style={{ width: 'auto' }} checked={importOverwrite} onChange={(e) => setImportOverwrite(e.target.checked)} />
+            <span>Overwrite existing sections</span>
+          </label>
+          <div className="actions">
+            <button type="button" className="btn sm" disabled={importBusy || !importFiles.length} onClick={() => runPdfImport(false)}>
+              Analyze &amp; Preview
+            </button>
+            <button type="button" className="btn sm primary" disabled={importBusy || !importFiles.length} onClick={() => runPdfImport(true)}>
+              {importBusy ? 'Importing…' : 'Import Into City Code'}
+            </button>
+          </div>
+        </div>
+
+        {importPreview && (
+          <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, padding: '.85rem', background: '#f8fafc', marginBottom: '.85rem' }}>
+            <div className="between" style={{ marginBottom: '.5rem' }}>
+              <strong>
+                Preview: {importPreview.files_processed} file(s), {importPreview.total_sections} section(s) across {importPreview.chapters.length} chapter(s)
+              </strong>
+              <button type="button" className="btn sm" onClick={() => setImportPreview(null)}>Dismiss Preview</button>
+            </div>
+            {(importPreview.warnings || []).length > 0 && (
+              <div className="error-msg" style={{ marginBottom: '.5rem' }}>
+                {importPreview.warnings.join(' | ')}
+              </div>
+            )}
+            <div style={{ display: 'grid', gap: '.5rem', maxHeight: 320, overflowY: 'auto' }}>
+              {importPreview.chapters.map((ch, cIdx) => (
+                <div key={cIdx} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, padding: '.6rem .75rem' }}>
+                  <div style={{ fontWeight: 700, marginBottom: '.35rem' }}>
+                    <span className="badge active" style={{ marginRight: 6 }}>{ch.code_prefix}</span>
+                    {ch.title}
+                  </div>
+                  <div style={{ display: 'grid', gap: '.35rem' }}>
+                    {ch.sections.map((sec, sIdx) => (
+                      <details key={sIdx} style={{ fontSize: '.86rem' }}>
+                        <summary style={{ cursor: 'pointer' }}>
+                          <strong>§ {sec.section_number} — {sec.title}</strong>
+                          {sec.article ? ` (${sec.article})` : ''} · {sec.subsection_count} subsections
+                          {sec.ordinance_ref ? ` · ${sec.ordinance_ref}` : ''}
+                        </summary>
+                        <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: '.35rem 0 0', background: '#f8fafc', padding: '.45rem', borderRadius: 4 }}>
+                          {sec.body_preview || '(No extractable text)'}
+                        </pre>
+                      </details>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '.65rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '.6rem' }}>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', fontSize: '.86rem' }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
+              <input type="checkbox" style={{ width: 'auto' }} checked={bulkOnlyEmpty} onChange={(e) => setBulkOnlyEmpty(e.target.checked)} />
+              <span>Only import sections missing body text</span>
+            </label>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
+              <input type="checkbox" style={{ width: 'auto' }} checked={bulkReformat} onChange={(e) => setBulkReformat(e.target.checked)} />
+              <span>Clean &amp; reformat existing text</span>
+            </label>
+          </div>
+          <button type="button" className="btn sm" disabled={importBusy} onClick={runBulkLinkedImport}>
+            {importBusy ? 'Working…' : 'Auto-Import All Linked PDFs & Clean Text'}
+          </button>
+        </div>
+        {bulkResult && (
+          <div className="ok-msg" role="status">
+            Auto-import finished: <strong>{bulkResult.imported}</strong> imported from PDFs,{' '}
+            <strong>{bulkResult.reformatted}</strong> reformatted, <strong>{bulkResult.skipped}</strong> unchanged
+            {bulkResult.failed?.length ? `, ${bulkResult.failed.length} failed` : ''}.
+          </div>
+        )}
       </div>
 
       <div className="card">

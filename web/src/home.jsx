@@ -23,7 +23,7 @@ import ServiceIcon from './core/ServiceIcon.jsx';
 import CustomFieldsRenderer from './core/CustomFieldsRenderer.jsx';
 import { DocketHallLogo, DirectoryHeaderLink, PublicFooter, PublicHeader, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
-import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
+import MunicodeCodeViewer from './modules/codification/MunicodeCodeViewer.jsx';
 import { COMPLAINT_STATUSES, ORDINANCE_PRESETS, StatusBadge } from './modules/complaints/constants.jsx';
 
 const TAB_DEFS = [
@@ -1650,158 +1650,8 @@ function PermitsPublicTab({ me, onRequireAuth }) {
   );
 }
 
-function CodePublicTab() {
-  const [chapters, setChapters] = useState([]);
-  const [q, setQ] = useState('');
-  const [openChapterIds, setOpenChapterIds] = useState({});
-  const [activeSection, setActiveSection] = useState(null);
-  const [allSectionsMap, setAllSectionsMap] = useState(() => new Map());
-
-  useEffect(() => {
-    fetch('/api/codification/public')
-      .then((r) => (r.ok ? r.json() : { chapters: [] }))
-      .then((d) => setAllSectionsMap(buildSectionMap(d.chapters || [])))
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      const qs = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : '';
-      fetch(`/api/codification/public${qs}`, { signal: controller.signal })
-        .then((r) => (r.ok ? r.json() : { chapters: [] }))
-        .then((d) => {
-          const list = d.chapters || [];
-          setChapters(list);
-          if (q.trim()) {
-            const expanded = {};
-            for (const ch of list) expanded[ch.id] = true;
-            setOpenChapterIds(expanded);
-          }
-        })
-        .catch(() => {});
-    }, 200);
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [q]);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <div className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem' }}>
-            <ServiceIcon id="codification" size={20} badge />
-            <div>
-              <h2 style={{ margin: 0 }}>Municipal City Code</h2>
-              <p className="muted" style={{ margin: '4px 0 0' }}>Search chapters, read ordinance sections, or open official section PDFs.</p>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <input
-              style={{ maxWidth: 320 }}
-              placeholder="Search section #, title, or text…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-            />
-            <a className="btn sm" href="/api/codification/public/full.pdf?download=1" target="_blank" rel="noreferrer">
-              Full Code PDF
-            </a>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: activeSection ? '1fr 1.4fr' : '1fr', gap: '1rem', alignItems: 'start' }}>
-        <div className="card">
-          {!chapters.length ? (
-            <p className="muted">No code chapters match your search.</p>
-          ) : chapters.map((ch) => {
-            const isOpen = !!openChapterIds[ch.id];
-            return (
-              <div key={ch.id} style={{ borderBottom: '1px solid #e5e7eb', padding: '8px 0' }}>
-                <button
-                  type="button"
-                  onClick={() => setOpenChapterIds((prev) => ({ ...prev, [ch.id]: !prev[ch.id] }))}
-                  style={{ width: '100%', textAlign: 'left', background: 'none', border: 0, cursor: 'pointer', fontWeight: 600, fontSize: '1rem', padding: '4px 0', display: 'flex', justifyContent: 'space-between' }}
-                >
-                  <span>{ch.code_prefix} — {ch.title}</span>
-                  <span>{isOpen ? '▾' : '▸'}</span>
-                </button>
-                {isOpen && (
-                  <ul style={{ listStyle: 'none', padding: '4px 0 0 12px', margin: 0, display: 'grid', gap: 4 }}>
-                    {(ch.sections || []).map((sec) => {
-                      const snippet = getSearchSnippet(sec, q);
-                      return (
-                        <li key={sec.id}>
-                          <button
-                            type="button"
-                            onClick={() => setActiveSection({ ...sec, chapter_prefix: ch.code_prefix, chapter_title: ch.title })}
-                            style={{
-                              background: activeSection?.id === sec.id ? '#eff6ff' : 'transparent',
-                              border: 0,
-                              borderRadius: 4,
-                              padding: '4px 6px',
-                              textAlign: 'left',
-                              width: '100%',
-                              cursor: 'pointer',
-                            }}
-                          >
-                            <div>
-                              <strong>Sec. <HighlightText text={sec.section_number} query={q} /></strong> — <HighlightText text={sec.title} query={q} />
-                            </div>
-                            {snippet && (
-                              <div className="muted" style={{ fontSize: '.8rem', marginTop: 2 }}>
-                                <HighlightText text={snippet} query={q} />
-                              </div>
-                            )}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {activeSection && (
-          <div className="card">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-              <div>
-                <div className="muted" style={{ fontSize: 12 }}>{activeSection.chapter_prefix} — {activeSection.chapter_title}</div>
-                <h3 style={{ margin: '4px 0' }}>Section {activeSection.section_number} — {activeSection.title}</h3>
-              </div>
-              <div className="actions">
-                <a className="btn sm primary" href={`/api/codification/sections/${activeSection.id}/pdf`} target="_blank" rel="noreferrer">View PDF</a>
-                <button type="button" className="btn sm" onClick={() => setActiveSection(null)}>Close</button>
-              </div>
-            </div>
-            {(activeSection.ordinance_ref || activeSection.effective_date) && (
-              <p className="muted" style={{ fontSize: 13 }}>
-                Ordinance: {activeSection.ordinance_ref || '—'} · Effective: {activeSection.effective_date || '—'}
-              </p>
-            )}
-            {activeSection.summary && <p><strong>Summary:</strong> {activeSection.summary}</p>}
-            <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', lineHeight: 1.55 }}>
-              {activeSection.body ? (
-                <LinkedCodeBody
-                  text={activeSection.body}
-                  sectionMap={allSectionsMap}
-                  currentSectionId={activeSection.id}
-                  onSelectSection={setActiveSection}
-                  query={q}
-                />
-              ) : (
-                'Full text is available via the View PDF button above.'
-              )}
-            </pre>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+function CodePublicTab({ branding = {} }) {
+  return <MunicodeCodeViewer branding={branding} standalone={false} />;
 }
 
 function RecordsPublicTab({ features = {} }) {
@@ -3653,7 +3503,7 @@ function PublicHomePage() {
             </div>
             {activeTab === 'agendas' && <AgendasPublicTab me={me} onRequireAuth={openAuth} />}
             {activeTab === 'permits' && <PermitsPublicTab me={me} onRequireAuth={openAuth} />}
-            {activeTab === 'codification' && <CodePublicTab />}
+            {activeTab === 'codification' && <CodePublicTab branding={branding} />}
             {activeTab === 'records' && <RecordsPublicTab features={publicFeatures.records || {}} />}
             {activeTab === 'complaints' && <ComplaintsPublicTab me={me} onRequireAuth={openAuth} features={publicFeatures.complaints || {}} />}
             {activeTab === 'calendar' && <CalendarPublicTab features={publicFeatures.calendar || {}} />}
