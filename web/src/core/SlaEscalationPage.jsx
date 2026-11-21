@@ -20,6 +20,7 @@ import { api } from './api.js';
 import { useToast } from './toast.jsx';
 
 export default function SlaEscalationPage({ onNavigate }) {
+  const [tab, setTab] = useState('alerts');
   const [rules, setRules] = useState([]);
   const [alertsData, setAlertsData] = useState({ summary: { total: 0, overdue: 0, warning: 0, by_rule: {} }, alerts: [] });
   const [filterSeverity, setFilterSeverity] = useState('all');
@@ -131,6 +132,26 @@ export default function SlaEscalationPage({ onNavigate }) {
         </div>
       </div>
 
+      <div className="tabs">
+        <button
+          type="button"
+          className={`btn sm${tab === 'alerts' ? ' active' : ''}`}
+          onClick={() => setTab('alerts')}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem' }}
+        >
+          <span>Active Alerts</span>
+          {summary.total > 0 && (
+            <span className="badge" style={{ background: summary.overdue > 0 ? '#fee2e2' : '#fef3c7', color: summary.overdue > 0 ? '#991b1b' : '#92400e' }}>
+              {summary.total}
+            </span>
+          )}
+        </button>
+        <button type="button" className={`btn sm${tab === 'rules' ? ' active' : ''}`} onClick={() => setTab('rules')}>
+          SLA Rules ({rules.length})
+        </button>
+      </div>
+
+      {tab === 'rules' && (
       <div className="card" style={{ marginBottom: '1rem' }}>
         <h2 style={{ marginTop: 0 }}>Configured SLA Rules</h2>
         {loading ? (
@@ -207,7 +228,9 @@ export default function SlaEscalationPage({ onNavigate }) {
           </div>
         )}
       </div>
+      )}
 
+      {tab === 'alerts' && (
       <div className="card">
         <div className="between" style={{ marginBottom: '.75rem', flexWrap: 'wrap', gap: '.5rem' }}>
           <h2 style={{ margin: 0 }}>Active Overdue &amp; Approaching Items ({filteredAlerts.length})</h2>
@@ -266,6 +289,7 @@ export default function SlaEscalationPage({ onNavigate }) {
           </table>
         )}
       </div>
+      )}
     </section>
   );
 }

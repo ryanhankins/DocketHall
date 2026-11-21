@@ -20,6 +20,7 @@ import { api, downloadBackupArchive } from './api.js';
 import { useToast } from './toast.jsx';
 
 export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner, onRestored }) {
+  const [tab, setTab] = useState('manual');
   const [days, setDays] = useState(String(reminderDays ?? 0));
   const [msg, setMsg] = useState({ text: '', isError: false });
   const [policy, setPolicy] = useState({
@@ -160,6 +161,19 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
   return (
     <section id="section-preferences-backup">
       <h1>Backup &amp; Restore</h1>
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'manual' ? ' active' : ''}`} onClick={() => setTab('manual')}>
+          Manual Backup &amp; Restore
+        </button>
+        <button type="button" className={`btn sm${tab === 'offsite' ? ' active' : ''}`} onClick={() => setTab('offsite')}>
+          Scheduled Offsite (S3)
+        </button>
+        <button type="button" className={`btn sm${tab === 'retention' ? ' active' : ''}`} onClick={() => setTab('retention')}>
+          Record Retention
+        </button>
+      </div>
+
+      {tab === 'manual' && (
       <div className="card" style={{ marginBottom: '1rem' }}>
         <p className="muted" style={{ marginTop: 0 }}>
           Download a full archive (.zip) containing human-readable agendas, CSVs, database JSON, users, preferences, templates, and uploaded attachments, or restore onto an instance.
@@ -200,7 +214,9 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
           <div id="backup-msg" className={msg.isError ? 'error-msg' : 'ok-msg'} role="status">{msg.text}</div>
         )}
       </div>
+      )}
 
+      {tab === 'offsite' && (
       <div className="card" style={{ marginBottom: '1rem' }}>
         <div className="between" style={{ marginBottom: '.65rem', flexWrap: 'wrap', gap: '.5rem' }}>
           <div>
@@ -333,7 +349,9 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
           </div>
         )}
       </div>
+      )}
 
+      {tab === 'retention' && (
       <div className="card">
         <div className="between" style={{ marginBottom: '.65rem', flexWrap: 'wrap', gap: '.5rem' }}>
           <div>
@@ -399,6 +417,7 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
           </div>
         </form>
       </div>
+      )}
     </section>
   );
 }

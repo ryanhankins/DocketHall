@@ -764,11 +764,11 @@ class GeneralPreferencesIn(BaseModel):
     theme_header_bg: str = "#ffffff"
     home_heading: str = ""
     home_intro_body: str = ""
-    home_blog_enabled: bool = True
-    home_blog_count: int = 3
-    home_blog_style: Literal["cards", "full"] = "cards"
-    home_blog_position: Literal["above_services", "below_services"] = "below_services"
-    home_blog_heading: str = ""
+    home_blog_enabled: bool | None = None
+    home_blog_count: int | None = None
+    home_blog_style: Literal["cards", "full"] | None = None
+    home_blog_position: Literal["above_services", "below_services"] | None = None
+    home_blog_heading: str | None = None
 
 
 class AgendaPreferencesIn(BaseModel):
@@ -968,8 +968,9 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
     theme_bg = _validate_hex_color(body.theme_bg, DEFAULT_THEME_COLORS["theme_bg"], "Page background color")
     theme_surface = _validate_hex_color(body.theme_surface, DEFAULT_THEME_COLORS["theme_surface"], "Card & sidebar color")
     theme_header_bg = _validate_hex_color(body.theme_header_bg, DEFAULT_THEME_COLORS["theme_header_bg"], "Header background color")
-    if not (1 <= int(body.home_blog_count) <= 20):
+    if body.home_blog_count is not None and not (1 <= int(body.home_blog_count) <= 20):
         raise HTTPException(status_code=400, detail="Main page blog entry count must be between 1 and 20")
+    clean_blog_heading = body.home_blog_heading.strip() if body.home_blog_heading is not None else None
     with pool.connection() as conn:
         conn.execute(
             "INSERT INTO agenda_preferences "
@@ -978,7 +979,9 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
             " theme_primary, theme_secondary, theme_tint, theme_bg, theme_surface, theme_header_bg, "
             " directory_url, directory_label, home_heading, home_intro_body, "
             " home_blog_enabled, home_blog_count, home_blog_style, home_blog_position, home_blog_heading, updated_at) "
-            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
+            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+            "        COALESCE(%s, TRUE), COALESCE(%s, 3), COALESCE(%s, 'cards'), "
+            "        COALESCE(%s, 'below_services'), COALESCE(%s, ''), now()) "
             "ON CONFLICT (id) DO UPDATE SET "
             "city_title = EXCLUDED.city_title, "
             "alert_enabled = EXCLUDED.alert_enabled, "
@@ -1000,11 +1003,11 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
             "directory_label = EXCLUDED.directory_label, "
             "home_heading = EXCLUDED.home_heading, "
             "home_intro_body = EXCLUDED.home_intro_body, "
-            "home_blog_enabled = EXCLUDED.home_blog_enabled, "
-            "home_blog_count = EXCLUDED.home_blog_count, "
-            "home_blog_style = EXCLUDED.home_blog_style, "
-            "home_blog_position = EXCLUDED.home_blog_position, "
-            "home_blog_heading = EXCLUDED.home_blog_heading, "
+            "home_blog_enabled = COALESCE(%s, agenda_preferences.home_blog_enabled), "
+            "home_blog_count = COALESCE(%s, agenda_preferences.home_blog_count), "
+            "home_blog_style = COALESCE(%s, agenda_preferences.home_blog_style), "
+            "home_blog_position = COALESCE(%s, agenda_preferences.home_blog_position), "
+            "home_blog_heading = COALESCE(%s, agenda_preferences.home_blog_heading), "
             "updated_at = now()",
             (
                 body.city_title.strip(),
@@ -1027,19 +1030,24 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
                 body.directory_label.strip(),
                 body.home_heading.strip(),
                 body.home_intro_body.strip(),
-                bool(body.home_blog_enabled),
-                int(body.home_blog_count),
+                body.home_blog_enabled,
+                int(body.home_blog_count) if body.home_blog_count is not None else None,
                 body.home_blog_style,
                 body.home_blog_position,
-                body.home_blog_heading.strip(),
+                clean_blog_heading,
+                body.home_blog_enabled,
+                int(body.home_blog_count) if body.home_blog_count is not None else None,
+                body.home_blog_style,
+                body.home_blog_position,
+                clean_blog_heading,
             ),
         )
         return _load_preferences(conn)
 
 
 def update_home_text(
-    home_heading: str,
-    home_intro_body: str,
+    home_heading: str | None = None,
+    home_intro_body: str | None = None,
     *,
     home_blog_enabled: bool | None = None,
     home_blog_count: int | None = None,
@@ -1047,20 +1055,23 @@ def update_home_text(
     home_blog_position: str | None = None,
     home_blog_heading: str | None = None,
 ) -> dict:
-    """Update custom portal welcome text and optional main-page blog feed display preferences."""
+    """Update custom portal welcome text and/or main-page blog feed display preferences."""
     if home_blog_count is not None and not (1 <= int(home_blog_count) <= 20):
         raise HTTPException(status_code=400, detail="Main page blog entry count must be between 1 and 20")
+    clean_heading = home_heading.strip() if home_heading is not None else None
+    clean_intro = home_intro_body.strip() if home_intro_body is not None else None
     clean_blog_heading = home_blog_heading.strip() if home_blog_heading is not None else None
+    count_val = int(home_blog_count) if home_blog_count is not None else None
     with pool.connection() as conn:
         conn.execute(
             "INSERT INTO agenda_preferences "
             "(id, home_heading, home_intro_body, home_blog_enabled, home_blog_count, "
             " home_blog_style, home_blog_position, home_blog_heading, updated_at) "
-            "VALUES (1, %s, %s, COALESCE(%s, TRUE), COALESCE(%s, 3), COALESCE(%s, 'cards'), "
-            "        COALESCE(%s, 'below_services'), COALESCE(%s, ''), now()) "
+            "VALUES (1, COALESCE(%s, ''), COALESCE(%s, ''), COALESCE(%s, TRUE), COALESCE(%s, 3), "
+            "        COALESCE(%s, 'cards'), COALESCE(%s, 'below_services'), COALESCE(%s, ''), now()) "
             "ON CONFLICT (id) DO UPDATE SET "
-            "home_heading = EXCLUDED.home_heading, "
-            "home_intro_body = EXCLUDED.home_intro_body, "
+            "home_heading = COALESCE(%s, agenda_preferences.home_heading), "
+            "home_intro_body = COALESCE(%s, agenda_preferences.home_intro_body), "
             "home_blog_enabled = COALESCE(%s, agenda_preferences.home_blog_enabled), "
             "home_blog_count = COALESCE(%s, agenda_preferences.home_blog_count), "
             "home_blog_style = COALESCE(%s, agenda_preferences.home_blog_style), "
@@ -1068,15 +1079,17 @@ def update_home_text(
             "home_blog_heading = COALESCE(%s, agenda_preferences.home_blog_heading), "
             "updated_at = now()",
             (
-                home_heading.strip(),
-                home_intro_body.strip(),
+                clean_heading,
+                clean_intro,
                 home_blog_enabled,
-                home_blog_count,
+                count_val,
                 home_blog_style,
                 home_blog_position,
                 clean_blog_heading,
+                clean_heading,
+                clean_intro,
                 home_blog_enabled,
-                home_blog_count,
+                count_val,
                 home_blog_style,
                 home_blog_position,
                 clean_blog_heading,

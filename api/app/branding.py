@@ -31,8 +31,8 @@ def get_branding():
 
 
 class HomeTextIn(BaseModel):
-    home_heading: str = ""
-    home_intro_body: str = ""
+    home_heading: str | None = None
+    home_intro_body: str | None = None
     home_blog_enabled: bool | None = None
     home_blog_count: int | None = None
     home_blog_style: Literal["cards", "full"] | None = None

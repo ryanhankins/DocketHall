@@ -40,6 +40,7 @@ function moduleTitle(modId) {
 }
 
 export default function UsersPage({ me, permissionsCatalog = [] }) {
+  const [tab, setTab] = useState('directory');
   const [users, setUsers] = useState([]);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -110,6 +111,7 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
       setNewPerms([]);
       setPwBanner({ username: created.username, password: created.generated_password });
       setCopied(false);
+      setTab('directory');
       await loadUsers();
     } catch (error) {
       setErr(error.message);
@@ -172,6 +174,16 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
         </div>
       )}
 
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'directory' ? ' active' : ''}`} onClick={() => setTab('directory')}>
+          Users Directory ({users.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'add' ? ' active' : ''}`} onClick={() => setTab('add')}>
+          + Add User
+        </button>
+      </div>
+
+      {tab === 'add' && (
       <div className="card">
         <h2>Add User</h2>
         <form onSubmit={handleCreate} className="row">
@@ -211,11 +223,11 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
           <button type="submit" className="btn primary">Create User</button>
         </form>
         {groupedPerms.length > 0 && (
-          <details style={{ marginTop: '.75rem' }}>
-            <summary style={{ cursor: 'pointer', fontSize: '.85rem', fontWeight: 600, color: '#334e68' }}>
+          <div style={{ marginTop: '.95rem' }}>
+            <div style={{ fontSize: '.86rem', fontWeight: 600, color: '#334e68', marginBottom: '.45rem' }}>
               Additional Module Permissions (optional{newPerms.length > 0 ? ` — ${newPerms.length} selected` : ''})
-            </summary>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '.75rem', marginTop: '.65rem' }}>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '.75rem' }}>
               {groupedPerms.map(grp => (
                 <div key={grp.id} style={{ border: '1px solid #e2e8f0', borderRadius: '6px', padding: '.6rem .75rem', background: '#f8fafc' }}>
                   <div style={{ fontSize: '.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: '#475569', marginBottom: '.4rem' }}>
@@ -237,11 +249,13 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
                 </div>
               ))}
             </div>
-          </details>
+          </div>
         )}
         {err && <div className="error-msg" role="alert">{err}</div>}
       </div>
+      )}
 
+      {tab === 'directory' && (
       <div className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '.75rem', marginBottom: '.85rem' }}>
           <h2 style={{ margin: 0 }}>Users ({filteredUsers.length} of {users.length})</h2>
@@ -431,6 +445,7 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
           </tbody>
         </table>
       </div>
+      )}
 
       {grantsUser && (
         <div

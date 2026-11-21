@@ -33,6 +33,7 @@ const HelpDocsPage = React.lazy(() => import('./HelpDocsPage.jsx'));
 const MyAccountPage = React.lazy(() => import('./MyAccountPage.jsx'));
 const BillingManagePage = React.lazy(() => import('./BillingManagePage.jsx'));
 const SlaEscalationPage = React.lazy(() => import('./SlaEscalationPage.jsx'));
+const BlogManagePage = React.lazy(() => import('../modules/blog/BlogManagePage.jsx'));
 
 export default function CoreShell() {
   const [me, setMe] = useState(null);
@@ -173,6 +174,7 @@ export default function CoreShell() {
   }, []);
 
   const canManageSettings = hasPermission(me, 'settings.manage') || hasPermission(me, 'agendas.manage');
+  const canManageBlog = hasPermission(me, 'blog.manage');
   const isAdmin = me?.role === 'admin';
 
   // Auto-open submenu when active route belongs to it
@@ -189,7 +191,7 @@ export default function CoreShell() {
     if (hash === 'calendar-manage' || hash === 'preferences-calendar') {
       setOpenSubmenus(prev => (prev['calendar-staff'] ? prev : { ...prev, 'calendar-staff': true }));
     }
-    if (['users', 'modules', 'preferences-general', 'integrations', 'audit', 'preferences-backup', 'billing', 'sla-rules'].includes(hash)) {
+    if (['users', 'modules', 'preferences-general', 'blog-admin', 'integrations', 'audit', 'preferences-backup', 'billing', 'sla-rules'].includes(hash)) {
       setOpenSubmenus(prev => (prev['admin-section'] ? prev : { ...prev, 'admin-section': true }));
     }
   }, [hash]);
@@ -214,6 +216,13 @@ export default function CoreShell() {
         component: GeneralPrefsPage,
         props: { onBrandingChange: applyBranding },
         activeSection: 'preferences-general',
+      };
+    }
+    if (hash === 'blog-admin' && canManageBlog) {
+      return {
+        component: BlogManagePage,
+        props: { initialTab: 'settings' },
+        activeSection: 'blog-admin',
       };
     }
     if (hash === 'sla-rules' && canManageSettings) {
@@ -403,7 +412,7 @@ export default function CoreShell() {
                 My Civic Account
               </button>
             </div>
-            {(moduleMenus.reduce((acc, m) => acc + m.items.length, 0) >= 6 || isAdmin || canManageSettings) && (
+            {(moduleMenus.reduce((acc, m) => acc + m.items.length, 0) >= 6 || isAdmin || canManageSettings || canManageBlog) && (
               <input
                 type="search"
                 className="nav-filter"
@@ -506,11 +515,12 @@ export default function CoreShell() {
               );
             })}
 
-            {(isAdmin || canManageSettings) && (() => {
+            {(isAdmin || canManageSettings || canManageBlog) && (() => {
               const adminItems = [
                 isAdmin && { section: 'users', label: 'Manage Users' },
                 isAdmin && { section: 'modules', label: 'Manage Modules' },
                 canManageSettings && { section: 'preferences-general', label: 'General & Branding' },
+                canManageBlog && { section: 'blog-admin', label: 'Blog Settings & Feed' },
                 isAdmin && { section: 'integrations', label: 'Email & Integrations' },
                 isAdmin && { section: 'audit', label: 'Audit Log' },
                 canManageSettings && { section: 'billing', label: 'Utility Bills & Citations' },

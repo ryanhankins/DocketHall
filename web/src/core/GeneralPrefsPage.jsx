@@ -44,11 +44,7 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
   const [directoryLabel, setDirectoryLabel] = useState('');
   const [homeHeading, setHomeHeading] = useState('');
   const [homeIntroBody, setHomeIntroBody] = useState('');
-  const [homeBlogEnabled, setHomeBlogEnabled] = useState(true);
-  const [homeBlogCount, setHomeBlogCount] = useState(3);
-  const [homeBlogStyle, setHomeBlogStyle] = useState('cards');
-  const [homeBlogPosition, setHomeBlogPosition] = useState('below_services');
-  const [homeBlogHeading, setHomeBlogHeading] = useState('');
+  const [tab, setTab] = useState('identity');
   const [themeColors, setThemeColors] = useState(() => ({ ...DEFAULT_THEME }));
   const [hasLogo, setHasLogo] = useState(false);
   const [logoVer, setLogoVer] = useState(() => Date.now());
@@ -72,11 +68,6 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
         setDirectoryLabel(b.directory_label || '');
         setHomeHeading(b.home_heading || '');
         setHomeIntroBody(b.home_intro_body || '');
-        setHomeBlogEnabled(b.home_blog_enabled !== false);
-        setHomeBlogCount(Number(b.home_blog_count) || 3);
-        setHomeBlogStyle(b.home_blog_style === 'full' ? 'full' : 'cards');
-        setHomeBlogPosition(b.home_blog_position === 'above_services' ? 'above_services' : 'below_services');
-        setHomeBlogHeading(b.home_blog_heading || '');
         setThemeColors({
           theme_primary: b.theme_primary || DEFAULT_THEME.theme_primary,
           theme_secondary: b.theme_secondary || DEFAULT_THEME.theme_secondary,
@@ -148,11 +139,6 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
           directory_label: directoryLabel.trim(),
           home_heading: homeHeading.trim(),
           home_intro_body: homeIntroBody.trim(),
-          home_blog_enabled: homeBlogEnabled,
-          home_blog_count: Math.max(1, Math.min(20, Number(homeBlogCount) || 3)),
-          home_blog_style: homeBlogStyle,
-          home_blog_position: homeBlogPosition,
-          home_blog_heading: homeBlogHeading.trim(),
           ...themeColors,
         }),
       });
@@ -176,364 +162,336 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
 
   return (
     <section id="section-preferences-general">
-      <h1>General Preferences</h1>
-      <div className="card">
-        <p className="muted" style={{ marginTop: 0 }}>
-          Site-wide branding shown at the top of each page and on the sign-in screen.
-        </p>
-        <form onSubmit={handleSave}>
-          <div className="field" style={{ marginBottom: '.9rem' }}>
-            <label htmlFor="pref-city-title">City Title (appears before DocketHall at the top of each page)</label>
-            <input
-              id="pref-city-title"
-              placeholder="e.g. City of Northfield"
-              value={cityTitle}
-              onChange={(e) => setCityTitle(e.target.value)}
-            />
-          </div>
-          <div className="field" style={{ marginBottom: '1.1rem' }}>
-            <label htmlFor="pref-logo-file">City Logo (prints on first page &amp; page header)</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', flexWrap: 'wrap' }}>
-              {hasLogo && (
-                <img
-                  id="pref-logo-preview"
-                  alt="City Logo"
-                  src={`/api/branding/logo?t=${logoVer}`}
-                  style={{ maxHeight: '72px', maxWidth: '220px', border: '1px solid #cbd2d9', borderRadius: '4px', padding: '4px', background: '#fff' }}
-                />
-              )}
-              <input
-                id="pref-logo-file"
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp"
-                style={{ width: 'auto' }}
-                onChange={async (e) => {
-                  const f = e.target.files?.[0];
-                  await uploadLogoFile(f);
-                  e.target.value = '';
-                }}
-              />
-              {hasLogo && (
-                <button type="button" id="pref-logo-remove" className="btn sm danger" onClick={handleRemoveLogo}>
-                  Remove Logo
-                </button>
-              )}
-            </div>
-            <div
-              id="pref-logo-drop"
-              className={`drop-zone${dragOver ? ' drag-over' : ''}`}
-              style={{ marginTop: '.5rem' }}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={async (e) => {
-                e.preventDefault();
-                setDragOver(false);
-                const f = e.dataTransfer?.files?.[0];
-                if (f) await uploadLogoFile(f);
-              }}
-            >
-              Drag &amp; drop a city logo image (PNG, JPG, GIF, WEBP) here
-            </div>
-          </div>
+      <h1>General &amp; Branding</h1>
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'identity' ? ' active' : ''}`} onClick={() => setTab('identity')}>
+          Identity &amp; Footer
+        </button>
+        <button type="button" className={`btn sm${tab === 'homepage' ? ' active' : ''}`} onClick={() => setTab('homepage')}>
+          Homepage Text &amp; Alerts
+        </button>
+        <button type="button" className={`btn sm${tab === 'theme' ? ' active' : ''}`} onClick={() => setTab('theme')}>
+          Color Theme
+        </button>
+        <button type="button" className={`btn sm${tab === 'updates' ? ' active' : ''}`} onClick={() => setTab('updates')}>
+          System Updates
+        </button>
+      </div>
 
-          <h2 style={{ margin: '1.25rem 0 .4rem', fontSize: '1.05rem' }}>Public Portal Welcome &amp; Custom Page Text</h2>
-          <p className="muted" style={{ margin: '0 0 .75rem', fontSize: '.88rem' }}>
-            Customize the welcome heading and rich intro text displayed on the Public Portal overview page.
-          </p>
-          <div className="field" style={{ marginBottom: '.75rem' }}>
-            <label htmlFor="pref-home-heading">Portal Welcome Heading (blank uses default)</label>
-            <input
-              id="pref-home-heading"
-              placeholder={cityTitle.trim() ? `Welcome to ${cityTitle.trim()}` : 'City Services & Community Hub'}
-              value={homeHeading}
-              onChange={(e) => setHomeHeading(e.target.value)}
-            />
-          </div>
-          <div style={{ marginBottom: '.85rem' }}>
-            <RichTextEditor
-              id="pref-home-intro"
-              label="Custom Portal Page Text (blank uses default intro)"
-              rows={5}
-              placeholder="Add custom announcements, City Hall welcome notes, hours, or formatted links..."
-              value={homeIntroBody}
-              onChange={setHomeIntroBody}
-            />
-          </div>
-          <div style={{ padding: '.85rem 1rem', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 8, marginBottom: '1.1rem' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginBottom: homeBlogEnabled ? '.75rem' : 0, cursor: 'pointer', fontWeight: 600 }}>
-              <input
-                type="checkbox"
-                style={{ width: 'auto' }}
-                checked={homeBlogEnabled}
-                onChange={(e) => setHomeBlogEnabled(e.target.checked)}
-              />
-              <span>Show recent blog entries on the main page</span>
-            </label>
-            {homeBlogEnabled && (
-              <div className="row">
-                <div className="field" style={{ width: 140 }}>
-                  <label htmlFor="pref-home-blog-count">Entries to Show (1–20)</label>
+      {tab !== 'updates' && (
+        <div className="card">
+          <form onSubmit={handleSave}>
+            {tab === 'identity' && (
+              <>
+                <p className="muted" style={{ marginTop: 0 }}>
+                  Site-wide city branding, logo, and public portal footer links.
+                </p>
+                <div className="field" style={{ marginBottom: '.9rem' }}>
+                  <label htmlFor="pref-city-title">City Title (appears before DocketHall at the top of each page)</label>
                   <input
-                    id="pref-home-blog-count"
-                    type="number"
-                    min={1}
-                    max={20}
-                    value={homeBlogCount}
-                    onChange={(e) => setHomeBlogCount(e.target.value)}
+                    id="pref-city-title"
+                    placeholder="e.g. City of Northfield"
+                    value={cityTitle}
+                    onChange={(e) => setCityTitle(e.target.value)}
                   />
                 </div>
-                <div className="field" style={{ flex: 1, minWidth: 170 }}>
-                  <label htmlFor="pref-home-blog-style">Display Style</label>
-                  <select
-                    id="pref-home-blog-style"
-                    value={homeBlogStyle}
-                    onChange={(e) => setHomeBlogStyle(e.target.value)}
-                  >
-                    <option value="cards">Summary Cards</option>
-                    <option value="full">Full Blog Entries</option>
-                  </select>
-                </div>
-                <div className="field" style={{ flex: 1, minWidth: 180 }}>
-                  <label htmlFor="pref-home-blog-pos">Placement</label>
-                  <select
-                    id="pref-home-blog-pos"
-                    value={homeBlogPosition}
-                    onChange={(e) => setHomeBlogPosition(e.target.value)}
-                  >
-                    <option value="below_services">Below City Services</option>
-                    <option value="above_services">Above City Services</option>
-                  </select>
-                </div>
-                <div className="field" style={{ flex: 1, minWidth: 190 }}>
-                  <label htmlFor="pref-home-blog-heading">Section Heading (optional)</label>
-                  <input
-                    id="pref-home-blog-heading"
-                    placeholder="Latest from the Blog"
-                    value={homeBlogHeading}
-                    onChange={(e) => setHomeBlogHeading(e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          <h2 style={{ margin: '1.25rem 0 .4rem', fontSize: '1.05rem' }}>Urgent Public Alert Banner</h2>
-          <p className="muted" style={{ margin: '0 0 .75rem', fontSize: '.88rem' }}>
-            Display an urgent notice across the top of the Public Portal (e.g. snow emergency, water shutoff, or City Hall closure).
-          </p>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginBottom: '.75rem', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              style={{ width: 'auto' }}
-              checked={alertEnabled}
-              onChange={(e) => setAlertEnabled(e.target.checked)}
-            />
-            <span>Show urgent alert banner on Public Portal</span>
-          </label>
-          <div className="row" style={{ marginBottom: '.75rem' }}>
-            <div className="field" style={{ minWidth: 160 }}>
-              <label htmlFor="pref-alert-level">Severity</label>
-              <select id="pref-alert-level" value={alertLevel} onChange={(e) => setAlertLevel(e.target.value)}>
-                <option value="danger">Emergency (Red)</option>
-                <option value="warning">Advisory / Notice (Amber)</option>
-                <option value="info">Information (Blue)</option>
-              </select>
-            </div>
-            <div className="field" style={{ flex: 1, minWidth: 200 }}>
-              <label htmlFor="pref-alert-title">Short Title (optional)</label>
-              <input
-                id="pref-alert-title"
-                placeholder="e.g. Snow Emergency"
-                value={alertTitle}
-                onChange={(e) => setAlertTitle(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="field" style={{ marginBottom: '.75rem' }}>
-            <label htmlFor="pref-alert-message">Alert Message</label>
-            <textarea
-              id="pref-alert-message"
-              rows={2}
-              placeholder="e.g. No street parking until 8:00 AM tomorrow for snow removal."
-              value={alertMessage}
-              onChange={(e) => setAlertMessage(e.target.value)}
-            />
-          </div>
-          <div className="row" style={{ marginBottom: '1.1rem' }}>
-            <div className="field" style={{ flex: 2, minWidth: 220 }}>
-              <label htmlFor="pref-alert-link-url">Alert Link URL (optional)</label>
-              <input
-                id="pref-alert-link-url"
-                type="url"
-                placeholder="https://..."
-                value={alertLinkUrl}
-                onChange={(e) => setAlertLinkUrl(e.target.value)}
-              />
-            </div>
-            <div className="field" style={{ flex: 1, minWidth: 160 }}>
-              <label htmlFor="pref-alert-link-label">Link Label (optional)</label>
-              <input
-                id="pref-alert-link-label"
-                placeholder="More Details"
-                value={alertLinkLabel}
-                onChange={(e) => setAlertLinkLabel(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <h2 style={{ margin: '1.25rem 0 .4rem', fontSize: '1.05rem' }}>Public Portal Footer</h2>
-          <p className="muted" style={{ margin: '0 0 .75rem', fontSize: '.88rem' }}>
-            Shown at the bottom of the Public Portal, Permits Portal, and City Code pages.
-          </p>
-          <div className="field" style={{ marginBottom: '.75rem' }}>
-            <label htmlFor="pref-footer-text">Footer Contact / Office Hours Text</label>
-            <textarea
-              id="pref-footer-text"
-              rows={2}
-              placeholder="e.g. City Hall · 101 Main St · Mon–Fri 8:00 AM–4:30 PM · (555) 123-4567"
-              value={footerText}
-              onChange={(e) => setFooterText(e.target.value)}
-            />
-          </div>
-          <div className="row" style={{ marginBottom: '1.1rem' }}>
-            <div className="field" style={{ flex: 2, minWidth: 220 }}>
-              <label htmlFor="pref-city-website-url">Main City Website URL (optional)</label>
-              <input
-                id="pref-city-website-url"
-                type="url"
-                placeholder="https://www.cityofexample.gov"
-                value={cityWebsiteUrl}
-                onChange={(e) => setCityWebsiteUrl(e.target.value)}
-              />
-            </div>
-            <div className="field" style={{ flex: 1, minWidth: 160 }}>
-              <label htmlFor="pref-city-website-label">Website Link Label (optional)</label>
-              <input
-                id="pref-city-website-label"
-                placeholder="Visit Main City Website"
-                value={cityWebsiteLabel}
-                onChange={(e) => setCityWebsiteLabel(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="row" style={{ marginBottom: '1.1rem' }}>
-            <div className="field" style={{ flex: 2, minWidth: 220 }}>
-              <label htmlFor="pref-directory-url">Contact / Directory URL (shown in Public Portal header, optional)</label>
-              <input
-                id="pref-directory-url"
-                type="url"
-                placeholder="https://www.cityofexample.gov/staff-directory/"
-                value={directoryUrl}
-                onChange={(e) => setDirectoryUrl(e.target.value)}
-              />
-            </div>
-            <div className="field" style={{ flex: 1, minWidth: 160 }}>
-              <label htmlFor="pref-directory-label">Contact / Directory Label (optional)</label>
-              <input
-                id="pref-directory-label"
-                placeholder="Contact / Directory"
-                value={directoryLabel}
-                onChange={(e) => setDirectoryLabel(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <h2 style={{ margin: '1.25rem 0 .4rem', fontSize: '1.05rem' }}>Color Theme</h2>
-          <p className="muted" style={{ margin: '0 0 .75rem', fontSize: '.88rem' }}>
-            Customize site-wide colors for both the Public Portal and the Staff Workspace.
-          </p>
-          <div className="actions" style={{ marginBottom: '.85rem' }}>
-            <span className="muted" style={{ fontSize: '.85rem' }}>Presets:</span>
-            {THEME_PRESETS.map((preset) => (
-              <button
-                key={preset.id}
-                type="button"
-                className="btn sm"
-                onClick={() => {
-                  const next = { ...preset.colors };
-                  setThemeColors(next);
-                  applyTheme(next);
-                }}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-              gap: '.75rem',
-              marginBottom: '1.25rem',
-            }}
-          >
-            {COLOR_FIELDS.map(({ key, label }) => {
-              const val = themeColors[key] || DEFAULT_THEME[key];
-              const pickerVal = /^#[0-9a-f]{6}$/i.test(val) ? val : DEFAULT_THEME[key];
-              return (
-                <div key={key} className="field">
-                  <label htmlFor={`pref-${key}`}>{label}</label>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '.45rem' }}>
+                <div className="field" style={{ marginBottom: '1.1rem' }}>
+                  <label htmlFor="pref-logo-file">City Logo (prints on first page &amp; page header)</label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', flexWrap: 'wrap' }}>
+                    {hasLogo && (
+                      <img
+                        id="pref-logo-preview"
+                        alt="City Logo"
+                        src={`/api/branding/logo?t=${logoVer}`}
+                        style={{ maxHeight: '72px', maxWidth: '220px', border: '1px solid #cbd2d9', borderRadius: '4px', padding: '4px', background: '#fff' }}
+                      />
+                    )}
                     <input
-                      type="color"
-                      aria-label={label}
-                      value={pickerVal}
-                      onChange={(e) => {
-                        const next = { ...themeColors, [key]: e.target.value };
-                        setThemeColors(next);
-                        applyTheme(next);
+                      id="pref-logo-file"
+                      type="file"
+                      accept="image/png,image/jpeg,image/gif,image/webp,.png,.jpg,.jpeg,.gif,.webp"
+                      style={{ width: 'auto' }}
+                      onChange={async (e) => {
+                        const f = e.target.files?.[0];
+                        await uploadLogoFile(f);
+                        e.target.value = '';
                       }}
-                      style={{ width: 42, height: 34, padding: 2, cursor: 'pointer', flexShrink: 0 }}
                     />
+                    {hasLogo && (
+                      <button type="button" id="pref-logo-remove" className="btn sm danger" onClick={handleRemoveLogo}>
+                        Remove Logo
+                      </button>
+                    )}
+                  </div>
+                  <div
+                    id="pref-logo-drop"
+                    className={`drop-zone${dragOver ? ' drag-over' : ''}`}
+                    style={{ marginTop: '.5rem' }}
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={async (e) => {
+                      e.preventDefault();
+                      setDragOver(false);
+                      const f = e.dataTransfer?.files?.[0];
+                      if (f) await uploadLogoFile(f);
+                    }}
+                  >
+                    Drag &amp; drop a city logo image (PNG, JPG, GIF, WEBP) here
+                  </div>
+                </div>
+
+                <h2 style={{ margin: '1.25rem 0 .4rem', fontSize: '1.05rem' }}>Public Portal Footer</h2>
+                <p className="muted" style={{ margin: '0 0 .75rem', fontSize: '.88rem' }}>
+                  Shown at the bottom of the Public Portal, Permits Portal, and City Code pages.
+                </p>
+                <div className="field" style={{ marginBottom: '.75rem' }}>
+                  <label htmlFor="pref-footer-text">Footer Contact / Office Hours Text</label>
+                  <textarea
+                    id="pref-footer-text"
+                    rows={2}
+                    placeholder="e.g. City Hall · 101 Main St · Mon–Fri 8:00 AM–4:30 PM · (555) 123-4567"
+                    value={footerText}
+                    onChange={(e) => setFooterText(e.target.value)}
+                  />
+                </div>
+                <div className="row" style={{ marginBottom: '1.1rem' }}>
+                  <div className="field" style={{ flex: 2, minWidth: 220 }}>
+                    <label htmlFor="pref-city-website-url">Main City Website URL (optional)</label>
                     <input
-                      id={`pref-${key}`}
-                      value={val}
-                      maxLength={7}
-                      onChange={(e) => {
-                        const next = { ...themeColors, [key]: e.target.value };
-                        setThemeColors(next);
-                        if (/^#[0-9a-f]{6}$/i.test(e.target.value)) applyTheme(next);
-                      }}
+                      id="pref-city-website-url"
+                      type="url"
+                      placeholder="https://www.cityofexample.gov"
+                      value={cityWebsiteUrl}
+                      onChange={(e) => setCityWebsiteUrl(e.target.value)}
+                    />
+                  </div>
+                  <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                    <label htmlFor="pref-city-website-label">Website Link Label (optional)</label>
+                    <input
+                      id="pref-city-website-label"
+                      placeholder="Visit Main City Website"
+                      value={cityWebsiteLabel}
+                      onChange={(e) => setCityWebsiteLabel(e.target.value)}
                     />
                   </div>
                 </div>
-              );
-            })}
-          </div>
+                <div className="row" style={{ marginBottom: '1.1rem' }}>
+                  <div className="field" style={{ flex: 2, minWidth: 220 }}>
+                    <label htmlFor="pref-directory-url">Contact / Directory URL (shown in Public Portal header, optional)</label>
+                    <input
+                      id="pref-directory-url"
+                      type="url"
+                      placeholder="https://www.cityofexample.gov/staff-directory/"
+                      value={directoryUrl}
+                      onChange={(e) => setDirectoryUrl(e.target.value)}
+                    />
+                  </div>
+                  <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                    <label htmlFor="pref-directory-label">Contact / Directory Label (optional)</label>
+                    <input
+                      id="pref-directory-label"
+                      placeholder="Contact / Directory"
+                      value={directoryLabel}
+                      onChange={(e) => setDirectoryLabel(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
 
-          {(() => {
-            const contrastWarnings = getThemeContrastWarnings(themeColors);
-            if (!contrastWarnings.length) return null;
-            return (
-              <div
-                className="banner show"
-                role="alert"
-                style={{
-                  background: '#fffbeb',
-                  borderColor: '#f59e0b',
-                  color: '#92400e',
-                  flexDirection: 'column',
-                  alignItems: 'flex-start',
-                  gap: '.35rem',
-                  marginBottom: '1rem',
-                }}
-              >
-                <strong>WCAG 2.1 AA Contrast Warning:</strong>
-                <ul style={{ margin: '0 0 0 1.2rem', padding: 0, fontSize: '.86rem' }}>
-                  {contrastWarnings.map((w) => <li key={w}>{w}</li>)}
-                </ul>
-              </div>
-            );
-          })()}
+            {tab === 'homepage' && (
+              <>
+                <h2 style={{ margin: '0 0 .4rem', fontSize: '1.05rem' }}>Public Portal Welcome &amp; Custom Page Text</h2>
+                <p className="muted" style={{ margin: '0 0 .75rem', fontSize: '.88rem' }}>
+                  Customize the welcome heading and rich intro text displayed on the Public Portal overview page. Manage main-page blog feed display under <strong>Administration → Blog Settings &amp; Feed</strong>.
+                </p>
+                <div className="field" style={{ marginBottom: '.75rem' }}>
+                  <label htmlFor="pref-home-heading">Portal Welcome Heading (blank uses default)</label>
+                  <input
+                    id="pref-home-heading"
+                    placeholder={cityTitle.trim() ? `Welcome to ${cityTitle.trim()}` : 'City Services & Community Hub'}
+                    value={homeHeading}
+                    onChange={(e) => setHomeHeading(e.target.value)}
+                  />
+                </div>
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <RichTextEditor
+                    id="pref-home-intro"
+                    label="Custom Portal Page Text (blank uses default intro)"
+                    rows={6}
+                    placeholder="Add custom announcements, City Hall welcome notes, hours, or formatted links..."
+                    value={homeIntroBody}
+                    onChange={setHomeIntroBody}
+                  />
+                </div>
 
-          <button type="submit" className="btn primary">Save General Preferences</button>
-          {msg.text && (
-            <div className={msg.isError ? 'error-msg' : 'ok-msg'} role="status">{msg.text}</div>
-          )}
-        </form>
-      </div>
+                <h2 style={{ margin: '1.25rem 0 .4rem', fontSize: '1.05rem' }}>Urgent Public Alert Banner</h2>
+                <p className="muted" style={{ margin: '0 0 .75rem', fontSize: '.88rem' }}>
+                  Display an urgent notice across the top of the Public Portal (e.g. snow emergency, water shutoff, or City Hall closure).
+                </p>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginBottom: '.75rem', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    style={{ width: 'auto' }}
+                    checked={alertEnabled}
+                    onChange={(e) => setAlertEnabled(e.target.checked)}
+                  />
+                  <span>Show urgent alert banner on Public Portal</span>
+                </label>
+                <div className="row" style={{ marginBottom: '.75rem' }}>
+                  <div className="field" style={{ minWidth: 160 }}>
+                    <label htmlFor="pref-alert-level">Severity</label>
+                    <select id="pref-alert-level" value={alertLevel} onChange={(e) => setAlertLevel(e.target.value)}>
+                      <option value="danger">Emergency (Red)</option>
+                      <option value="warning">Advisory / Notice (Amber)</option>
+                      <option value="info">Information (Blue)</option>
+                    </select>
+                  </div>
+                  <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                    <label htmlFor="pref-alert-title">Short Title (optional)</label>
+                    <input
+                      id="pref-alert-title"
+                      placeholder="e.g. Snow Emergency"
+                      value={alertTitle}
+                      onChange={(e) => setAlertTitle(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="field" style={{ marginBottom: '.75rem' }}>
+                  <label htmlFor="pref-alert-message">Alert Message</label>
+                  <textarea
+                    id="pref-alert-message"
+                    rows={2}
+                    placeholder="e.g. No street parking until 8:00 AM tomorrow for snow removal."
+                    value={alertMessage}
+                    onChange={(e) => setAlertMessage(e.target.value)}
+                  />
+                </div>
+                <div className="row" style={{ marginBottom: '1.1rem' }}>
+                  <div className="field" style={{ flex: 2, minWidth: 220 }}>
+                    <label htmlFor="pref-alert-link-url">Alert Link URL (optional)</label>
+                    <input
+                      id="pref-alert-link-url"
+                      type="url"
+                      placeholder="https://..."
+                      value={alertLinkUrl}
+                      onChange={(e) => setAlertLinkUrl(e.target.value)}
+                    />
+                  </div>
+                  <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                    <label htmlFor="pref-alert-link-label">Link Label (optional)</label>
+                    <input
+                      id="pref-alert-link-label"
+                      placeholder="More Details"
+                      value={alertLinkLabel}
+                      onChange={(e) => setAlertLinkLabel(e.target.value)}
+                    />
+                  </div>
+                </div>
+              </>
+            )}
 
-      <SystemUpdatesCard />
+            {tab === 'theme' && (
+              <>
+                <h2 style={{ margin: '0 0 .4rem', fontSize: '1.05rem' }}>Color Theme</h2>
+                <p className="muted" style={{ margin: '0 0 .75rem', fontSize: '.88rem' }}>
+                  Customize site-wide colors for both the Public Portal and the Staff Workspace.
+                </p>
+                <div className="actions" style={{ marginBottom: '.85rem' }}>
+                  <span className="muted" style={{ fontSize: '.85rem' }}>Presets:</span>
+                  {THEME_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className="btn sm"
+                      onClick={() => {
+                        const next = { ...preset.colors };
+                        setThemeColors(next);
+                        applyTheme(next);
+                      }}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: '.75rem',
+                    marginBottom: '1.25rem',
+                  }}
+                >
+                  {COLOR_FIELDS.map(({ key, label }) => {
+                    const val = themeColors[key] || DEFAULT_THEME[key];
+                    const pickerVal = /^#[0-9a-f]{6}$/i.test(val) ? val : DEFAULT_THEME[key];
+                    return (
+                      <div key={key} className="field">
+                        <label htmlFor={`pref-${key}`}>{label}</label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '.45rem' }}>
+                          <input
+                            type="color"
+                            aria-label={label}
+                            value={pickerVal}
+                            onChange={(e) => {
+                              const next = { ...themeColors, [key]: e.target.value };
+                              setThemeColors(next);
+                              applyTheme(next);
+                            }}
+                            style={{ width: 42, height: 34, padding: 2, cursor: 'pointer', flexShrink: 0 }}
+                          />
+                          <input
+                            id={`pref-${key}`}
+                            value={val}
+                            maxLength={7}
+                            onChange={(e) => {
+                              const next = { ...themeColors, [key]: e.target.value };
+                              setThemeColors(next);
+                              if (/^#[0-9a-f]{6}$/i.test(e.target.value)) applyTheme(next);
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {(() => {
+                  const contrastWarnings = getThemeContrastWarnings(themeColors);
+                  if (!contrastWarnings.length) return null;
+                  return (
+                    <div
+                      className="banner show"
+                      role="alert"
+                      style={{
+                        background: '#fffbeb',
+                        borderColor: '#f59e0b',
+                        color: '#92400e',
+                        flexDirection: 'column',
+                        alignItems: 'flex-start',
+                        gap: '.35rem',
+                        marginBottom: '1rem',
+                      }}
+                    >
+                      <strong>WCAG 2.1 AA Contrast Warning:</strong>
+                      <ul style={{ margin: '0 0 0 1.2rem', padding: 0, fontSize: '.86rem' }}>
+                        {contrastWarnings.map((w) => <li key={w}>{w}</li>)}
+                      </ul>
+                    </div>
+                  );
+                })()}
+              </>
+            )}
+
+            <button type="submit" className="btn primary">Save General Preferences</button>
+            {msg.text && (
+              <div className={msg.isError ? 'error-msg' : 'ok-msg'} role="status">{msg.text}</div>
+            )}
+          </form>
+        </div>
+      )}
+
+      {tab === 'updates' && <SystemUpdatesCard />}
     </section>
   );
 }

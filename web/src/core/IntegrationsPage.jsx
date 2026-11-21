@@ -21,6 +21,7 @@ import { useToast } from './toast.jsx';
 
 export default function IntegrationsPage() {
   const showToast = useToast();
+  const [tab, setTab] = useState('email');
   const [cfg, setCfg] = useState(null);
   const [apiKey, setApiKey] = useState('');
   const [projectId, setProjectId] = useState('');
@@ -136,7 +137,23 @@ export default function IntegrationsPage() {
 
   return (
     <section id="section-integrations">
-      <h1>Integrations</h1>
+      <h1>Email &amp; Integrations</h1>
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'email' ? ' active' : ''}`} onClick={() => setTab('email')}>
+          Outgoing Email (SMTP)
+        </button>
+        <button type="button" className={`btn sm${tab === 'subscribers' ? ' active' : ''}`} onClick={() => setTab('subscribers')}>
+          Subscribers &amp; Bulletins ({(subData.subscribers || []).length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'payments' ? ' active' : ''}`} onClick={() => setTab('payments')}>
+          Payments (Stripe)
+        </button>
+        <button type="button" className={`btn sm${tab === 'google' ? ' active' : ''}`} onClick={() => setTab('google')}>
+          Google Cloud
+        </button>
+      </div>
+
+      {tab === 'google' && (
       <div className="card">
         <div className="between" style={{ marginBottom: '.75rem' }}>
           <div>
@@ -233,7 +250,9 @@ export default function IntegrationsPage() {
           )}
         </form>
       </div>
+      )}
 
+      {tab === 'email' && (
       <div className="card">
         <div className="between" style={{ marginBottom: '.75rem' }}>
           <div>
@@ -438,7 +457,9 @@ export default function IntegrationsPage() {
           )}
         </form>
       </div>
+      )}
 
+      {tab === 'subscribers' && (
       <div className="card">
         <div className="between" style={{ marginBottom: '.75rem' }}>
           <div>
@@ -498,8 +519,9 @@ export default function IntegrationsPage() {
           </table>
         )}
       </div>
+      )}
 
-      <StripePaymentsCard showToast={showToast} />
+      {tab === 'payments' && <StripePaymentsCard showToast={showToast} />}
     </section>
   );
 }

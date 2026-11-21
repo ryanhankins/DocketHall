@@ -41,13 +41,12 @@ const EMPTY_FORM = {
 
 export default function BillingManagePage({ fixedBillType = '', pageTitle = '', pageSubtitle = '' }) {
   const showToast = useToast();
+  const [tab, setTab] = useState('ledger');
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState(fixedBillType || '');
   const [statusFilter, setStatusFilter] = useState('');
   const [q, setQ] = useState('');
-  const [showForm, setShowForm] = useState(false);
-  const [showTools, setShowTools] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM, bill_type: fixedBillType || 'utility' });
   const [lineItemsText, setLineItemsText] = useState('');
   const [saving, setSaving] = useState(false);
@@ -104,9 +103,9 @@ export default function BillingManagePage({ fixedBillType = '', pageTitle = '', 
         body: JSON.stringify({ ...form, line_items }),
       });
       showToast(`Created ${created.reference_number}`, 'ok');
-      setForm({ ...EMPTY_FORM });
+      setForm({ ...EMPTY_FORM, bill_type: fixedBillType || 'utility' });
       setLineItemsText('');
-      setShowForm(false);
+      setTab('ledger');
       await loadBills();
     } catch (err) {
       showToast(err.message || 'Failed to create bill', 'error');
@@ -206,24 +205,26 @@ export default function BillingManagePage({ fixedBillType = '', pageTitle = '', 
 
   return (
     <section id="section-billing">
-      <div className="between" style={{ marginBottom: '1rem', flexWrap: 'wrap', gap: '.5rem' }}>
-        <div>
-          <h1 style={{ margin: 0 }}>{pageTitle || 'Utility Bills, Citations & Misc. Fees'}</h1>
-          <p className="muted" style={{ margin: '.25rem 0 0' }}>
-            {pageSubtitle || <>Manage utility statements, municipal citations, batch CSV imports, late-fee aging, and PDF invoices for <code>/#pay</code>.</>}
-          </p>
-        </div>
-        <div className="actions">
-          <button type="button" className="btn" onClick={() => setShowTools(v => !v)}>
-            {showTools ? 'Hide Batch Tools' : 'Batch CSV & Late Fees'}
-          </button>
-          <button type="button" className="btn primary" onClick={() => setShowForm(v => !v)}>
-            {showForm ? 'Close Form' : '+ New Bill / Citation'}
-          </button>
-        </div>
+      <div style={{ marginBottom: '.85rem' }}>
+        <h1 style={{ margin: 0 }}>{pageTitle || 'Utility Bills, Citations & Misc. Fees'}</h1>
+        <p className="muted" style={{ margin: '.25rem 0 0' }}>
+          {pageSubtitle || <>Manage utility statements, municipal citations, batch CSV imports, late-fee aging, and PDF invoices for <code>/#pay</code>.</>}
+        </p>
       </div>
 
-      {showTools && (
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'ledger' ? ' active' : ''}`} onClick={() => setTab('ledger')}>
+          Bills &amp; Ledger ({bills.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'create' ? ' active' : ''}`} onClick={() => setTab('create')}>
+          + Create Bill / Fee
+        </button>
+        <button type="button" className={`btn sm${tab === 'tools' ? ' active' : ''}`} onClick={() => setTab('tools')}>
+          CSV Import &amp; Late Fees
+        </button>
+      </div>
+
+      {tab === 'tools' && (
         <div className="card" style={{ display: 'grid', gap: '1rem' }}>
           <form onSubmit={handleImportCsv} className="row" style={{ alignItems: 'flex-end', gap: '.65rem', flexWrap: 'wrap' }}>
             <div className="field" style={{ flex: 1, minWidth: 240 }}>
@@ -258,7 +259,7 @@ export default function BillingManagePage({ fixedBillType = '', pageTitle = '', 
         </div>
       )}
 
-      {showForm && (
+      {tab === 'create' && (
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Create Bill, Citation, or Fee</h2>
           <form onSubmit={handleCreate}>
@@ -326,6 +327,7 @@ export default function BillingManagePage({ fixedBillType = '', pageTitle = '', 
         </div>
       )}
 
+      {tab === 'ledger' && (
       <div className="card">
         <div className="row" style={{ marginBottom: '.85rem' }}>
           <input
@@ -427,6 +429,7 @@ export default function BillingManagePage({ fixedBillType = '', pageTitle = '', 
           </div>
         )}
       </div>
+      )}
 
       {paymentBill && (
         <div

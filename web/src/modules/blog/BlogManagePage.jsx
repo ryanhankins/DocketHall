@@ -102,11 +102,22 @@ function toDatetimeLocalValue(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export default function BlogManagePage() {
-  const [tab, setTab] = useState('posts');
+export default function BlogManagePage({ initialTab = 'posts' }) {
+  const [tab, setTab] = useState(initialTab || 'posts');
   const [categories, setCategories] = useState([]);
   const [posts, setPosts] = useState([]);
   const [commentData, setCommentData] = useState({ items: [], counts: { pending: 0, approved: 0, rejected: 0 } });
+
+  const [homeBlogEnabled, setHomeBlogEnabled] = useState(true);
+  const [homeBlogCount, setHomeBlogCount] = useState(3);
+  const [homeBlogStyle, setHomeBlogStyle] = useState('cards');
+  const [homeBlogPosition, setHomeBlogPosition] = useState('below_services');
+  const [homeBlogHeading, setHomeBlogHeading] = useState('');
+  const [savingHomeBlog, setSavingHomeBlog] = useState(false);
+
+  useEffect(() => {
+    setTab(initialTab || 'posts');
+  }, [initialTab]);
 
   const [catFilter, setCatFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -168,6 +179,45 @@ export default function BlogManagePage() {
   useEffect(() => {
     loadComments().catch((e) => showToast(e.message, 'error'));
   }, [loadComments, showToast]);
+
+  useEffect(() => {
+    api('/api/branding')
+      .then((b) => {
+        setHomeBlogEnabled(b?.home_blog_enabled !== false);
+        setHomeBlogCount(Number(b?.home_blog_count) || 3);
+        setHomeBlogStyle(b?.home_blog_style === 'full' ? 'full' : 'cards');
+        setHomeBlogPosition(b?.home_blog_position === 'above_services' ? 'above_services' : 'below_services');
+        setHomeBlogHeading(b?.home_blog_heading || '');
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleSaveHomeBlogSettings = async (e) => {
+    e.preventDefault();
+    setSavingHomeBlog(true);
+    try {
+      const saved = await api('/api/branding/home-text', {
+        method: 'PUT',
+        body: JSON.stringify({
+          home_blog_enabled: homeBlogEnabled,
+          home_blog_count: Math.max(1, Math.min(20, Number(homeBlogCount) || 3)),
+          home_blog_style: homeBlogStyle,
+          home_blog_position: homeBlogPosition,
+          home_blog_heading: homeBlogHeading.trim(),
+        }),
+      });
+      setHomeBlogEnabled(saved?.home_blog_enabled !== false);
+      setHomeBlogCount(Number(saved?.home_blog_count) || 3);
+      setHomeBlogStyle(saved?.home_blog_style === 'full' ? 'full' : 'cards');
+      setHomeBlogPosition(saved?.home_blog_position === 'above_services' ? 'above_services' : 'below_services');
+      setHomeBlogHeading(saved?.home_blog_heading || '');
+      showToast('Main page blog display settings saved', 'ok');
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setSavingHomeBlog(false);
+    }
+  };
 
   const selectedCategory = useMemo(
     () => categories.find((c) => String(c.id) === String(postForm.category_id)) || null,
@@ -372,6 +422,13 @@ export default function BlogManagePage() {
           {pendingCount > 0 && (
             <span className="badge" style={{ background: '#fef3c7', color: '#92400e' }}>{pendingCount}</span>
           )}
+        </button>
+        <button
+          type="button"
+          className={`btn sm${tab === 'settings' ? ' active' : ''}`}
+          onClick={() => setTab('settings')}
+        >
+          Main Page Display &amp; Settings
         </button>
       </div>
 
@@ -1039,11 +1096,83 @@ export default function BlogManagePage() {
         </div>
       )}
 
-      <ModuleNotificationsCard
-        moduleId="blog"
-        title="Blog Email Notifications"
-        events={BLOG_NOTIFICATION_EVENTS}
-      />
+      {tab === 'settings' && (
+        <>
+          <div className="card">
+            <h2 style={{ marginTop: 0 }}>Main Page Blog Feed Display</h2>
+            <p className="muted" style={{ marginTop: 0, fontSize: '.88rem' }}>
+              Control whether recent blog entries appear on the public main page, how many entries to show, and how they are presented.
+              Only categories with <strong>Show Posts on Portal Homepage Feed</strong> enabled appear on the main page.
+            </p>
+            <form onSubmit={handleSaveHomeBlogSettings}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginBottom: homeBlogEnabled ? '.85rem' : '1rem', cursor: 'pointer', fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  style={{ width: 'auto' }}
+                  checked={homeBlogEnabled}
+                  onChange={(e) => setHomeBlogEnabled(e.target.checked)}
+                />
+                <span>Show recent blog entries on the main page</span>
+              </label>
+              {homeBlogEnabled && (
+                <div className="row" style={{ marginBottom: '1rem' }}>
+                  <div className="field" style={{ width: 150 }}>
+                    <label htmlFor="blog-adm-home-count">Entries to Show (1–20)</label>
+                    <input
+                      id="blog-adm-home-count"
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={homeBlogCount}
+                      onChange={(e) => setHomeBlogCount(e.target.value)}
+                    />
+                  </div>
+                  <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                    <label htmlFor="blog-adm-home-style">Display Style</label>
+                    <select
+                      id="blog-adm-home-style"
+                      value={homeBlogStyle}
+                      onChange={(e) => setHomeBlogStyle(e.target.value)}
+                    >
+                      <option value="cards">Summary Cards</option>
+                      <option value="full">Full Blog Entries</option>
+                    </select>
+                  </div>
+                  <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                    <label htmlFor="blog-adm-home-pos">Placement</label>
+                    <select
+                      id="blog-adm-home-pos"
+                      value={homeBlogPosition}
+                      onChange={(e) => setHomeBlogPosition(e.target.value)}
+                    >
+                      <option value="below_services">Below City Services</option>
+                      <option value="above_services">Above City Services</option>
+                    </select>
+                  </div>
+                  <div className="field" style={{ flex: 1, minWidth: 200 }}>
+                    <label htmlFor="blog-adm-home-heading">Section Heading (optional)</label>
+                    <input
+                      id="blog-adm-home-heading"
+                      placeholder="Latest from the Blog"
+                      value={homeBlogHeading}
+                      onChange={(e) => setHomeBlogHeading(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+              <button type="submit" className="btn primary" disabled={savingHomeBlog}>
+                {savingHomeBlog ? 'Saving…' : 'Save Display Settings'}
+              </button>
+            </form>
+          </div>
+
+          <ModuleNotificationsCard
+            moduleId="blog"
+            title="Blog Email Notifications"
+            events={BLOG_NOTIFICATION_EVENTS}
+          />
+        </>
+      )}
     </section>
   );
 }
