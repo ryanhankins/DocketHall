@@ -27,10 +27,10 @@ def test_health_and_public_modules(anon_client):
 
 
 def test_admin_launch_readiness_and_auth_boundary(anon_client, admin_client):
-    unauth = anon_client.get("/api/backup/launch-readiness")
+    unauth = anon_client.get("/api/backup/readiness")
     assert unauth.status_code in (401, 403)
 
-    ready = admin_client.get("/api/backup/launch-readiness")
+    ready = admin_client.get("/api/backup/readiness")
     assert ready.status_code == 200
     body = ready.json()
     assert "checks" in body

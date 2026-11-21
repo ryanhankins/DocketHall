@@ -83,3 +83,19 @@ def anon_client(api_app):
 
     with TestClient(api_app) as client:
         yield client
+
+
+@pytest.fixture()
+def applicant_client(api_app):
+    """Authenticated TestClient registered as a low-privilege applicant user."""
+    import uuid
+    from fastapi.testclient import TestClient  # noqa: WPS433
+
+    uname = f"test_applicant_{uuid.uuid4().hex[:8]}"
+    with TestClient(api_app) as client:
+        res = client.post(
+            "/api/register",
+            json={"username": uname, "email": f"{uname}@example.com", "password": "TestPassword123!"},
+        )
+        assert res.status_code == 201, f"Applicant register failed: {res.status_code} {res.text}"
+        yield client
