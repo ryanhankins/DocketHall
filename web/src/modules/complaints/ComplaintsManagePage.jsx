@@ -34,7 +34,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
-  const [showOralForm, setShowOralForm] = useState(false);
+  const [tab, setTab] = useState('queue'); // 'queue' | 'reinspection' | 'work_orders' | 'intake'
   const [oralForm, setOralForm] = useState({
     intake_channel: 'oral',
     is_anonymous: false,
@@ -67,8 +67,6 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
   const [sendingMsg, setSendingMsg] = useState(false);
 
   const [codeSections, setCodeSections] = useState([]);
-  const [showQueue, setShowQueue] = useState(false);
-  const [showWo, setShowWo] = useState(false);
   const [woList, setWoList] = useState([]);
   const [editingWo, setEditingWo] = useState(null);
   const [savingWo, setSavingWo] = useState(false);
@@ -129,18 +127,18 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
   }, []);
 
   useEffect(() => {
-    if (!showQueue) return;
+    if (tab !== 'reinspection') return;
     api('/api/complaints/reinspections/queue')
       .then((rows) => setReinspQueue(Array.isArray(rows) ? rows : []))
       .catch(() => setReinspQueue([]));
-  }, [showQueue, items]);
+  }, [tab, items]);
 
   useEffect(() => {
-    if (!showWo) return;
+    if (tab !== 'work_orders') return;
     api('/api/complaints/work-orders')
       .then((rows) => setWoList(Array.isArray(rows) ? rows : []))
       .catch(() => setWoList([]));
-  }, [showWo]);
+  }, [tab]);
 
   useEffect(() => {
     if (!initialId || items.length === 0) return;
@@ -177,7 +175,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
         body: JSON.stringify(oralForm),
       });
       showToast(`Logged ${created.complaint_number}`, 'ok');
-      setShowOralForm(false);
+      setTab('queue');
       setOralForm({
         intake_channel: 'oral',
         is_anonymous: false,
@@ -274,39 +272,29 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Complaint Queue &amp; Investigations</h2>
-          <p className="muted" style={{ margin: '4px 0 0' }}>
-            Staff workbench for investigations, Notices of Violation, Council/Board referrals, and Log Book resolutions.
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setShowWo((v) => !v)}
-          >
-            {showWo ? 'Hide 311 / Public Works' : '311 / Public Works Orders'}
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => setShowQueue((v) => !v)}
-          >
-            {showQueue ? 'Hide Reinspection Queue' : 'Reinspection & Deadline Queue'}
-          </button>
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => setShowOralForm((v) => !v)}
-          >
-            {showOralForm ? 'Close Intake Form' : '+ Log Oral / Staff Complaint'}
-          </button>
-        </div>
+      <div>
+        <h2 style={{ margin: 0 }}>Complaint Queue &amp; Investigations</h2>
+        <p className="muted" style={{ margin: '4px 0 0' }}>
+          Staff workbench for investigations, Notices of Violation, Council/Board referrals, and Log Book resolutions.
+        </p>
       </div>
 
-      {showWo && (
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'queue' ? ' active' : ''}`} onClick={() => setTab('queue')}>
+          Complaint Queue ({items.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'reinspection' ? ' active' : ''}`} onClick={() => setTab('reinspection')}>
+          Reinspection &amp; Deadlines
+        </button>
+        <button type="button" className={`btn sm${tab === 'work_orders' ? ' active' : ''}`} onClick={() => setTab('work_orders')}>
+          311 / Work Orders
+        </button>
+        <button type="button" className={`btn sm${tab === 'intake' ? ' active' : ''}`} onClick={() => setTab('intake')}>
+          + Log Oral / Staff Complaint
+        </button>
+      </div>
+
+      {tab === 'work_orders' && (
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Public Works &amp; 311 Work Orders ({woList.length})</h3>
           {!woList.length ? (
@@ -387,7 +375,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
         </div>
       )}
 
-      {showQueue && (
+      {tab === 'reinspection' && (
         <div className="card">
           <h3 style={{ marginTop: 0 }}>Reinspection &amp; NOV Compliance Queue</h3>
           {reinspQueue.length === 0 ? (
@@ -421,7 +409,10 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                         className="btn sm"
                         onClick={() => {
                           const match = items.find((x) => x.id === rq.id);
-                          if (match) openCase(match);
+                          if (match) {
+                            openCase(match);
+                            setTab('queue');
+                          }
                         }}
                       >
                         Open
@@ -435,30 +426,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
-        <div className="card" style={{ margin: 0, padding: '.75rem 1rem' }}>
-          <div className="muted" style={{ fontSize: 12 }}>Total Complaints</div>
-          <div style={{ fontSize: '1.35rem', fontWeight: 700 }}>{stats.total}</div>
-        </div>
-        <div className="card" style={{ margin: 0, padding: '.75rem 1rem' }}>
-          <div className="muted" style={{ fontSize: 12 }}>Open Cases</div>
-          <div style={{ fontSize: '1.35rem', fontWeight: 700, color: '#2563eb' }}>{stats.open_count}</div>
-        </div>
-        <div className="card" style={{ margin: 0, padding: '.75rem 1rem', borderColor: stats.overdue_nov_count > 0 ? '#fca5a5' : undefined }}>
-          <div className="muted" style={{ fontSize: 12 }}>Overdue NOV Deadlines</div>
-          <div style={{ fontSize: '1.35rem', fontWeight: 700, color: stats.overdue_nov_count > 0 ? '#dc2626' : undefined }}>
-            {stats.overdue_nov_count}
-          </div>
-        </div>
-        <div className="card" style={{ margin: 0, padding: '.75rem 1rem' }}>
-          <div className="muted" style={{ fontSize: 12 }}>Avg. Resolution</div>
-          <div style={{ fontSize: '1.35rem', fontWeight: 700 }}>
-            {stats.avg_resolution_days != null ? `${stats.avg_resolution_days}d` : '—'}
-          </div>
-        </div>
-      </div>
-
-      {showOralForm && (
+      {tab === 'intake' && (
         <form className="card" onSubmit={handleLogOral} style={{ display: 'grid', gap: 10 }}>
           <h3 style={{ margin: 0 }}>Log Oral, Anonymous, or Written Complaint</h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
@@ -526,6 +494,31 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
           </div>
         </form>
       )}
+
+      {tab === 'queue' && (
+      <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+        <div className="card" style={{ margin: 0, padding: '.75rem 1rem' }}>
+          <div className="muted" style={{ fontSize: 12 }}>Total Complaints</div>
+          <div style={{ fontSize: '1.35rem', fontWeight: 700 }}>{stats.total}</div>
+        </div>
+        <div className="card" style={{ margin: 0, padding: '.75rem 1rem' }}>
+          <div className="muted" style={{ fontSize: 12 }}>Open Cases</div>
+          <div style={{ fontSize: '1.35rem', fontWeight: 700, color: '#2563eb' }}>{stats.open_count}</div>
+        </div>
+        <div className="card" style={{ margin: 0, padding: '.75rem 1rem', borderColor: stats.overdue_nov_count > 0 ? '#fca5a5' : undefined }}>
+          <div className="muted" style={{ fontSize: 12 }}>Overdue NOV Deadlines</div>
+          <div style={{ fontSize: '1.35rem', fontWeight: 700, color: stats.overdue_nov_count > 0 ? '#dc2626' : undefined }}>
+            {stats.overdue_nov_count}
+          </div>
+        </div>
+        <div className="card" style={{ margin: 0, padding: '.75rem 1rem' }}>
+          <div className="muted" style={{ fontSize: 12 }}>Avg. Resolution</div>
+          <div style={{ fontSize: '1.35rem', fontWeight: 700 }}>
+            {stats.avg_resolution_days != null ? `${stats.avg_resolution_days}d` : '—'}
+          </div>
+        </div>
+      </div>
 
       <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
         <input
@@ -811,7 +804,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                           assigned_crew: 'Public Works',
                         }),
                       });
-                      setShowWo(true);
+                      setTab('work_orders');
                       setWoList((prev) => [wo, ...prev]);
                       showToast(`Created Work Order ${wo.work_order_number}`, 'ok');
                     }}
@@ -1093,6 +1086,8 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
           </div>
         )}
       </div>
+      </>
+      )}
 
       {editingWo && (
         <div

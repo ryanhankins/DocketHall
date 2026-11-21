@@ -212,6 +212,7 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
   const [templateId, setTemplateId] = useState('');
   const [formErr, setFormErr] = useState('');
 
+  const [tab, setTab] = useState('agendas');
   const [search, setSearch] = useState('');
   const [selectedBodies, setSelectedBodies] = useState([]);
   const [selectedCats, setSelectedCats] = useState([]);
@@ -408,25 +409,50 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
         </div>
       )}
 
-      {submissions.length > 0 && (
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'agendas' ? ' active' : ''}`} onClick={() => setTab('agendas')}>
+          Agendas ({agendas.length})
+        </button>
+        <button
+          type="button"
+          className={`btn sm${tab === 'submissions' ? ' active' : ''}`}
+          onClick={() => setTab('submissions')}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem' }}
+        >
+          <span>Council Submissions</span>
+          {submissions.length > 0 && (
+            <span className="badge" style={{ background: '#fef3c7', color: '#92400e' }}>{submissions.length}</span>
+          )}
+        </button>
+        <button type="button" className={`btn sm${tab === 'create' ? ' active' : ''}`} onClick={() => setTab('create')}>
+          + New Agenda
+        </button>
+      </div>
+
+      {tab === 'submissions' && (
         <div className="card">
           <div className="between" style={{ marginBottom: '.65rem' }}>
             <h2 style={{ margin: 0 }}>Council &amp; Staff Submissions</h2>
             <span className="badge draft">{submissions.length} pending</span>
           </div>
-          <table>
-            <thead>
-              <tr><th>Submitted Item</th><th>From</th><th>Requested</th><th>Assign to Agenda</th><th>Actions</th></tr>
-            </thead>
-            <tbody>
-              {submissions.map(s => (
-                <SubmissionRow key={s.id} sub={s} agendas={agendas} onReloadAll={loadAll} onReloadSubs={loadSubs} />
-              ))}
-            </tbody>
-          </table>
+          {submissions.length === 0 ? (
+            <p className="muted" style={{ margin: 0 }}>No pending council or staff submissions.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr><th>Submitted Item</th><th>From</th><th>Requested</th><th>Assign to Agenda</th><th>Actions</th></tr>
+              </thead>
+              <tbody>
+                {submissions.map(s => (
+                  <SubmissionRow key={s.id} sub={s} agendas={agendas} onReloadAll={loadAll} onReloadSubs={loadSubs} />
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
 
+      {tab === 'create' && (
       <div className="card">
         <h2>New Agenda</h2>
         <form onSubmit={handleCreate}>
@@ -475,7 +501,9 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
           {formErr && <div className="error-msg" role="alert">{formErr}</div>}
         </form>
       </div>
+      )}
 
+      {tab === 'agendas' && (
       <div className="card">
         <div className="row" style={{ marginBottom: '1rem', alignItems: 'flex-end' }}>
           <div className="field" style={{ flex: 1, minWidth: '180px' }}>
@@ -615,6 +643,7 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
           </div>
         ))}
       </div>
+      )}
     </section>
   );
 }

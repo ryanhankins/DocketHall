@@ -51,6 +51,7 @@ const EMPTY_FORM = {
 
 export default function ContractorsManagePage() {
   const [items, setItems] = useState([]);
+  const [tab, setTab] = useState('directory');
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [form, setForm] = useState({ ...EMPTY_FORM });
@@ -98,6 +99,7 @@ export default function ContractorsManagePage() {
       }
       setForm({ ...EMPTY_FORM });
       setEditId(null);
+      setTab('directory');
       await load();
     } catch (err) {
       showToast(err.message, 'error');
@@ -140,6 +142,16 @@ export default function ContractorsManagePage() {
         </div>
       </div>
 
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'directory' ? ' active' : ''}`} onClick={() => setTab('directory')}>
+          Registered Directory ({items.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'add' ? ' active' : ''}`} onClick={() => setTab('add')}>
+          {editId ? 'Edit Contractor / Business' : '+ Register Contractor'}
+        </button>
+      </div>
+
+      {tab === 'add' && (
       <div className="card">
         <h2>{editId ? 'Edit Contractor / Business License' : 'Register Contractor or Business License'}</h2>
         <form onSubmit={handleSave}>
@@ -227,14 +239,16 @@ export default function ContractorsManagePage() {
               {busy ? 'Saving…' : (editId ? 'Save License' : 'Add Contractor License')}
             </button>
             {editId && (
-              <button type="button" className="btn" onClick={() => { setEditId(null); setForm({ ...EMPTY_FORM }); }}>
+              <button type="button" className="btn" onClick={() => { setEditId(null); setForm({ ...EMPTY_FORM }); setTab('directory'); }}>
                 Cancel
               </button>
             )}
           </div>
         </form>
       </div>
+      )}
 
+      {tab === 'directory' && (
       <div className="card">
         <div className="between" style={{ marginBottom: '.75rem', flexWrap: 'wrap', gap: '.5rem' }}>
           <h2 style={{ margin: 0 }}>Registered Contractors &amp; Businesses ({items.length})</h2>
@@ -304,6 +318,7 @@ export default function ContractorsManagePage() {
                         className="btn sm"
                         onClick={() => {
                           setEditId(c.id);
+                          setTab('add');
                           setForm({
                             license_number: c.license_number || '',
                             business_name: c.business_name || '',
@@ -344,6 +359,7 @@ export default function ContractorsManagePage() {
           </table>
         )}
       </div>
+      )}
     </section>
   );
 }

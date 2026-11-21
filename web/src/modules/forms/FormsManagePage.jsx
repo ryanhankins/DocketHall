@@ -43,6 +43,7 @@ const FORM_NOTIFICATION_EVENTS = [
 export default function FormsManagePage() {
   const [forms, setForms] = useState([]);
   const [editingId, setEditingId] = useState(null);
+  const [tab, setTab] = useState('list');
   const [formDraft, setFormDraft] = useState({ ...EMPTY_FORM });
 
   // New/Edit field builder inputs
@@ -117,6 +118,7 @@ export default function FormsManagePage() {
       }
       setEditingId(null);
       setFormDraft({ ...EMPTY_FORM });
+      setTab('list');
       await loadForms();
     } catch (err) {
       showToast(err.message, 'error');
@@ -132,6 +134,19 @@ export default function FormsManagePage() {
         <a href="/#forms" target="_blank" rel="noreferrer" className="btn sm">View Public Forms &amp; Polls</a>
       </div>
 
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'list' ? ' active' : ''}`} onClick={() => setTab('list')}>
+          Forms &amp; Polls ({forms.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'create' ? ' active' : ''}`} onClick={() => setTab('create')}>
+          {editingId ? 'Edit Form / Poll' : '+ Create Form / Poll'}
+        </button>
+        <button type="button" className={`btn sm${tab === 'notifications' ? ' active' : ''}`} onClick={() => setTab('notifications')}>
+          Email Notifications
+        </button>
+      </div>
+
+      {tab === 'create' && (
       <div className="card">
         <h2>{editingId ? 'Edit Form / Poll' : 'Create New Form or Opinion Poll'}</h2>
         <form onSubmit={saveForm}>
@@ -238,14 +253,17 @@ export default function FormsManagePage() {
               {busy ? 'Saving…' : (editingId ? 'Save Form' : 'Create Form')}
             </button>
             {editingId && (
-              <button type="button" className="btn" onClick={() => { setEditingId(null); setFormDraft({ ...EMPTY_FORM }); }}>
+              <button type="button" className="btn" onClick={() => { setEditingId(null); setFormDraft({ ...EMPTY_FORM }); setTab('list'); }}>
                 Cancel
               </button>
             )}
           </div>
         </form>
       </div>
+      )}
 
+      {tab === 'list' && (
+      <>
       <div className="card">
         <h2>Configured Forms &amp; Polls ({forms.length})</h2>
         <table>
@@ -270,6 +288,7 @@ export default function FormsManagePage() {
                       className="btn sm"
                       onClick={() => {
                         setEditingId(frm.id);
+                        setTab('create');
                         setFormDraft({
                           title: frm.title || '',
                           form_kind: frm.form_kind || 'form',
@@ -386,12 +405,16 @@ export default function FormsManagePage() {
           )}
         </div>
       )}
+      </>
+      )}
 
+      {tab === 'notifications' && (
       <ModuleNotificationsCard
         moduleId="forms"
         title="Forms & Polls Email Notifications"
         events={FORM_NOTIFICATION_EVENTS}
       />
+      )}
     </section>
   );
 }

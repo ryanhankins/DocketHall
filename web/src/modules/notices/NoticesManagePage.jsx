@@ -58,6 +58,7 @@ export default function NoticesManagePage() {
   const [q, setQ] = useState('');
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [editingId, setEditingId] = useState(null);
+  const [tab, setTab] = useState('list');
   const [attachFile, setAttachFile] = useState(null);
   const [pdfWarn, setPdfWarn] = useState('');
   const [saving, setSaving] = useState(false);
@@ -115,6 +116,7 @@ export default function NoticesManagePage() {
       }
       setForm({ ...EMPTY_FORM });
       setEditingId(null);
+      setTab('list');
       await loadItems();
     } catch (err) {
       showToast(err.message, 'error');
@@ -125,6 +127,7 @@ export default function NoticesManagePage() {
 
   const startEdit = (n) => {
     setEditingId(n.id);
+    setTab('create');
     setForm({
       title: n.title || '',
       category: n.category || 'news',
@@ -148,6 +151,19 @@ export default function NoticesManagePage() {
         <a href="/#notices" target="_blank" rel="noreferrer" className="btn sm">View Public Notices</a>
       </div>
 
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'list' ? ' active' : ''}`} onClick={() => setTab('list')}>
+          All Posts ({items.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'create' ? ' active' : ''}`} onClick={() => setTab('create')}>
+          {editingId ? 'Edit Post' : '+ Create Post'}
+        </button>
+        <button type="button" className={`btn sm${tab === 'notifications' ? ' active' : ''}`} onClick={() => setTab('notifications')}>
+          Email Notifications
+        </button>
+      </div>
+
+      {tab === 'create' && (
       <div className="card">
         <h2>{editingId ? 'Edit Post' : 'Create News, Notice, Bid, or Job Posting'}</h2>
         <form onSubmit={handleSubmit}>
@@ -301,7 +317,7 @@ export default function NoticesManagePage() {
               <button
                 type="button"
                 className="btn"
-                onClick={() => { setEditingId(null); setForm({ ...EMPTY_FORM }); }}
+                onClick={() => { setEditingId(null); setForm({ ...EMPTY_FORM }); setTab('list'); }}
               >
                 Cancel
               </button>
@@ -309,7 +325,10 @@ export default function NoticesManagePage() {
           </div>
         </form>
       </div>
+      )}
 
+      {tab === 'list' && (
+      <>
       <div className="card">
         <div className="between" style={{ marginBottom: '.85rem', flexWrap: 'wrap', gap: '.5rem' }}>
           <h2 style={{ margin: 0 }}>All Posts ({items.length})</h2>
@@ -462,12 +481,16 @@ export default function NoticesManagePage() {
           )}
         </div>
       )}
+      </>
+      )}
 
+      {tab === 'notifications' && (
       <ModuleNotificationsCard
         moduleId="notices"
         title="News & Notices Email Notifications"
         events={NOTICE_NOTIFICATION_EVENTS}
       />
+      )}
     </section>
   );
 }

@@ -637,6 +637,8 @@ export default function PermitCatalogAdminPage() {
     }
   };
 
+  const [tab, setTab] = useState('catalog');
+
   return (
     <section id="section-permits-catalog-admin">
       <div className="between" style={{ marginBottom: '1rem' }}>
@@ -644,6 +646,19 @@ export default function PermitCatalogAdminPage() {
         <a href="/portal" target="_blank" rel="noreferrer" className="btn sm">Open Public Permits Portal</a>
       </div>
 
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'catalog' ? ' active' : ''}`} onClick={() => setTab('catalog')}>
+          Permit Catalog &amp; Fees ({types.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'portal' ? ' active' : ''}`} onClick={() => setTab('portal')}>
+          Portal Instructions &amp; Links
+        </button>
+        <button type="button" className={`btn sm${tab === 'notifications' ? ' active' : ''}`} onClick={() => setTab('notifications')}>
+          Email Notifications
+        </button>
+      </div>
+
+      {tab === 'portal' && (
       <div className="card">
         <h2>Public Portal Instructions &amp; Payment Links</h2>
         <form onSubmit={handleSaveSettings}>
@@ -679,7 +694,9 @@ export default function PermitCatalogAdminPage() {
           {msg.text && <div className={msg.isError ? 'error-msg' : 'ok-msg'} role="status">{msg.text}</div>}
         </form>
       </div>
+      )}
 
+      {tab === 'catalog' && (
       <div className="card">
         <div className="between" style={{ marginBottom: '.35rem' }}>
           <h2 style={{ margin: 0 }}>Permit Categories &amp; Items</h2>
@@ -756,12 +773,15 @@ export default function PermitCatalogAdminPage() {
           />
         ))}
       </div>
+      )}
 
+      {tab === 'notifications' && (
       <ModuleNotificationsCard
         moduleId="permits"
         title="Permit Email Notifications"
         events={PERMIT_NOTIFICATION_EVENTS}
       />
+      )}
     </section>
   );
 }

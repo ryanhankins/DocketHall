@@ -478,7 +478,7 @@ export default function CoreShell() {
               }
 
               const hasActiveChild = mod.items.some(it => it.section === activeSection);
-              const isOpen = q ? true : (!!openSubmenus[mod.id] || hasActiveChild);
+              const isOpen = q ? true : (openSubmenus[mod.id] !== undefined ? !!openSubmenus[mod.id] : hasActiveChild);
               return (
                 <div key={mod.id} className="nav-group">
                   <button
@@ -533,7 +533,7 @@ export default function CoreShell() {
                 : adminItems;
               if (visibleAdmin.length === 0) return null;
               const adminActive = adminItems.some(it => it.section === activeSection);
-              const adminOpen = q ? true : (!!openSubmenus['admin-section'] || adminActive);
+              const adminOpen = q ? true : (openSubmenus['admin-section'] !== undefined ? !!openSubmenus['admin-section'] : adminActive);
               return (
                 <div id="menu-admin" style={{ borderTop: '1px solid #e2e8f0', paddingTop: '.55rem', marginTop: '.4rem' }}>
                   <button

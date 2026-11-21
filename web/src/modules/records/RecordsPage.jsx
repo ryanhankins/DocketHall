@@ -93,7 +93,7 @@ export default function RecordsPage({ me }) {
   const [statusFilter, setStatusFilter] = useState('');
   const [expiringOnly, setExpiringOnly] = useState(false);
 
-  const [showAdd, setShowAdd] = useState(false);
+  const [tab, setTab] = useState('repository'); // 'repository' | 'foia' | 'add' | 'notifications'
   const [newForm, setNewForm] = useState({ ...EMPTY_FORM });
   const [savingNew, setSavingNew] = useState(false);
 
@@ -102,7 +102,6 @@ export default function RecordsPage({ me }) {
   const [savingEdit, setSavingEdit] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [showFoia, setShowFoia] = useState(false);
   const [foiaItems, setFoiaItems] = useState([]);
   const [editingFoia, setEditingFoia] = useState(null);
   const [savingFoia, setSavingFoia] = useState(false);
@@ -137,11 +136,11 @@ export default function RecordsPage({ me }) {
   }, [loadRecords]);
 
   useEffect(() => {
-    if (!showFoia) return;
+    if (tab !== 'foia') return;
     api('/api/records/requests')
       .then((rows) => setFoiaItems(Array.isArray(rows) ? rows : []))
       .catch(() => setFoiaItems([]));
-  }, [showFoia]);
+  }, [tab]);
 
   function openDetail(rec) {
     setSelected(rec);
@@ -178,7 +177,7 @@ export default function RecordsPage({ me }) {
       });
       showToast('Record created', 'ok');
       setNewForm({ ...EMPTY_FORM });
-      setShowAdd(false);
+      setTab('repository');
       await loadRecords();
       openDetail(created);
     } catch (err) {
@@ -266,38 +265,33 @@ export default function RecordsPage({ me }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: 12,
-        }}
-      >
-        <div>
-          <h2 style={{ margin: 0 }}>Contracts, Resolutions &amp; Document Repository</h2>
-          <p className="muted" style={{ margin: '4px 0 0' }}>
-            Central archive for city contracts, resolutions, ordinances, agreements, and renewal tracking.
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button type="button" className="btn" onClick={() => setShowFoia((v) => !v)}>
-            {showFoia ? 'Hide FOIA Requests' : 'FOIA / Data Requests'}
-          </button>
-          {canManage && (
-            <button
-              type="button"
-              className="btn primary"
-              onClick={() => setShowAdd((v) => !v)}
-            >
-              {showAdd ? 'Close Form' : '+ Add Record'}
-            </button>
-          )}
-        </div>
+      <div>
+        <h2 style={{ margin: 0 }}>Contracts, Resolutions &amp; Document Repository</h2>
+        <p className="muted" style={{ margin: '4px 0 0' }}>
+          Central archive for city contracts, resolutions, ordinances, agreements, and renewal tracking.
+        </p>
       </div>
 
-      {showFoia && (
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'repository' ? ' active' : ''}`} onClick={() => setTab('repository')}>
+          Document Repository ({items.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'foia' ? ' active' : ''}`} onClick={() => setTab('foia')}>
+          FOIA / Data Requests
+        </button>
+        {canManage && (
+          <button type="button" className={`btn sm${tab === 'add' ? ' active' : ''}`} onClick={() => setTab('add')}>
+            + Add Record
+          </button>
+        )}
+        {canManage && (
+          <button type="button" className={`btn sm${tab === 'notifications' ? ' active' : ''}`} onClick={() => setTab('notifications')}>
+            Email Notifications
+          </button>
+        )}
+      </div>
+
+      {tab === 'foia' && (
         <div className="card">
           <div className="between" style={{ marginBottom: '.65rem' }}>
             <h3 style={{ margin: 0 }}>Public Records / FOIA Requests ({foiaItems.length})</h3>
@@ -425,33 +419,7 @@ export default function RecordsPage({ me }) {
         </div>
       )}
 
-      {expiringCount > 0 && (
-        <div
-          className="card"
-          style={{
-            background: '#fffbeb',
-            border: '1px solid #fcd34d',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            gap: 12,
-          }}
-        >
-          <div>
-            <strong>Renewal / Expiration Alert:</strong> {expiringCount} record
-            {expiringCount === 1 ? ' is' : 's are'} expired or approaching expiration.
-          </div>
-          <button
-            type="button"
-            className="btn sm"
-            onClick={() => setExpiringOnly((v) => !v)}
-          >
-            {expiringOnly ? 'Show All Records' : 'Filter Expiring / Expired'}
-          </button>
-        </div>
-      )}
-
-      {showAdd && canManage && (
+      {tab === 'add' && canManage && (
         <form className="card" onSubmit={handleCreate} style={{ display: 'grid', gap: 12 }}>
           <h3 style={{ margin: 0 }}>New Repository Record</h3>
           <div
@@ -587,12 +555,40 @@ export default function RecordsPage({ me }) {
             <button
               type="button"
               className="btn"
-              onClick={() => setShowAdd(false)}
+              onClick={() => setTab('repository')}
             >
               Cancel
             </button>
           </div>
         </form>
+      )}
+
+      {tab === 'repository' && (
+      <>
+      {expiringCount > 0 && (
+        <div
+          className="card"
+          style={{
+            background: '#fffbeb',
+            border: '1px solid #fcd34d',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <div>
+            <strong>Renewal / Expiration Alert:</strong> {expiringCount} record
+            {expiringCount === 1 ? ' is' : 's are'} expired or approaching expiration.
+          </div>
+          <button
+            type="button"
+            className="btn sm"
+            onClick={() => setExpiringOnly((v) => !v)}
+          >
+            {expiringOnly ? 'Show All Records' : 'Filter Expiring / Expired'}
+          </button>
+        </div>
       )}
 
       <div
@@ -962,8 +958,10 @@ export default function RecordsPage({ me }) {
           </div>
         )}
       </div>
+      </>
+      )}
 
-      {canManage && (
+      {tab === 'notifications' && canManage && (
         <ModuleNotificationsCard
           moduleId="records"
           title="Records &amp; FOIA Email Notifications"

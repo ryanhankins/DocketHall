@@ -177,6 +177,7 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
   const [folder, setFolder] = useState('');
   const [formErr, setFormErr] = useState('');
 
+  const [tab, setTab] = useState('list');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('open');
   const [bodyFilter, setBodyFilter] = useState('');
@@ -250,6 +251,7 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
       setTitle(''); setAssignedTo(''); setTargetBody(''); setTargetDate('');
       setRecurrence('none'); setSection(''); setPresenter(''); setMotion(''); setFiscal(''); setDescription(''); setFolder('');
       showToast('Added to Todos & Backlog', 'ok');
+      setTab('list');
       await loadAll();
     } catch (err) {
       setFormErr(err.message);
@@ -277,6 +279,16 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
         {folderOptions.map(f => <option key={f} value={f} />)}
       </datalist>
 
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'list' ? ' active' : ''}`} onClick={() => setTab('list')}>
+          Todos &amp; Backlog ({filteredItems.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'add' ? ' active' : ''}`} onClick={() => setTab('add')}>
+          + Add Todo Item
+        </button>
+      </div>
+
+      {tab === 'add' && (
       <div className="card">
         <h2>Add Todo or Backlog Item</h2>
         <form onSubmit={handleCreate}>
@@ -352,7 +364,9 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
           {formErr && <div className="error-msg" role="alert">{formErr}</div>}
         </form>
       </div>
+      )}
 
+      {tab === 'list' && (
       <div className="card">
         <div className="row" style={{ marginBottom: '1rem', alignItems: 'flex-end' }}>
           <div className="field" style={{ flex: 1, minWidth: '180px' }}>
@@ -589,6 +603,7 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
           </div>
         )}
       </div>
+      )}
     </section>
   );
 }

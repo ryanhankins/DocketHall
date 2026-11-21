@@ -34,6 +34,7 @@ const AGENDA_NOTIFICATION_EVENTS = [
 ];
 
 export default function AgendaPrefsPage() {
+  const [tab, setTab] = useState('cover');
   const [coverSheets, setCoverSheets] = useState(true);
   const [pageNumbers, setPageNumbers] = useState(true);
   const [cityName, setCityName] = useState('');
@@ -124,11 +125,29 @@ export default function AgendaPrefsPage() {
   return (
     <section id="section-preferences-agenda">
       <h1>Agenda Preferences</h1>
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'cover' ? ' active' : ''}`} onClick={() => setTab('cover')}>
+          Cover Sheet &amp; Timing
+        </button>
+        <button type="button" className={`btn sm${tab === 'structure' ? ' active' : ''}`} onClick={() => setTab('structure')}>
+          Bodies, Sections &amp; Categories
+        </button>
+        <button type="button" className={`btn sm${tab === 'templates' ? ' active' : ''}`} onClick={() => setTab('templates')}>
+          Meeting Templates ({templates.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'notifications' ? ' active' : ''}`} onClick={() => setTab('notifications')}>
+          Email Notifications
+        </button>
+      </div>
+
+      {(tab === 'cover' || tab === 'structure') && (
       <div className="card">
-        <p className="muted" style={{ marginTop: 0 }}>
-          These settings apply to all agendas when generating a PDF packet.
-        </p>
         <form onSubmit={handleSave}>
+          {tab === 'cover' && (
+          <>
+          <p className="muted" style={{ marginTop: 0 }}>
+            These settings apply to all agendas when generating a PDF packet.
+          </p>
           <label style={{ display: 'flex', alignItems: 'center', gap: '.55rem', marginBottom: '.75rem', cursor: 'pointer' }}>
             <input type="checkbox" style={{ width: 'auto' }} checked={coverSheets} onChange={(e) => setCoverSheets(e.target.checked)} />
             <span>Include a cover sheet before each agenda item (with the item title and TOC page number pointing to the cover sheet)</span>
@@ -173,8 +192,12 @@ export default function AgendaPrefsPage() {
               onChange={(e) => setPostingNoticeHours(e.target.value)}
             />
           </div>
+          </>
+          )}
 
-          <h2 style={{ margin: '1rem 0 .4rem', fontSize: '1rem' }}>Governing Bodies</h2>
+          {tab === 'structure' && (
+          <>
+          <h2 style={{ margin: '0 0 .4rem', fontSize: '1rem' }}>Governing Bodies</h2>
           <p className="muted" style={{ margin: '0 0 .6rem' }}>
             Bodies available when creating or editing an agenda (e.g. City Council, Parks Committee).
           </p>
@@ -341,12 +364,16 @@ export default function AgendaPrefsPage() {
               Add Category
             </button>
           </div>
+          </>
+          )}
 
           <button type="submit" className="btn primary">Save Preferences</button>
           {msg.text && <div className={msg.isError ? 'error-msg' : 'ok-msg'} role="status">{msg.text}</div>}
         </form>
       </div>
+      )}
 
+      {tab === 'templates' && (
       <div className="card">
         <h2>Meeting Templates</h2>
         <p className="muted" style={{ marginTop: 0 }}>
@@ -387,12 +414,15 @@ export default function AgendaPrefsPage() {
           </table>
         )}
       </div>
+      )}
 
+      {tab === 'notifications' && (
       <ModuleNotificationsCard
         moduleId="agendas"
         title="Agenda Email Notifications"
         events={AGENDA_NOTIFICATION_EVENTS}
       />
+      )}
     </section>
   );
 }

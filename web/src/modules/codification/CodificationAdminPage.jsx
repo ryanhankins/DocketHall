@@ -499,6 +499,7 @@ export default function CodificationAdminPage() {
   const [savingChapter, setSavingChapter] = useState(false);
 
   // Studio tabs & shared options
+  const [tab, setTab] = useState('tree'); // 'tree' | 'import'
   const [studioTab, setStudioTab] = useState('upload'); // 'upload' | 'urls' | 'sync'
   const [importFiles, setImportFiles] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -1032,7 +1033,16 @@ export default function CodificationAdminPage() {
         <a href="/code" target="_blank" rel="noreferrer" className="btn sm">Open Public Code Reader</a>
       </div>
 
-      {/* BULK IMPORT & CODIFY STUDIO */}
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'tree' ? ' active' : ''}`} onClick={() => setTab('tree')}>
+          Code Tree &amp; Editor ({chapters.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'import' ? ' active' : ''}`} onClick={() => setTab('import')}>
+          Bulk Import &amp; Codify Studio
+        </button>
+      </div>
+
+      {tab === 'import' && (
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Bulk Import &amp; Codify Studio</h2>
 
@@ -1397,7 +1407,10 @@ export default function CodificationAdminPage() {
           </div>
         )}
       </div>
+      )}
 
+      {tab === 'tree' && (
+      <>
       {/* SEARCH + MANUAL ADD */}
       <div className="card">
         <div className="row" style={{ marginBottom: '.85rem', alignItems: 'flex-end' }}>
@@ -1609,6 +1622,8 @@ export default function CodificationAdminPage() {
           </details>
         );
       })}
+      </>
+      )}
 
       {editingChapter && (
         <div

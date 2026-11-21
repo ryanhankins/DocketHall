@@ -48,6 +48,7 @@ const EMPTY_FORM = {
 
 export default function ComplianceProgramsPage() {
   const [items, setItems] = useState([]);
+  const [tab, setTab] = useState('directory');
   const [q, setQ] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -98,6 +99,7 @@ export default function ComplianceProgramsPage() {
       }
       setForm({ ...EMPTY_FORM });
       setEditId(null);
+      setTab('directory');
       await load();
     } catch (err) {
       showToast(err.message, 'error');
@@ -139,6 +141,16 @@ export default function ComplianceProgramsPage() {
         </div>
       </div>
 
+      <div className="tabs">
+        <button type="button" className={`btn sm${tab === 'directory' ? ' active' : ''}`} onClick={() => setTab('directory')}>
+          Registered Directory ({items.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'add' ? ' active' : ''}`} onClick={() => setTab('add')}>
+          {editId ? 'Edit Program' : '+ Register Property'}
+        </button>
+      </div>
+
+      {tab === 'add' && (
       <div className="card">
         <h2>{editId ? 'Edit Compliance Program' : 'Register Property for Recurring Inspection'}</h2>
         <form onSubmit={save}>
@@ -231,14 +243,16 @@ export default function ComplianceProgramsPage() {
               {busy ? 'Saving…' : (editId ? 'Save Program' : 'Add Program')}
             </button>
             {editId && (
-              <button type="button" className="btn" onClick={() => { setEditId(null); setForm({ ...EMPTY_FORM }); }}>
+              <button type="button" className="btn" onClick={() => { setEditId(null); setForm({ ...EMPTY_FORM }); setTab('directory'); }}>
                 Cancel
               </button>
             )}
           </div>
         </form>
       </div>
+      )}
 
+      {tab === 'directory' && (
       <div className="card">
         <div className="between" style={{ marginBottom: '.75rem', flexWrap: 'wrap', gap: '.5rem' }}>
           <h2 style={{ margin: 0 }}>Registered Compliance Properties ({items.length})</h2>
@@ -323,6 +337,7 @@ export default function ComplianceProgramsPage() {
                         className="btn sm"
                         onClick={() => {
                           setEditId(p.id);
+                          setTab('add');
                           setForm({ ...p });
                         }}
                       >
@@ -347,6 +362,7 @@ export default function ComplianceProgramsPage() {
           </table>
         )}
       </div>
+      )}
     </section>
   );
 }
