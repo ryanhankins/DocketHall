@@ -65,13 +65,15 @@ CREATE TABLE IF NOT EXISTS municipal_bills (
     amount_paid      TEXT NOT NULL DEFAULT '',
     late_fee_applied BOOLEAN NOT NULL DEFAULT FALSE,
     dispute_status   TEXT NOT NULL DEFAULT '',
-    dispute_notes    TEXT NOT NULL DEFAULT ''
+    dispute_notes    TEXT NOT NULL DEFAULT '',
+    gl_account_code  TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE municipal_bills ADD COLUMN IF NOT EXISTS line_items JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE municipal_bills ADD COLUMN IF NOT EXISTS amount_paid TEXT NOT NULL DEFAULT '';
 ALTER TABLE municipal_bills ADD COLUMN IF NOT EXISTS late_fee_applied BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE municipal_bills ADD COLUMN IF NOT EXISTS dispute_status TEXT NOT NULL DEFAULT '';
 ALTER TABLE municipal_bills ADD COLUMN IF NOT EXISTS dispute_notes TEXT NOT NULL DEFAULT '';
+ALTER TABLE municipal_bills ADD COLUMN IF NOT EXISTS gl_account_code TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS municipal_bills_ref_idx ON municipal_bills(reference_number);
 CREATE INDEX IF NOT EXISTS municipal_bills_acct_idx ON municipal_bills(account_number);
 CREATE INDEX IF NOT EXISTS municipal_bills_email_idx ON municipal_bills(LOWER(payer_email));
@@ -486,6 +488,7 @@ class BillIn(BaseModel):
     amount_due: str = ""
     due_date: str = ""
     notes: str = ""
+    gl_account_code: str = ""
     line_items: list[dict] | None = None
 
 
@@ -505,6 +508,7 @@ class BillPatchIn(BaseModel):
     amount_paid: str | None = None
     dispute_status: str | None = None
     dispute_notes: str | None = None
+    gl_account_code: str | None = None
     line_items: list[dict] | None = None
 
 
@@ -525,6 +529,7 @@ def _row_to_bill(r, include_private: bool = True) -> dict:
         "amount_paid": (r[19] or "") if len(r) > 19 else "",
         "late_fee_applied": bool(r[20]) if len(r) > 20 else False,
         "dispute_status": (r[21] or "") if len(r) > 21 else "",
+        "gl_account_code": (r[23] or "") if len(r) > 23 else "",
     }
     if include_private:
         out.update({
@@ -544,7 +549,7 @@ _BILL_COLS = (
     "id, reference_number, bill_type, account_number, payer_name, payer_email, "
     "service_address, description, amount_due, due_date, payment_status, paid_at, "
     "payment_method, payment_ref, notes, created_by, created_at, updated_at, "
-    "line_items, amount_paid, late_fee_applied, dispute_status, dispute_notes"
+    "line_items, amount_paid, late_fee_applied, dispute_status, dispute_notes, gl_account_code"
 )
 
 
@@ -614,8 +619,8 @@ def create_bill(body: BillIn, user: dict = Depends(_require_billing_staff)):
                     inserted = conn.execute(
                         "INSERT INTO municipal_bills "
                         "(reference_number, bill_type, account_number, payer_name, payer_email, "
-                        "service_address, description, amount_due, due_date, notes, created_by, line_items) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                        "service_address, description, amount_due, due_date, notes, created_by, gl_account_code, line_items) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
                         "RETURNING id",
                         (
                             tmp_ref,
@@ -629,6 +634,7 @@ def create_bill(body: BillIn, user: dict = Depends(_require_billing_staff)):
                             body.due_date.strip(),
                             body.notes.strip(),
                             user["username"],
+                            body.gl_account_code.strip(),
                             json.dumps(body.line_items or []),
                         ),
                     ).fetchone()
@@ -641,8 +647,8 @@ def create_bill(body: BillIn, user: dict = Depends(_require_billing_staff)):
                 row = conn.execute(
                     f"INSERT INTO municipal_bills "
                     "(reference_number, bill_type, account_number, payer_name, payer_email, "
-                    "service_address, description, amount_due, due_date, notes, created_by, line_items) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                    "service_address, description, amount_due, due_date, notes, created_by, gl_account_code, line_items) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
                     f"RETURNING {_BILL_COLS}",
                     (
                         ref,
@@ -656,6 +662,7 @@ def create_bill(body: BillIn, user: dict = Depends(_require_billing_staff)):
                         body.due_date.strip(),
                         body.notes.strip(),
                         user["username"],
+                        body.gl_account_code.strip(),
                         json.dumps(body.line_items or []),
                     ),
                 ).fetchone()
@@ -677,7 +684,7 @@ def update_bill(
         "bill_type", "account_number", "payer_name", "payer_email",
         "service_address", "description", "amount_due", "due_date",
         "payment_method", "payment_ref", "notes", "amount_paid",
-        "dispute_status", "dispute_notes",
+        "dispute_status", "dispute_notes", "gl_account_code",
     ):
         val = getattr(body, field)
         if val is not None:
@@ -1037,3 +1044,114 @@ def download_public_bill_pdf(reference_number: str):
         bill = _row_to_bill(r, include_private=False)
     pdf = _render_bill_pdf(bill)
     return Response(content=pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{bill["reference_number"]}.pdf"'})
+
+
+def _query_reconciliation_rows(
+    date_from: str = "",
+    date_to: str = "",
+    bill_type: str = "",
+    payment_status: str = "",
+) -> list[dict]:
+    clauses = ["TRUE"]
+    params: list = []
+    if bill_type.strip():
+        clauses.append("bill_type = %s")
+        params.append(bill_type.strip())
+    if payment_status.strip():
+        clauses.append("payment_status = %s")
+        params.append(payment_status.strip())
+    if date_from.strip():
+        clauses.append("COALESCE(paid_at, created_at) >= %s::date")
+        params.append(date_from.strip())
+    if date_to.strip():
+        clauses.append("COALESCE(paid_at, created_at) < (%s::date + INTERVAL '1 day')")
+        params.append(date_to.strip())
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"SELECT {_BILL_COLS} FROM municipal_bills WHERE {' AND '.join(clauses)} ORDER BY id DESC LIMIT 2000",
+            tuple(params),
+        ).fetchall()
+    return [_row_to_bill(r, include_private=True) for r in rows]
+
+
+@router.get("/reconciliation")
+def get_gl_reconciliation(
+    date_from: str = "",
+    date_to: str = "",
+    bill_type: str = "",
+    payment_status: str = "",
+    _: dict = Depends(_require_billing_staff),
+):
+    """Summarize billed and collected totals grouped by GL account code."""
+    items = _query_reconciliation_rows(date_from, date_to, bill_type, payment_status)
+    groups: dict[str, dict] = {}
+    for b in items:
+        gl = (b.get("gl_account_code") or "").strip() or "(Unassigned)"
+        g = groups.setdefault(
+            gl,
+            {"gl_account_code": gl, "count": 0, "billed_cents": 0, "collected_cents": 0},
+        )
+        g["count"] += 1
+        billed_c = _parse_cents(b.get("amount_due") or "")
+        paid_c = _parse_cents(b.get("amount_paid") or "")
+        if paid_c == 0 and b.get("payment_status") == "paid":
+            paid_c = billed_c
+        g["billed_cents"] += billed_c
+        g["collected_cents"] += paid_c
+
+    summary = []
+    for g in sorted(groups.values(), key=lambda x: x["gl_account_code"]):
+        out_c = max(0, g["billed_cents"] - g["collected_cents"])
+        summary.append({
+            "gl_account_code": g["gl_account_code"],
+            "count": g["count"],
+            "billed": f"${g['billed_cents'] / 100:,.2f}",
+            "collected": f"${g['collected_cents'] / 100:,.2f}",
+            "outstanding": f"${out_c / 100:,.2f}",
+        })
+    return {"summary": summary, "total_rows": len(items)}
+
+
+@router.get("/reconciliation.csv")
+def export_gl_reconciliation_csv(
+    date_from: str = "",
+    date_to: str = "",
+    bill_type: str = "",
+    payment_status: str = "",
+    _: dict = Depends(_require_billing_staff),
+):
+    """Export accounting reconciliation batch CSV with GL account codes."""
+    import csv
+    import io
+    from fastapi.responses import Response
+
+    items = _query_reconciliation_rows(date_from, date_to, bill_type, payment_status)
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([
+        "Reference #", "Bill Type", "GL Account Code", "Account #",
+        "Payer Name", "Service Address", "Description",
+        "Amount Due", "Amount Paid", "Payment Status",
+        "Paid At", "Payment Method", "Payment Ref",
+    ])
+    for b in items:
+        w.writerow([
+            b.get("reference_number", ""),
+            b.get("bill_type", ""),
+            b.get("gl_account_code", ""),
+            b.get("account_number", ""),
+            b.get("payer_name", ""),
+            b.get("service_address", ""),
+            b.get("description", ""),
+            b.get("amount_due", ""),
+            b.get("amount_paid", ""),
+            b.get("payment_status", ""),
+            b.get("paid_at") or "",
+            b.get("payment_method", ""),
+            b.get("payment_ref", ""),
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="dockethall-gl-reconciliation.csv"'},
+    )

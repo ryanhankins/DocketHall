@@ -37,6 +37,7 @@ const EMPTY_FORM = {
   amount_due: '',
   due_date: '',
   notes: '',
+  gl_account_code: '',
 };
 
 export default function BillingManagePage({ fixedBillType = '', pageTitle = '', pageSubtitle = '' }) {
@@ -60,7 +61,35 @@ export default function BillingManagePage({ fixedBillType = '', pageTitle = '', 
   const [payMethod, setPayMethod] = useState('check');
   const [payRef, setPayRef] = useState('');
   const [recordingPayment, setRecordingPayment] = useState(false);
+  const [recFrom, setRecFrom] = useState('');
+  const [recTo, setRecTo] = useState('');
+  const [recSummary, setRecSummary] = useState([]);
+  const [recTotalRows, setRecTotalRows] = useState(0);
+  const [recLoading, setRecLoading] = useState(false);
   const csvRef = useRef(null);
+
+  const loadReconciliation = useCallback(async () => {
+    setRecLoading(true);
+    try {
+      const p = new URLSearchParams();
+      if (fixedBillType || typeFilter) p.set('bill_type', fixedBillType || typeFilter);
+      if (statusFilter) p.set('payment_status', statusFilter);
+      if (recFrom) p.set('date_from', recFrom);
+      if (recTo) p.set('date_to', recTo);
+      const qs = p.toString() ? `?${p.toString()}` : '';
+      const res = await api(`/api/payments/reconciliation${qs}`);
+      setRecSummary(res.summary || []);
+      setRecTotalRows(res.total_rows || 0);
+    } catch (err) {
+      showToast(err.message || 'Failed to load reconciliation', 'error');
+    } finally {
+      setRecLoading(false);
+    }
+  }, [fixedBillType, typeFilter, statusFilter, recFrom, recTo, showToast]);
+
+  useEffect(() => {
+    if (tab === 'reconciliation') loadReconciliation();
+  }, [tab, loadReconciliation]);
 
   const loadBills = useCallback(async () => {
     setLoading(true);
@@ -222,7 +251,67 @@ export default function BillingManagePage({ fixedBillType = '', pageTitle = '', 
         <button type="button" className={`btn sm${tab === 'tools' ? ' active' : ''}`} onClick={() => setTab('tools')}>
           CSV Import &amp; Late Fees
         </button>
+        <button type="button" className={`btn sm${tab === 'reconciliation' ? ' active' : ''}`} onClick={() => setTab('reconciliation')}>
+          GL &amp; Reconciliation
+        </button>
       </div>
+
+      {tab === 'reconciliation' && (
+        <div className="card" style={{ display: 'grid', gap: '.85rem' }}>
+          <div className="between" style={{ flexWrap: 'wrap', gap: '.65rem' }}>
+            <div>
+              <h2 style={{ margin: 0 }}>GL Account Summary &amp; Accounting Export</h2>
+              <p className="muted" style={{ margin: '.2rem 0 0', fontSize: '.86rem' }}>
+                Reconcile billed vs. collected revenue by General Ledger code and export batch CSVs ({recTotalRows} matching records).
+              </p>
+            </div>
+            <div className="actions" style={{ flexWrap: 'wrap' }}>
+              <input type="date" aria-label="From date" value={recFrom} onChange={e => setRecFrom(e.target.value)} style={{ width: 'auto' }} />
+              <input type="date" aria-label="To date" value={recTo} onChange={e => setRecTo(e.target.value)} style={{ width: 'auto' }} />
+              <a
+                className="btn sm primary"
+                href={`/api/payments/reconciliation.csv?${new URLSearchParams({
+                  ...(fixedBillType || typeFilter ? { bill_type: fixedBillType || typeFilter } : {}),
+                  ...(statusFilter ? { payment_status: statusFilter } : {}),
+                  ...(recFrom ? { date_from: recFrom } : {}),
+                  ...(recTo ? { date_to: recTo } : {}),
+                }).toString()}`}
+                download="dockethall-gl-reconciliation.csv"
+              >
+                Export Reconciliation CSV
+              </a>
+            </div>
+          </div>
+          {recLoading ? (
+            <p className="muted" style={{ margin: 0 }}>Calculating GL totals…</p>
+          ) : !recSummary.length ? (
+            <p className="muted" style={{ margin: 0 }}>No billing records match the selected filters.</p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>GL Account Code</th>
+                  <th>Bills</th>
+                  <th>Total Billed</th>
+                  <th>Collected</th>
+                  <th>Outstanding</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recSummary.map(row => (
+                  <tr key={row.gl_account_code}>
+                    <td><code>{row.gl_account_code}</code></td>
+                    <td>{row.count}</td>
+                    <td>{row.billed}</td>
+                    <td><strong>{row.collected}</strong></td>
+                    <td>{row.outstanding}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {tab === 'tools' && (
         <div className="card" style={{ display: 'grid', gap: '1rem' }}>
@@ -280,6 +369,10 @@ export default function BillingManagePage({ fixedBillType = '', pageTitle = '', 
               <div className="field" style={{ flex: 1, minWidth: 160 }}>
                 <label htmlFor="bill-acct">Utility Account # (optional)</label>
                 <input id="bill-acct" placeholder="e.g. ACCT-1042" value={form.account_number} onChange={e => setForm(f => ({ ...f, account_number: e.target.value }))} />
+              </div>
+              <div className="field" style={{ flex: 1, minWidth: 150 }}>
+                <label htmlFor="bill-gl">GL Account Code</label>
+                <input id="bill-gl" placeholder="e.g. 601-43200" value={form.gl_account_code} onChange={e => setForm(f => ({ ...f, gl_account_code: e.target.value }))} />
               </div>
             </div>
             <div className="row" style={{ marginBottom: '.75rem' }}>
@@ -381,6 +474,7 @@ export default function BillingManagePage({ fixedBillType = '', pageTitle = '', 
                     <td>
                       <div>{BILL_TYPE_LABELS[b.bill_type] || b.bill_type}</div>
                       {b.account_number && <div className="muted" style={{ fontSize: '.78rem' }}>Acct: {b.account_number}</div>}
+                      {b.gl_account_code && <div className="muted" style={{ fontSize: '.78rem' }}>GL: <code>{b.gl_account_code}</code></div>}
                     </td>
                     <td>
                       <div>{b.payer_name || '—'}</div>

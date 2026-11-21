@@ -1887,7 +1887,7 @@ function RecordsPublicTab({ features = {} }) {
 
 function ComplaintsPublicTab({ me, onRequireAuth, features = {}, initialItemId = '', onItemChange }) {
   const [subView, setSubView] = useState('log'); // 'log' | 'file' | '311'
-  const [woForm, setWoForm] = useState({ category: 'Pothole / Street', location: '', description: '', reporter_name: '', reporter_email: '' });
+  const [woForm, setWoForm] = useState({ category: 'Pothole / Street', location: '', description: '', reporter_name: '', reporter_email: '', latitude: '', longitude: '' });
   const [woDone, setWoDone] = useState(null);
   const [woLookupNum, setWoLookupNum] = useState('');
   const [woLookupRes, setWoLookupRes] = useState(null);
@@ -2034,14 +2034,19 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {}, initialItemId =
           style={{ display: 'grid', gap: 10 }}
           onSubmit={async (e) => {
             e.preventDefault();
+            const payload = {
+              ...woForm,
+              latitude: woForm.latitude !== '' ? Number(woForm.latitude) : null,
+              longitude: woForm.longitude !== '' ? Number(woForm.longitude) : null,
+            };
             const r = await fetch('/api/complaints/work-orders/public', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(woForm),
+              body: JSON.stringify(payload),
             });
             if (r.ok) {
               setWoDone(await r.json());
-              setWoForm({ category: 'Pothole / Street', location: '', description: '', reporter_name: '', reporter_email: '' });
+              setWoForm({ category: 'Pothole / Street', location: '', description: '', reporter_name: '', reporter_email: '', latitude: '', longitude: '' });
             }
           }}
         >
@@ -2060,6 +2065,26 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {}, initialItemId =
             <input type="email" placeholder="Email (optional)" value={woForm.reporter_email} onChange={(e) => setWoForm((f) => ({ ...f, reporter_email: e.target.value }))} />
           </div>
           <textarea required rows={3} placeholder="Describe the maintenance issue..." value={woForm.description} onChange={(e) => setWoForm((f) => ({ ...f, description: e.target.value }))} />
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => {
+                if (!navigator.geolocation) return;
+                navigator.geolocation.getCurrentPosition((pos) => {
+                  setWoForm((f) => ({
+                    ...f,
+                    latitude: pos.coords.latitude.toFixed(6),
+                    longitude: pos.coords.longitude.toFixed(6),
+                  }));
+                });
+              }}
+            >
+              Pin My GPS Location
+            </button>
+            <input placeholder="Latitude (optional)" value={woForm.latitude} onChange={(e) => setWoForm((f) => ({ ...f, latitude: e.target.value }))} style={{ maxWidth: 145 }} />
+            <input placeholder="Longitude (optional)" value={woForm.longitude} onChange={(e) => setWoForm((f) => ({ ...f, longitude: e.target.value }))} style={{ maxWidth: 145 }} />
+          </div>
           <div className="actions"><button type="submit" className="btn primary">Submit 311 Request</button></div>
           {woDone && (
             <div style={{ padding: '.6rem .8rem', background: '#dcfce7', borderRadius: 6, fontSize: '.9rem' }}>

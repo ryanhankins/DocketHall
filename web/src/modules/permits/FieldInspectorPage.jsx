@@ -21,6 +21,7 @@ import { useToast } from '../../core/toast.jsx';
 
 const DRAFTS_KEY = 'dockethall_inspector_drafts_v1';
 const CACHE_KEY = 'dockethall_inspector_queue_cache_v1';
+const PARCELS_KEY = 'dockethall_inspector_parcels_v1';
 
 function readJsonStorage(key, fallback) {
   try {
@@ -159,6 +160,7 @@ export default function FieldInspectorPage({ me }) {
   const [selectedId, setSelectedId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [parcels, setParcels] = useState(() => readJsonStorage(PARCELS_KEY, []));
 
   // Active inspection form state
   const [checklist, setChecklist] = useState([]);
@@ -172,10 +174,17 @@ export default function FieldInspectorPage({ me }) {
   const loadQueue = useCallback(async () => {
     setLoading(true);
     try {
-      const items = await api('/api/permits/inspections/queue?result=');
+      const [items, parcelRows] = await Promise.all([
+        api('/api/permits/inspections/queue?result='),
+        api('/api/permits/parcels/map').catch(() => null),
+      ]);
       const list = Array.isArray(items) ? items : [];
       setQueue(list);
       writeJsonStorage(CACHE_KEY, list);
+      if (Array.isArray(parcelRows)) {
+        setParcels(parcelRows);
+        writeJsonStorage(PARCELS_KEY, parcelRows);
+      }
     } catch {
       const cached = readJsonStorage(CACHE_KEY, []);
       setQueue(cached);
@@ -408,6 +417,7 @@ export default function FieldInspectorPage({ me }) {
               ['today', "Today's Queue"],
               ['mine', 'Assigned to Me'],
               ['scheduled', 'All Scheduled'],
+              ['map', 'Route Map'],
               ['completed', 'Completed'],
             ].map(([k, lbl]) => (
               <button
@@ -427,7 +437,87 @@ export default function FieldInspectorPage({ me }) {
             />
           </div>
 
-          {loading && !queue.length ? (
+          {tab === 'map' ? (() => {
+            const parcelByAddr = new Map();
+            for (const p of parcels) {
+              if (p.latitude != null && p.longitude != null && p.address) {
+                parcelByAddr.set(p.address.trim().toLowerCase(), p);
+              }
+            }
+            const scheduledStops = queue.filter((ins) => ins.result === 'scheduled');
+            const mapped = scheduledStops
+              .map((ins) => {
+                const match = parcelByAddr.get((ins.property_address || '').trim().toLowerCase());
+                return match ? { ins, lat: Number(match.latitude), lng: Number(match.longitude) } : null;
+              })
+              .filter(Boolean);
+            const lats = mapped.map((m) => m.lat);
+            const lngs = mapped.map((m) => m.lng);
+            const minLat = lats.length ? Math.min(...lats) : 0;
+            const maxLat = lats.length ? Math.max(...lats) : 1;
+            const minLng = lngs.length ? Math.min(...lngs) : 0;
+            const maxLng = lngs.length ? Math.max(...lngs) : 1;
+            const spanLat = Math.max(0.002, maxLat - minLat);
+            const spanLng = Math.max(0.002, maxLng - minLng);
+            const pts = mapped.map((m, i) => ({
+              ...m,
+              idx: i + 1,
+              x: 40 + ((m.lng - minLng) / spanLng) * 520,
+              y: 260 - ((m.lat - minLat) / spanLat) * 220,
+            }));
+            return (
+              <div style={{ display: 'grid', gap: '.85rem' }}>
+                {pts.length === 0 ? (
+                  <p className="muted" style={{ margin: 0 }}>
+                    No scheduled inspections currently match parcels with latitude/longitude coordinates. Add coordinates in Property Profiles to plot inspection routes.
+                  </p>
+                ) : (
+                  <svg viewBox="0 0 600 300" style={{ width: '100%', maxHeight: 320, background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 8 }}>
+                    <line x1="20" y1="150" x2="580" y2="150" stroke="#e2e8f0" strokeDasharray="4 4" />
+                    <line x1="300" y1="20" x2="300" y2="280" stroke="#e2e8f0" strokeDasharray="4 4" />
+                    {pts.length > 1 && (
+                      <polyline
+                        fill="none"
+                        stroke="#2563eb"
+                        strokeWidth="2"
+                        strokeDasharray="5 4"
+                        points={pts.map((pt) => `${pt.x},${pt.y}`).join(' ')}
+                      />
+                    )}
+                    {pts.map((pt) => (
+                      <g key={pt.ins.id} style={{ cursor: 'pointer' }} onClick={() => openInspection(pt.ins)}>
+                        <circle cx={pt.x} cy={pt.y} r="13" fill="#1d4ed8" stroke="#ffffff" strokeWidth="2" />
+                        <text x={pt.x} y={pt.y + 4} textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="700">
+                          {pt.idx}
+                        </text>
+                      </g>
+                    ))}
+                  </svg>
+                )}
+                <div style={{ display: 'grid', gap: '.45rem' }}>
+                  {scheduledStops.map((ins, i) => {
+                    const m = pts.find((p) => p.ins.id === ins.id);
+                    return (
+                      <div
+                        key={ins.id}
+                        className="between"
+                        onClick={() => openInspection(ins)}
+                        style={{ padding: '.55rem .75rem', border: '1px solid #cbd5e1', borderRadius: 6, cursor: 'pointer' }}
+                      >
+                        <div>
+                          <strong>{m ? `#${m.idx} ` : ''}{ins.inspection_type}</strong> — {ins.property_address || ins.permit_number}
+                          <div className="muted" style={{ fontSize: '.8rem' }}>
+                            {ins.scheduled_date || 'Unscheduled'}{m ? ` · GPS: ${m.lat.toFixed(5)}, ${m.lng.toFixed(5)}` : ' · No parcel GPS coordinates'}
+                          </div>
+                        </div>
+                        <button type="button" className="btn sm">Open</button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })() : loading && !queue.length ? (
             <p className="muted">Loading inspections…</p>
           ) : !filteredQueue.length ? (
             <p className="muted" style={{ margin: 0 }}>No inspections match this queue view.</p>

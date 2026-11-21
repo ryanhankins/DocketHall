@@ -203,8 +203,12 @@ CREATE TABLE IF NOT EXISTS public_works_orders (
     completion_notes    TEXT NOT NULL DEFAULT '',
     completed_at        TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    latitude            DOUBLE PRECISION,
+    longitude           DOUBLE PRECISION
 );
+ALTER TABLE public_works_orders ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
+ALTER TABLE public_works_orders ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
 CREATE INDEX IF NOT EXISTS pwo_status_idx ON public_works_orders(status, id DESC);
 """
 
@@ -872,6 +876,8 @@ class WorkOrderIn(BaseModel):
     reporter_name: str = ""
     reporter_email: str = ""
     source_complaint_id: int | None = None
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class WorkOrderPatch(BaseModel):
@@ -886,7 +892,7 @@ class WorkOrderPatch(BaseModel):
 _WO_COLS = (
     "id, work_order_number, source_complaint_id, category, asset_id, location, "
     "description, priority, status, assigned_crew, estimated_cost, reporter_name, "
-    "reporter_email, completion_notes, completed_at, created_at, updated_at"
+    "reporter_email, completion_notes, completed_at, created_at, updated_at, latitude, longitude"
 )
 
 
@@ -909,6 +915,8 @@ def _row_to_wo(r) -> dict:
         "completed_at": _iso(r[14]),
         "created_at": _iso(r[15]),
         "updated_at": _iso(r[16]),
+        "latitude": r[17] if len(r) > 17 else None,
+        "longitude": r[18] if len(r) > 18 else None,
     }
 
 
@@ -924,8 +932,8 @@ def _create_work_order_row(conn, body: WorkOrderIn) -> dict:
     row = conn.execute(
         "INSERT INTO public_works_orders "
         "(work_order_number, source_complaint_id, category, asset_id, location, description, "
-        " priority, assigned_crew, estimated_cost, reporter_name, reporter_email) "
-        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        " priority, assigned_crew, estimated_cost, reporter_name, reporter_email, latitude, longitude) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
         (
             tmp,
             body.source_complaint_id,
@@ -938,6 +946,8 @@ def _create_work_order_row(conn, body: WorkOrderIn) -> dict:
             body.estimated_cost.strip(),
             body.reporter_name.strip(),
             body.reporter_email.strip(),
+            body.latitude,
+            body.longitude,
         ),
     ).fetchone()
     final_num = f"WO-{yr}-{row[0]:04d}"

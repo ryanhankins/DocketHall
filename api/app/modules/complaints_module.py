@@ -76,7 +76,7 @@ COMPLAINTS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
             "id", "work_order_number", "source_complaint_id", "category", "asset_id",
             "location", "description", "priority", "status", "assigned_crew",
             "estimated_cost", "reporter_name", "reporter_email", "completion_notes",
-            "completed_at", "created_at", "updated_at",
+            "completed_at", "created_at", "updated_at", "latitude", "longitude",
         ],
         set(),
         True,
