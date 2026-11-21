@@ -42,10 +42,13 @@ def test_agenda_and_backlog_crud_lifecycle(anon_client, applicant_client, admin_
     assert bl_res.status_code == 201, bl_res.text
     bl_id = bl_res.json()["id"]
 
+    prefs = admin_client.get("/api/agendas/preferences").json()
+    governing_body = (prefs.get("bodies") or ["City Council"])[0]
+
     # Create agenda
     ag_res = admin_client.post(
         "/api/agendas",
-        json={"title": f"Test Council Meeting {uuid.uuid4().hex[:6]}", "meeting_date": "2026-12-15"},
+        json={"title": f"Test Council Meeting {uuid.uuid4().hex[:6]}", "body": governing_body, "meeting_date": "2026-12-15"},
     )
     assert ag_res.status_code == 201, ag_res.text
     ag_id = ag_res.json()["id"]

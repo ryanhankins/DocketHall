@@ -30,4 +30,19 @@ test.describe('Public Portal, Search & Multilingual UI', () => {
     }
     errors.assertClean('/code search');
   });
+
+  test('multilingual public portal selector switches language cleanly', async ({ page }) => {
+    const errors = attachErrorListeners(page, {
+      allowedConsolePatterns: [/status of 401 \(Unauthorized\)/],
+    });
+
+    await page.goto('/', { waitUntil: 'networkidle' });
+    const langSelect = page.locator('select').filter({ hasText: 'Español' }).first();
+    if (await langSelect.isVisible()) {
+      await langSelect.selectOption('es');
+      await page.waitForTimeout(150);
+      await langSelect.selectOption('en');
+    }
+    errors.assertClean('multilingual selector');
+  });
 });

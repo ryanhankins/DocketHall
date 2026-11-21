@@ -30,5 +30,13 @@ export default defineConfig({
         viewport: { width: 1440, height: 900 },
       },
     },
+    {
+      name: 'chromium-mobile',
+      testMatch: /0(1|6)-.*\.spec\.js/,
+      use: {
+        ...devices['Pixel 5'],
+        viewport: { width: 390, height: 844 },
+      },
+    },
   ],
 });

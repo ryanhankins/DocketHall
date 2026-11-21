@@ -54,3 +54,31 @@ class OpenApiManifestTest(unittest.TestCase):
                 else:
                     seen[key] = route.name
         self.assertEqual(duplicates, [], f"Duplicate routes detected: {duplicates}")
+
+    def test_expected_router_prefixes_present(self):
+        paths = {r.path for r in app.routes if isinstance(r, APIRoute)}
+        expected_prefixes = (
+            "/api/health",
+            "/api/login",
+            "/api/users",
+            "/api/backup",
+            "/api/agendas",
+            "/api/permits",
+            "/api/payments",
+            "/api/complaints",
+            "/api/records",
+            "/api/codification",
+            "/api/blog",
+            "/api/pages",
+            "/api/calendar",
+            "/api/directory",
+            "/api/forms",
+            "/api/notices",
+            "/api/public",
+            "/api/subscriptions",
+        )
+        for prefix in expected_prefixes:
+            self.assertTrue(
+                any(p.startswith(prefix) for p in paths),
+                f"Expected router prefix missing from FastAPI app: {prefix}",
+            )

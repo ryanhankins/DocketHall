@@ -186,7 +186,7 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
     );
   }
 
-  const activeTab = (tab === 'contents' || tab === 'minutes') ? tab : 'edit';
+  const activeTab = (tab === 'contents' || tab === 'live' || tab === 'minutes') ? tab : 'edit';
   const setTab = (nextTab) => {
     const suffix = nextTab === 'edit' ? '' : `/${nextTab}`;
     onNavigate(`#agendas/${agenda.id}${suffix}`);

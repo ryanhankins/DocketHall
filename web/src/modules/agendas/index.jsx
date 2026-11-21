@@ -32,7 +32,7 @@ const agendasModule = {
   routes: [
     {
       match: (hash) => {
-        const m = hash.match(/^agendas\/(\d+)(?:\/(contents|minutes))?$/);
+        const m = hash.match(/^agendas\/(\d+)(?:\/(contents|live|minutes))?$/);
         return m ? { agendaId: Number(m[1]), tab: m[2] || 'edit' } : null;
       },
       permission: 'agendas.manage',

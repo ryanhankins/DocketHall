@@ -10,6 +10,12 @@ test.describe('Permits, Property & Parcel Profile, and Field Inspector PWA', () 
     await page.goto('/app/properties', { waitUntil: 'networkidle' });
     await expect(page.getByRole('heading', { name: 'Property & Parcel Profile' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open Property Profile' })).toBeVisible();
+    const parcelInput = page.locator('main input').first();
+    if (await parcelInput.isVisible()) {
+      await parcelInput.fill('P-100');
+      await parcelInput.press('Enter');
+      await page.waitForLoadState('networkidle');
+    }
     errors.assertClean('/app/properties');
   });
 
