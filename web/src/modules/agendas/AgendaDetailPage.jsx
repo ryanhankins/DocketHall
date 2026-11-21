@@ -24,6 +24,7 @@ import { recurrenceLabel } from './BacklogPage.jsx';
 import AgendaItemsTab from './AgendaItemsTab.jsx';
 import AgendaContentsTab from './AgendaContentsTab.jsx';
 import AgendaMinutesTab from './AgendaMinutesTab.jsx';
+import LiveMeetingTab from './LiveMeetingTab.jsx';
 import ImportAgendaDialog from './ImportAgendaDialog.jsx';
 
 function AgendaCommentsPanel({ agendaId }) {
@@ -295,26 +296,46 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
         </div>
       </div>
 
-      {(showFinalized || agenda.amended_at || logs.length > 0) && (
-        <div className="muted" style={{ fontSize: '.85rem', marginBottom: '.65rem' }}>
-          {showFinalized && <span>Finalized: {new Date(agenda.finalized_at).toLocaleString()} </span>}
-          {agenda.amended_at && <span>· Amended: {new Date(agenda.amended_at).toLocaleString()} </span>}
-          {logs.length > 0 && (
-            <details style={{ display: 'inline-block', marginLeft: showFinalized ? '.4rem' : 0 }}>
-              <summary style={{ cursor: 'pointer', color: '#1d4ed8' }}>Status Log ({logs.length})</summary>
-              <ul style={{ margin: '.35rem 0 0', paddingLeft: '1.1rem' }}>
-                {logs.map((ev, i) => (
-                  <li key={i}>
-                    {ev.created_at ? new Date(ev.created_at).toLocaleString() : ''} — {ev.action}
-                    {ev.actor ? ` by ${ev.actor}` : ''}
-                    {ev.note ? ` (${ev.note})` : ''}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-        </div>
-      )}
+      {(showFinalized || agenda.amended_at || logs.length > 0) && (() => {
+        let noticeAudit = null;
+        if (showFinalized && agenda.finalized_at && agenda.meeting_date) {
+          const finMs = new Date(agenda.finalized_at).getTime();
+          const timePart = toTimeInputValue(agenda.meeting_time || defaultMeetingTime) || '00:00';
+          const mtgMs = new Date(`${agenda.meeting_date}T${timePart}:00`).getTime();
+          if (!Number.isNaN(finMs) && !Number.isNaN(mtgMs)) {
+            const hrs = Math.round((mtgMs - finMs) / (1000 * 60 * 60));
+            const meets = postingNoticeHours <= 0 || hrs >= postingNoticeHours;
+            noticeAudit = { hrs, meets };
+          }
+        }
+        return (
+          <div className="muted" style={{ fontSize: '.85rem', marginBottom: '.65rem', display: 'flex', flexWrap: 'wrap', gap: '.45rem', alignItems: 'center' }}>
+            {showFinalized && <span>Posted / Finalized: {new Date(agenda.finalized_at).toLocaleString()}</span>}
+            {noticeAudit && (
+              <span className={`badge ${noticeAudit.meets ? 'active' : 'draft'}`}>
+                {noticeAudit.hrs >= 0
+                  ? `Posted ${noticeAudit.hrs}h before meeting (${noticeAudit.meets ? `Meets ${postingNoticeHours}h notice` : `Under ${postingNoticeHours}h notice`})`
+                  : 'Posted after meeting start'}
+              </span>
+            )}
+            {agenda.amended_at && <span>· Amended: {new Date(agenda.amended_at).toLocaleString()}</span>}
+            {logs.length > 0 && (
+              <details style={{ display: 'inline-block', marginLeft: showFinalized ? '.4rem' : 0 }}>
+                <summary style={{ cursor: 'pointer', color: '#1d4ed8' }}>Status Log ({logs.length})</summary>
+                <ul style={{ margin: '.35rem 0 0', paddingLeft: '1.1rem' }}>
+                  {logs.map((ev, i) => (
+                    <li key={i}>
+                      {ev.created_at ? new Date(ev.created_at).toLocaleString() : ''} — {ev.action}
+                      {ev.actor ? ` by ${ev.actor}` : ''}
+                      {ev.note ? ` (${ev.note})` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        );
+      })()}
 
       <form
         className="row"
@@ -444,6 +465,9 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
         <button type="button" className={`btn sm${activeTab === 'contents' ? ' active' : ''}`} onClick={() => setTab('contents')}>
           Contents Page &amp; Order
         </button>
+        <button type="button" className={`btn sm${activeTab === 'live' ? ' active' : ''}`} onClick={() => setTab('live')}>
+          Live Meeting Mode
+        </button>
         <button type="button" className={`btn sm${activeTab === 'minutes' ? ' active' : ''}`} onClick={() => setTab('minutes')}>
           Record Minutes
         </button>
@@ -462,6 +486,13 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
         />
       )}
       {activeTab === 'contents' && <AgendaContentsTab agenda={agenda} />}
+      {activeTab === 'live' && (
+        <LiveMeetingTab
+          agenda={agenda}
+          onAgendaUpdated={(updated) => applyAgendaState(updated)}
+          onSwitchTab={(t) => setTab(t)}
+        />
+      )}
       {activeTab === 'minutes' && (
         <AgendaMinutesTab agenda={agenda} onAgendaUpdated={(updated) => applyAgendaState(updated)} />
       )}

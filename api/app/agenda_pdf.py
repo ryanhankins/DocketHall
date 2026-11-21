@@ -978,6 +978,20 @@ def build_minutes_pdf(
                 parts.append('<p class="item-meta"><em>No action or notes recorded.</em></p>')
             parts.append("</div>")
 
+    if not watermark_draft:
+        aid = agenda.get("id")
+        base_url = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
+        verify_url = f"{base_url}/agendas/{aid}" if (base_url and aid) else (f"/agendas/{aid}" if aid else "")
+        city_label = _esc(prefs.get("city_title") or "Municipality")
+        verify_line = f'<p class="item-meta">Verify online: {_esc(verify_url)}</p>' if verify_url else ""
+        parts.append(
+            '<div style="margin-top: 24px; padding: 12px 14px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc;">'
+            '<p style="margin: 0 0 4px;"><strong>Official Clerk Attestation</strong></p>'
+            f'<p class="item-meta">Approved public minutes for {city_label} (Meeting ID #{_esc(str(aid or ""))}).</p>'
+            f'{verify_line}'
+            '</div>'
+        )
+
     min_title = f"{agenda.get('title') or 'Meeting'} — Minutes"
     return _html_to_pdf_bytes(
         "\n".join(parts),

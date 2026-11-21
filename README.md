@@ -1,48 +1,58 @@
 # <img src="web/public/dockethall-logo.svg" alt="DocketHall logo" width="32" height="32" align="absmiddle" /> DocketHall
 
-DocketHall is a self-hosted, modular municipal operations platform built for city clerks, staff, councilmembers, and residents. It combines a **Public Services & Records Portal** with an authenticated **Workspace** for managing meeting agendas, permits, municipal code, public records, code-enforcement complaints, and community calendars.
+DocketHall is a self-hosted, modular municipal operations platform built for city clerks, staff, councilmembers, inspectors, and residents. It combines a **Public Services & Records Portal** with an authenticated **Workspace** for managing meeting agendas, live meetings, permits, licensing, municipal code, public records, code-enforcement complaints, 311 work orders, community calendars, utility billing, citations, and public communications.
 
 ## Key Capabilities
 
 ### Public Portal (`/`, `/portal`, `/code`)
-- **Public Services Overview (`/`)**: Presents enabled public services with service-specific icons, sign-in/applicant registration, and **Public Email Alerts** (self-service citizen email subscriptions for Agendas, City Code updates, and Public Records with one-click unsubscribe links).
-- **Meeting Agendas & Minutes**: Filter finalized meetings by **Board / Body**, **Year**, and keyword; view **Summary PDF**, **Full Packet PDF**, **Minutes PDF** (labeled *Draft* with a diagonal `DRAFT` watermark until approved), **Amended** badges, and **Watch Video / Listen Audio** recording links.
-- **Permits & Fees (`/portal` & `/#permits`)**: Search permit types and uses, review fee schedules and required documents, and launch online permit applications.
-- **Municipal City Code (`/code` & `/#codification`)**: Browse chapters and sections, search with **highlighted text snippets**, jump between sections via **clickable cross-references** (e.g. `§ 618.040`), view per-section PDFs, or download the **Full-Code Compiled PDF** with a Table of Contents.
-- **Public Records (`/#records`)**: Search and download publicly published contracts, resolutions, ordinances, and agreements.
-- **Administrative Complaints (`/#complaints`)**: Browse the public Complaint Log Book or file a complaint at no cost (anonymous or authenticated, with complainant confidentiality per MN Stat. 13.44).
+Every public section and published item has a clean, bookmarkable URL:
+- **Public Services Overview (`/`)**: Global public search, customizable welcome banner and city blog feed preview, service tiles, **Transparency Snapshot** bar, and **Public Email Alerts** (self-service citizen subscriptions with one-click unsubscribe links).
+- **Meeting Agendas & Minutes (`/agendas`, `/agendas/<id>`)**: Filter finalized meetings by **Board / Body**, **Year**, and keyword; view **Summary PDF**, **Full Packet PDF**, **Minutes PDF** (watermarked `DRAFT` until approved, or attested official minutes when approved), **Amended** badges, **Video / Audio** recordings, and online public comments.
+- **Permits & Fees (`/portal`, `/permits`)**: Search permit types and uses, review fee schedules and required documents, and launch online permit applications (`/app/permits-apply`).
+- **Municipal City Code (`/code`, `/codification`)**: Browse chapters and nested sections, search with **highlighted text snippets**, jump between sections via **clickable cross-references** (e.g. `§ 618.040`), copy section permalinks, view per-section PDFs, or download the **Full-Code Compiled PDF** with a Table of Contents.
+- **Public Records & FOIA (`/records`)**: Search and download publicly published contracts, resolutions, ordinances, and agreements, or submit/track public records (FOIA / Data Practices) requests.
+- **Administrative Complaints & 311 (`/complaints`, `/complaints/<number>`)**: Browse the public Complaint Log Book, file confidential or anonymous complaints, or submit and track 311 Public Works requests.
+- **Communications & Community Hub**:
+  - **City Blog (`/blog`, `/blog/<slug>`)**: Categorized articles, tags, RSS feed (`/api/blog/rss.xml`), moderated/open comments, and optional live inline editing.
+  - **News, Public Notices, Bids & Jobs (`/notices`, `/notices/<id>`)**: Public notices, RFPs/plan-holder registration, and online job applications.
+  - **City Information Pages (`/pages`, `/pages/<slug>`)**: Custom rich-text pages and Quick Links cards.
+  - **Forms & Opinion Polls (`/forms`, `/forms/<id>`)**: Dynamic public forms and community polls.
+  - **City Directory & FAQs (`/directory`)**: Elected officials, department contacts, boards/commissions, and searchable FAQs.
+- **Calendar & Facility Reservations (`/calendar`)**: Public meetings/events and online park/hall reservation requests.
+- **Online Payments & Transparency (`/pay`, `/utilities`, `/citations`, `/transparency`)**: Utility bill and municipal citation lookup/contest/payment, plus a public transparency dashboard.
 
-### Pluggable Workspace Modules (`/app`)
-Modules can be enabled or disabled individually under **Administration → Manage Modules** without losing stored data:
+### Pluggable Workspace Modules (`/app/...`)
+Modules can be enabled or disabled individually under **Administration → Manage Modules** without losing stored data, and every workspace route supports clean `/app/<route>` deep-linking:
 
-1. **Agendas (`agendas`)**
-   - Configurable governing bodies, agenda sections, workflow categories, default meeting times/locations, and **Open-Meeting Posting Notice Window** warnings (e.g. 72-hour notice).
+1. **Agendas & Live Meetings (`agendas`)**
+   - Configurable governing bodies, agenda sections, workflow categories, default meeting times/locations, **Councilmember Roster**, and **Open-Meeting Posting Notice Window** warnings with a **Proof-of-Posting Audit** badge (`Posted Xh before meeting`).
+   - **Live Meeting Mode**: Step-by-step in-meeting clerk & council view with a configurable **Public Comment Speaker Timer** (`2m` / `3m` / `5m`), **Call to Order / Adjourn** timestamping, and live **Motion / Second / Roll-Call Voting** that compiles straight into Draft Minutes.
    - Reusable **Agenda Templates**, agenda **Cloning**, **Todos & Backlog** (including recurring monthly/quarterly/annual items), and **Councilmember Item Submissions** with attachment approval.
-   - Automatic **Amended** timestamp & badge when items or attachments are modified after finalization.
-   - Multi-format packet compilation (`.pdf`, `.docx`, `.xlsx`, `.pptx`, `.csv`, `.txt`, `.md`, `.png`, `.jpg`) with optional item cover sheets and continuous page numbers.
-   - Structured **Minutes** entry (attendance, motions, seconds, votes, notes) generating watermarked `DRAFT` PDFs until marked **Approved**, plus **Video / Audio** media links.
-   - Built-in dismissible **Getting Started** checklist and **Clerk & Councilmember Quick Guide** modal.
-2. **Permits (`permits`)**
-   - Configurable permit catalog (types, uses, fees, required documents) and **Parcel / Property Directory**.
-   - Online application intake, multi-step department review workflow, inspection scheduling & results, staff/applicant messaging, and generated Permit PDFs.
-   - **Expiration Date** tracking with *Expired* / *Expires in Xd* badges, **CSV Export** (`/api/permits/export.csv`) with live assessed/paid/unpaid fee totals, and automatic **Applicant Email Notifications** on status updates, inspections, and messages.
-3. **City Code (`codification`)**
-   - Chapter & section editor, full revision history, PDF upload & text extraction, per-section PDFs, and **Full-Code Compiled PDF** generation.
-4. **Public Records (`records`)**
-   - Document repository for contracts, resolutions, ordinances, and agreements with multi-file attachments, effective/expiration dates, renewal notice tracking, and public visibility toggles.
-5. **Complaints (`complaints`)**
-   - Anonymous, resident, and staff oral complaint intake, investigation queue, activity log, confidential vs. public attachments, and Section 618.040 **Notice of Violation** issuance.
-6. **Calendar (`calendar`)**
-   - Municipal meeting and event calendar with public and workspace views.
+   - Multi-format packet compilation (`.pdf`, `.docx`, `.xlsx`, `.pptx`, `.csv`, `.txt`, `.md`, `.png`, `.jpg`) with optional item cover sheets, continuous page numbers, and **Tagged PDF/UA accessibility** checks.
+   - Structured **Minutes** entry generating watermarked `DRAFT` PDFs until marked **Approved** (which adds an **Official Clerk Attestation** & verification block).
+2. **Permits & Inspections (`permits`)**
+   - Configurable permit catalog (types, uses, fees, custom fields, required documents) and **Parcel / Property Profile Directory**.
+   - Online application intake (`/app/my-permits/<id>`), multi-step department review workflow, inspection scheduling & Field Inspector mode, staff/applicant messaging, CSV export, and generated Permit/Receipt PDFs.
+3. **Contractor Licensing & Compliance Programs (`licensing`)**
+   - Track contractor licenses, liability insurance, surety bonds (automatically blocking non-compliant contractors at permit submission), and recurring **Rental / STR / Fire / Backflow Compliance Programs** with automated 30-day renewal reminders and Compliance Certificates.
+4. **City Code (`codification`)**
+   - Chapter & section tree editor, bulk import & codify studio (PDF/URL/sync), full revision history, per-section PDFs, and **Full-Code Compiled PDF** generation.
+5. **Public Records & FOIA (`records`)**
+   - Document repository for contracts, resolutions, ordinances, and agreements with multi-file attachments, expiration/renewal alerts, and a **FOIA / Data Requests** workflow.
+6. **Complaints, 311 & Work Orders (`complaints`)**
+   - Anonymous, resident, and staff oral complaint intake, investigation workbench, reinspection & NOV deadline queue, 311 / Public Works work orders, and confidential vs. public attachments.
+7. **Calendar & Facility Reservations (`calendar`)**
+   - Municipal meeting and event calendar, facility catalog, reservation approvals, and public calendar feeds.
+8. **Communications Suite (`communications` — `blog`, `notices`, `pages`, `forms`, `directory`)**
+   - City Blog management & public feed settings, News/Notices/Bids/Jobs, Custom Pages & Quick Links, Dynamic Forms & Opinion Polls, and Directory & FAQs.
+9. **Utility Billing (`utilities`) & Municipal Citations (`citations`)**
+   - Manage water/sewer/trash utility bills, municipal code/parking citations, online payments, and hearing/contest requests.
 
 ### Administration, Notifications & Security
-- **Users & Permissions**: Role-based access (`admin`, `council_member`, `admin_staff`, `non_admin_staff`, `applicant`, `read_only`) with per-user permission overrides and email addresses.
-- **General & Branding**: Custom city title, city logo upload, workspace theme preferences, and configurable backup reminder intervals.
-- **Email & Integrations**:
-  - Customer-configurable outgoing **SMTP** server (`smtp_host`, `smtp_port`, sender email, password/App Password, and test email sender).
-  - **Per-Module Notification Routing** inside **Agenda Preferences**, **Permit Preferences**, and **Complaint Preferences**, allowing each event type to notify specific DocketHall users and/or external email addresses with authenticated deep-links directly to the item.
-  - **Public Alert Subscribers** management and optional Google Cloud API key validation.
-- **Backup & Restore**: Export and restore full PostgreSQL + MinIO archives.
+- **Users & Permissions**: Role-based access (`admin`, `council_member`, `admin_staff`, `non_admin_staff`, `applicant`, `read_only`) with per-user permission overrides.
+- **General & Branding**: Custom city title, city logo, urgent alert banner, workspace theme/colors, home page text & blog feed layout, and backup reminder intervals.
+- **Email, SLA & Integrations**: Customer-configurable **SMTP**, per-module notification routing, **SLA & Escalation** rules, public alert subscribers, and **Audit Log**.
+- **Backup & Restore**: Export and restore full PostgreSQL + object storage archives.
 
 ## Prerequisites
 
@@ -69,9 +79,10 @@ Run the deployment script. It builds the React/Vite frontend bundle, initializes
 
 Once the services are running:
 
-- **Public Portal & Web App:** <http://localhost:8080>
+- **Public Portal & Clean Routes:** <http://localhost:8080> (e.g. `/blog`, `/pages`, `/notices`, `/forms`, `/agendas`, `/complaints`)
 - **Standalone Permits Portal:** <http://localhost:8080/portal>
 - **Standalone Municipal Code:** <http://localhost:8080/code>
+- **Authenticated Workspace:** <http://localhost:8080/app>
 
 ### 4. First-time sign-in
 
@@ -127,16 +138,16 @@ Stop and remove the stack **and** delete all volumes, secrets, and configs:
 | `STORAGE_BACKEND` | `s3` | Object storage backend (`s3` for SeaweedFS or `local` for `/data/records`) |
 | `S3_REPLICAS` | `1` | SeaweedFS service replicas (`0` when using `STORAGE_BACKEND=local`) |
 | `COOKIE_SECURE` | `false` | Set to `true` when serving over HTTPS |
-| `APP_BASE_URL` | *(from request)* | Optional override for base URL used in notification email links |
+| `APP_BASE_URL` | *(from request)* | Optional override for base URL used in notification emails and PDF verification links |
 
 Secrets are created once and are never overwritten by subsequent `./scripts/deploy.sh` runs.
 
 ## Repository Layout
 
-- `web/` — Nginx reverse proxy and React 19 + Vite frontend (`index.html`, `app.html`, `portal.html`, `code.html`, `src/core/`, and `src/modules/` for `agendas`, `calendar`, `codification`, `complaints`, `permits`, `records`)
-- `api/` — Python FastAPI backend (`main.py`, `auth.py`, `users.py`, `branding.py`, `integrations.py`, `subscriptions.py`, `backup.py`, `registry.py`, `agenda_pdf.py`, `agendas.py`, `calendar_mod.py`, `codification.py`, `complaints.py`, `permits.py`, `records.py`, and `modules/`)
+- `web/` — Nginx reverse proxy and React 19 + Vite frontend (`index.html`, `app.html`, `portal.html`, `code.html`, `src/core/`, and `src/modules/` for `agendas`, `blog`, `calendar`, `citations`, `codification`, `communications`, `complaints`, `directory`, `forms`, `licensing`, `notices`, `pages`, `permits`, `records`, `utilities`)
+- `api/` — Python FastAPI backend (`main.py`, `auth.py`, `users.py`, `branding.py`, `integrations.py`, `subscriptions.py`, `backup.py`, `registry.py`, `search.py`, `sla.py`, `payments.py`, `agenda_pdf.py`, `agendas.py`, `blog.py`, `calendar_mod.py`, `codification.py`, `complaints.py`, `directory.py`, `forms.py`, `notices.py`, `pages.py`, `permits.py`, `records.py`, and `modules/`)
 - `db/` — PostgreSQL initialization script (`init.sql`)
-- `scripts/` — Swarm deployment (`deploy.sh`) and removal (`teardown.sh`) scripts
+- `scripts/` — Swarm deployment (`deploy.sh`), provisioning (`provision-city.sh`), health check (`health-check.sh`), offsite backup (`backup-offsite.sh`), and removal (`teardown.sh`) scripts
 - `docker-stack.yml` — Docker Swarm stack definition
 
 ## License
