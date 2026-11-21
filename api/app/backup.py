@@ -72,7 +72,7 @@ _CORE_TABLES: list[tuple[str, list[str], set[str], bool]] = [
     ),
     (
         "public_subscriptions",
-        ["id", "email", "topic", "token", "is_active", "created_at"],
+        ["id", "email", "topic", "token", "is_active", "created_at", "phone", "sms_enabled"],
         set(),
         True,
     ),

@@ -2976,10 +2976,12 @@ function TransparencySnapshotBar({ onSelectTab }) {
   );
 }
 
-function NotifyMeCard() {
+function NotifyMeCard({ t = (k) => k }) {
   const [topics, setTopics] = useState([]);
   const [selected, setSelected] = useState([]);
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [smsEnabled, setSmsEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ text: '', isError: false });
 
@@ -3012,12 +3014,19 @@ function NotifyMeCard() {
       const r = await fetch('/api/subscriptions/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), topics: selected }),
+        body: JSON.stringify({
+          email: email.trim(),
+          topics: selected,
+          phone: phone.trim(),
+          sms_enabled: smsEnabled,
+        }),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.detail || 'Subscription failed');
-      setMsg({ text: data.message || 'Subscribed to email alerts.', isError: false });
+      setMsg({ text: data.message || 'Subscribed to alerts.', isError: false });
       setEmail('');
+      setPhone('');
+      setSmsEnabled(false);
     } catch (err) {
       setMsg({ text: err.message, isError: true });
     } finally {
@@ -3031,36 +3040,48 @@ function NotifyMeCard() {
         <div style={{ flex: 1, minWidth: 260 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '.65rem', marginBottom: '.35rem' }}>
             <ServiceIcon id="alerts" size={20} badge />
-            <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Public Email Alerts</h2>
+            <h2 style={{ margin: 0, fontSize: '1.1rem' }}>{t('Public Email & SMS Alerts')}</h2>
           </div>
           <p className="muted" style={{ margin: '0 0 .75rem', fontSize: '.9rem' }}>
-            Subscribe to receive automatic email alerts whenever new city agendas, code updates, or public records are published. Every email includes a one-click unsubscribe link.
+            {t('Subscribe to receive automatic email or text alerts whenever new city agendas, code updates, notices, or public records are published.')}
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem 1.25rem', marginBottom: '.75rem' }}>
-            {topics.map((t) => (
-              <label key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '.4rem', fontSize: '.9rem', cursor: 'pointer' }}>
+            {topics.map((tp) => (
+              <label key={tp.id} style={{ display: 'flex', alignItems: 'center', gap: '.4rem', fontSize: '.9rem', cursor: 'pointer' }}>
                 <input
                   type="checkbox"
                   style={{ width: 'auto' }}
-                  checked={selected.includes(t.id)}
-                  onChange={() => toggleTopic(t.id)}
+                  checked={selected.includes(tp.id)}
+                  onChange={() => toggleTopic(tp.id)}
                 />
-                <span>{t.label}</span>
+                <span>{tp.label}</span>
               </label>
             ))}
           </div>
-          <form onSubmit={handleSubscribe} style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem', alignItems: 'center', maxWidth: 460 }}>
+          <form onSubmit={handleSubscribe} style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem', alignItems: 'center', maxWidth: 680 }}>
             <input
               type="email"
               required
               aria-label="Email address for public alerts"
-              placeholder="Enter your email address…"
+              placeholder={t('Enter your email address…')}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              style={{ flex: 1, minWidth: 220 }}
+              style={{ flex: 1, minWidth: 200 }}
             />
+            <input
+              type="tel"
+              aria-label="Mobile phone for SMS alerts"
+              placeholder={t('Mobile phone for SMS (optional)')}
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              style={{ flex: 1, minWidth: 180 }}
+            />
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.3rem', fontSize: '.86rem' }}>
+              <input type="checkbox" style={{ width: 'auto' }} checked={smsEnabled} onChange={(e) => setSmsEnabled(e.target.checked)} />
+              <span>{t('SMS Alerts')}</span>
+            </label>
             <button type="submit" className="btn primary" disabled={busy}>
-              {busy ? 'Subscribing…' : 'Subscribe'}
+              {busy ? t('Subscribing…') : t('Subscribe')}
             </button>
           </form>
           {msg.text && (
@@ -3518,8 +3539,43 @@ function parsePublicLocation(pathname, rawHash) {
 }
 
 
+const PUBLIC_I18N = {
+  es: {
+    'Sign In': 'Iniciar sesión',
+    'Create Account': 'Crear cuenta',
+    'Go to Workspace': 'Ir al espacio de trabajo',
+    'Sign out': 'Cerrar sesión',
+    '← All Public Services': '← Todos los servicios públicos',
+    'Public Email & SMS Alerts': 'Alertas públicas por correo y SMS',
+    'Subscribe to receive automatic email or text alerts whenever new city agendas, code updates, notices, or public records are published.': 'Suscríbase para recibir alertas automáticas por correo o SMS cuando se publiquen nuevas agendas, códigos, avisos o registros públicos.',
+    'Enter your email address…': 'Ingrese su correo electrónico…',
+    'Mobile phone for SMS (optional)': 'Teléfono móvil para SMS (opcional)',
+    'SMS Alerts': 'Alertas SMS',
+    'Subscribing…': 'Suscribiendo…',
+    'Subscribe': 'Suscribirse',
+  },
+  fr: {
+    'Sign In': 'Se connecter',
+    'Create Account': 'Créer un compte',
+    'Go to Workspace': 'Aller à l’espace de travail',
+    'Sign out': 'Se déconnecter',
+    '← All Public Services': '← Tous les services publics',
+    'Public Email & SMS Alerts': 'Alertes publiques par courriel et SMS',
+    'Subscribe to receive automatic email or text alerts whenever new city agendas, code updates, notices, or public records are published.': 'Abonnez-vous pour recevoir des alertes automatiques par courriel ou SMS lors de la publication d’ordres du jour, de codes, d’avis ou de dossiers publics.',
+    'Enter your email address…': 'Entrez votre adresse courriel…',
+    'Mobile phone for SMS (optional)': 'Téléphone mobile pour SMS (optionnel)',
+    'SMS Alerts': 'Alertes SMS',
+    'Subscribing…': 'Abonnement…',
+    'Subscribe': 'S’abonner',
+  },
+};
+
 function PublicHomePage() {
   const params = useMemo(() => new URLSearchParams(location.search), []);
+  const [lang, setLang] = useState(() => {
+    try { return localStorage.getItem('dockethall.lang') || 'en'; } catch { return 'en'; }
+  });
+  const t = useCallback((key) => (PUBLIC_I18N[lang]?.[key]) || key, [lang]);
   const [branding, setBranding] = useState({ city_title: '', has_city_logo: false });
   const [enabledModules, setEnabledModules] = useState(null);
   const [publicFeatures, setPublicFeatures] = useState({});
@@ -3707,7 +3763,7 @@ function PublicHomePage() {
       <UrgentAlertBanner branding={branding} />
       <PublicHeader
         branding={branding}
-        brandHref="/#overview"
+        brandHref="/"
         onBrandClick={(e) => {
           e.preventDefault();
           selectTab('overview');
@@ -3715,10 +3771,24 @@ function PublicHomePage() {
         subtitle="DocketHall"
         logoHeight={52}
       >
+        <select
+          aria-label="Portal Language"
+          value={lang}
+          onChange={(e) => {
+            const next = e.target.value;
+            setLang(next);
+            try { localStorage.setItem('dockethall.lang', next); } catch { /* ignore */ }
+          }}
+          style={{ width: 'auto', fontSize: '.82rem', padding: '.25rem .45rem' }}
+        >
+          <option value="en">English</option>
+          <option value="es">Español</option>
+          <option value="fr">Français</option>
+        </select>
         {me ? (
           <>
             <span>{me.username} ({ROLE_LABELS[me.role] || me.role})</span>
-            <a className="btn sm primary" href="/app">Go to Workspace</a>
+            <a className="btn sm primary" href="/app">{t('Go to Workspace')}</a>
             <button
               type="button"
               className="btn sm"
@@ -3727,16 +3797,16 @@ function PublicHomePage() {
                 setMe(null);
               }}
             >
-              Sign out
+              {t('Sign out')}
             </button>
           </>
         ) : (
           <>
             <button type="button" className="btn sm primary" onClick={() => openAuth('/app', false, '')}>
-              Sign In
+              {t('Sign In')}
             </button>
             <button type="button" className="btn sm" onClick={() => openAuth('/app', true, 'Create an applicant account to submit and track permit applications or complaints.')}>
-              Create Account
+              {t('Create Account')}
             </button>
           </>
         )}
@@ -3892,7 +3962,7 @@ function PublicHomePage() {
 
             <TransparencySnapshotBar onSelectTab={selectTab} />
 
-            <NotifyMeCard />
+            <NotifyMeCard t={t} />
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -3905,7 +3975,7 @@ function PublicHomePage() {
                 }}
                 style={{ fontSize: '.92rem', fontWeight: 500, color: 'var(--cd-primary)', textDecoration: 'none' }}
               >
-                ← All Public Services
+                {t('← All Public Services')}
               </a>
             </div>
             {activeTab === 'agendas' && (

@@ -77,8 +77,12 @@ CREATE TABLE IF NOT EXISTS public_subscriptions (
     token       TEXT NOT NULL UNIQUE,
     is_active   BOOLEAN NOT NULL DEFAULT TRUE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    phone       TEXT NOT NULL DEFAULT '',
+    sms_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE (email, topic)
 );
+ALTER TABLE public_subscriptions ADD COLUMN IF NOT EXISTS phone TEXT NOT NULL DEFAULT '';
+ALTER TABLE public_subscriptions ADD COLUMN IF NOT EXISTS sms_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS public_subs_topic_idx ON public_subscriptions(topic, is_active);
 """
 
@@ -152,6 +156,8 @@ def notify_topic_subscribers(
 class SubscribeIn(BaseModel):
     email: str
     topics: list[str]
+    phone: str = ""
+    sms_enabled: bool = False
 
 
 @router.get("/topics")
@@ -173,16 +179,21 @@ def subscribe(body: SubscribeIn, request: Request):
     if not chosen:
         raise HTTPException(status_code=400, detail="Please select at least one notification topic")
 
+    phone = re.sub(r"[^0-9+]", "", (body.phone or "").strip())[:24]
+    sms_enabled = bool(body.sms_enabled and len(phone) >= 7)
     tokens_by_topic: list[tuple[str, str]] = []
     with pool.connection() as conn:
         for t in chosen:
             tok = secrets.token_urlsafe(24)
             row = conn.execute(
-                "INSERT INTO public_subscriptions (email, topic, token, is_active) "
-                "VALUES (%s, %s, %s, TRUE) "
-                "ON CONFLICT (email, topic) DO UPDATE SET is_active = TRUE "
+                "INSERT INTO public_subscriptions (email, topic, token, is_active, phone, sms_enabled) "
+                "VALUES (%s, %s, %s, TRUE, %s, %s) "
+                "ON CONFLICT (email, topic) DO UPDATE SET "
+                "is_active = TRUE, "
+                "phone = CASE WHEN EXCLUDED.phone != '' THEN EXCLUDED.phone ELSE public_subscriptions.phone END, "
+                "sms_enabled = EXCLUDED.sms_enabled "
                 "RETURNING token",
-                (email, t, tok),
+                (email, t, tok, phone, sms_enabled),
             ).fetchone()
             tokens_by_topic.append((t, row[0]))
         smtp = _get_smtp_config(conn)

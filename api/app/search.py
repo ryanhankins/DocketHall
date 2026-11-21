@@ -16,10 +16,12 @@
 """Global Public Portal search and performance transparency across all enabled modules."""
 import csv
 from datetime import date, datetime, timezone
+from html import escape as _html_escape
 import io
+import urllib.parse
 
-from fastapi import APIRouter
-from fastapi.responses import Response
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse, Response
 
 from .db import pool
 from .registry import get_enabled_module_ids
@@ -488,3 +490,115 @@ def public_performance_csv():
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="dockethall-performance-metrics.csv"'},
     )
+
+
+@router.get("/share-card", response_class=HTMLResponse)
+def public_share_card(request: Request, path: str = "/"):
+    """Return OpenGraph / link-preview HTML metadata for social & chat crawlers."""
+    clean = urllib.parse.unquote((path or "/").split("?")[0]).strip("/")
+    parts = [p for p in clean.split("/") if p]
+    section = parts[0] if parts else "overview"
+    item_key = parts[1] if len(parts) > 1 else ""
+
+    city_title = "DocketHall"
+    title = "DocketHall — Public Portal"
+    description = "Self-service municipal portal for agendas, permits, city code, public records, notices, and 311 requests."
+    image_path = "/api/branding/logo"
+
+    from . import agendas
+    try:
+        b = agendas.get_preferences_branding() or {}
+        if (b.get("city_title") or "").strip():
+            city_title = b["city_title"].strip()
+            title = f"{city_title} — Public Portal"
+        if (b.get("home_heading") or "").strip():
+            description = b["home_heading"].strip()
+    except Exception:
+        pass
+
+    with pool.connection() as conn:
+        try:
+            if section == "blog" and item_key:
+                r = conn.execute(
+                    "SELECT id, title, lead_in, has_image FROM blog_posts "
+                    "WHERE slug = %s AND is_published = TRUE LIMIT 1",
+                    (item_key,),
+                ).fetchone()
+                if r:
+                    title = f"{r[1]} — {city_title}"
+                    if (r[2] or "").strip():
+                        description = r[2].strip()[:220]
+                    if r[3]:
+                        image_path = f"/api/blog/public/posts/{r[0]}/image"
+            elif section == "pages" and item_key:
+                if item_key.isdigit():
+                    r = conn.execute(
+                        "SELECT title, summary FROM cms_pages WHERE id = %s AND is_published = TRUE LIMIT 1",
+                        (int(item_key),),
+                    ).fetchone()
+                else:
+                    r = conn.execute(
+                        "SELECT title, summary FROM cms_pages WHERE slug = %s AND is_published = TRUE LIMIT 1",
+                        (item_key,),
+                    ).fetchone()
+                if r:
+                    title = f"{r[0]} — {city_title}"
+                    if (r[1] or "").strip():
+                        description = r[1].strip()[:220]
+            elif section == "notices" and item_key.isdigit():
+                r = conn.execute(
+                    "SELECT title, summary FROM public_notices WHERE id = %s AND is_published = TRUE LIMIT 1",
+                    (int(item_key),),
+                ).fetchone()
+                if r:
+                    title = f"{r[0]} — {city_title}"
+                    if (r[1] or "").strip():
+                        description = r[1].strip()[:220]
+            elif section == "forms" and item_key.isdigit():
+                r = conn.execute(
+                    "SELECT title, description FROM public_forms WHERE id = %s AND is_public = TRUE LIMIT 1",
+                    (int(item_key),),
+                ).fetchone()
+                if r:
+                    title = f"{r[0]} — {city_title}"
+                    if (r[1] or "").strip():
+                        description = r[1].strip()[:220]
+            elif section == "agendas" and item_key.isdigit():
+                r = conn.execute(
+                    "SELECT title, body, meeting_date FROM agendas "
+                    "WHERE id = %s AND (finalized_at IS NOT NULL OR LOWER(status) LIKE 'finalized%%') LIMIT 1",
+                    (int(item_key),),
+                ).fetchone()
+                if r:
+                    title = f"{r[0]} — {city_title}"
+                    description = f"Meeting agenda & minutes ({r[1] or 'Council'}, {r[2] or ''})".strip(" ,()")
+        except Exception:
+            pass
+
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
+    host = request.headers.get("host") or "localhost:8080"
+    base = f"{proto}://{host}"
+    canonical = f"{base}/{clean}" if clean else f"{base}/"
+    og_image = f"{base}{image_path}"
+    t_esc = _html_escape(title)
+    d_esc = _html_escape(description)
+    u_esc = _html_escape(canonical)
+    i_esc = _html_escape(og_image)
+
+    html = (
+        "<!doctype html><html lang=\"en\"><head>"
+        "<meta charset=\"utf-8\">"
+        f"<title>{t_esc}</title>"
+        f"<meta name=\"description\" content=\"{d_esc}\">"
+        f"<link rel=\"canonical\" href=\"{u_esc}\">"
+        "<meta property=\"og:type\" content=\"article\">"
+        f"<meta property=\"og:title\" content=\"{t_esc}\">"
+        f"<meta property=\"og:description\" content=\"{d_esc}\">"
+        f"<meta property=\"og:url\" content=\"{u_esc}\">"
+        f"<meta property=\"og:image\" content=\"{i_esc}\">"
+        "<meta name=\"twitter:card\" content=\"summary_large_image\">"
+        f"<meta name=\"twitter:title\" content=\"{t_esc}\">"
+        f"<meta name=\"twitter:description\" content=\"{d_esc}\">"
+        f"</head><body><h1>{t_esc}</h1><p>{d_esc}</p><p><a href=\"{u_esc}\">Open in DocketHall</a></p></body></html>"
+    )
+    return HTMLResponse(content=html)
