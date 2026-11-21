@@ -3561,7 +3561,9 @@ function PublicHomePage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <div className="card">
               <div className="between" style={{ gap: '.5rem', marginBottom: '.35rem' }}>
-                <h1 style={{ margin: 0 }}>{branding.home_heading || 'Public Services & Records Portal'}</h1>
+                <h1 style={{ margin: 0 }}>
+                  {branding.home_heading || (branding.city_title?.trim() ? `Welcome to ${branding.city_title.trim()}` : 'City Services & Community Hub')}
+                </h1>
                 {canEditHomeText && (
                   <button
                     type="button"
@@ -3581,7 +3583,7 @@ function PublicHomePage() {
                 <RichTextContent text={branding.home_intro_body} />
               ) : (
                 <p className="muted" style={{ margin: 0 }}>
-                  Explore public city services below — no account required to view finalized agendas, City Code, public records, permit schedules, or to file a complaint.
+                  Read community updates, browse city information, view meeting agendas and City Code, and access online resident services — no account required for public information.
                 </p>
               )}
             </div>
@@ -3731,7 +3733,7 @@ function PublicHomePage() {
                 <label htmlFor="home-edit-heading">Portal Welcome Heading (blank uses default)</label>
                 <input
                   id="home-edit-heading"
-                  placeholder="Public Services & Records Portal"
+                  placeholder={branding.city_title?.trim() ? `Welcome to ${branding.city_title.trim()}` : 'City Services & Community Hub'}
                   value={homeHeadingDraft}
                   onChange={(e) => setHomeHeadingDraft(e.target.value)}
                 />

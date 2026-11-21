@@ -229,7 +229,7 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
             <label htmlFor="pref-home-heading">Portal Welcome Heading (blank uses default)</label>
             <input
               id="pref-home-heading"
-              placeholder="Public Services & Records Portal"
+              placeholder={cityTitle.trim() ? `Welcome to ${cityTitle.trim()}` : 'City Services & Community Hub'}
               value={homeHeading}
               onChange={(e) => setHomeHeading(e.target.value)}
             />
