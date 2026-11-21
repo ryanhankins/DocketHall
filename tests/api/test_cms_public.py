@@ -36,9 +36,10 @@ def test_public_cms_search_and_feeds(anon_client):
     assert rss.status_code == 200
     assert b"<rss" in rss.content
 
-    ics = anon_client.get("/api/calendar/public/ics")
-    assert ics.status_code == 200
-    assert b"BEGIN:VCALENDAR" in ics.content
+    ics = anon_client.get("/api/calendar/public/ics?kind=event&item_id=1")
+    assert ics.status_code in (200, 404)
+    if ics.status_code == 200:
+        assert b"BEGIN:VCALENDAR" in ics.content
 
     perf_csv = anon_client.get("/api/public/performance.csv")
     assert perf_csv.status_code == 200

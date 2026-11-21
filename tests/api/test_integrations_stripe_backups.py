@@ -31,6 +31,9 @@ def test_backup_export_import_roundtrip_and_demo_seed(admin_client):
     )
     assert imp.status_code == 200, imp.text
 
+    # Re-authenticate in case backup import replaced sessions table
+    admin_client.post("/api/login", json={"username": "admin", "password": "admin"})
+
     # Seed demo data (idempotent)
     seed = admin_client.post("/api/backup/seed-demo")
     assert seed.status_code == 200, seed.text

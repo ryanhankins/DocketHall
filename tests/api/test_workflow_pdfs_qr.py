@@ -23,18 +23,26 @@ def test_permit_application_to_pdf_workflow(applicant_client, admin_client):
     catalog = applicant_client.get("/api/permits/public/catalog")
     assert catalog.status_code == 200
     types = catalog.json().get("types") or catalog.json().get("permit_types") or []
-    if not types:
-        return  # No permit types seeded in blank DB
+    uses = catalog.json().get("uses") or []
+    if not types or not uses:
+        return  # No permit types/uses seeded in blank DB
 
     ptype_id = types[0]["id"]
+    matching_uses = [u for u in uses if u.get("permit_type_id") in (None, ptype_id)]
+    if not matching_uses:
+        matching_uses = uses
+    puse_id = matching_uses[0]["id"]
+    ptype_id = matching_uses[0].get("permit_type_id") or ptype_id
     created = applicant_client.post(
         "/api/permits",
         json={
             "permit_type_id": ptype_id,
+            "permit_use_id": puse_id,
             "applicant_name": "Test Resident",
             "applicant_email": "resident@example.com",
-            "address": "456 Oak Ave",
+            "property_address": "456 Oak Ave",
             "description": "Deck replacement",
+            "accepted_terms": True,
         },
     )
     assert created.status_code == 201, created.text

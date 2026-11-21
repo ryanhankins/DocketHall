@@ -92,7 +92,7 @@ def test_users_crud_and_rbac_boundaries(anon_client, applicant_client, admin_cli
     staff_name = f"clerk_{uuid.uuid4().hex[:8]}"
     created = admin_client.post(
         "/api/users",
-        json={"username": staff_name, "role": "staff", "email": f"{staff_name}@city.gov", "permissions": ["agendas.manage"]},
+        json={"username": staff_name, "role": "admin_staff", "email": f"{staff_name}@city.gov", "permissions": ["agendas.manage"]},
     )
     assert created.status_code == 201
     user_obj = created.json()

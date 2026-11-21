@@ -18,11 +18,13 @@
 import uuid
 
 
-def test_public_agenda_and_council_endpoints(anon_client):
+def test_public_agenda_and_council_endpoints(anon_client, admin_client):
     assert anon_client.get("/api/agendas/public").status_code == 200
-    assert anon_client.get("/api/agendas/council").status_code == 200
-    assert anon_client.get("/api/agendas/council-members").status_code == 200
-    assert anon_client.get("/api/agendas/ordinance-history").status_code == 200
+    assert anon_client.get("/api/agendas/council").status_code in (401, 403)
+    assert anon_client.get("/api/agendas/council-members").status_code in (401, 403)
+    assert admin_client.get("/api/agendas/council-members").status_code == 200
+    assert anon_client.get("/api/agendas/ordinance-history").status_code in (401, 403)
+    assert admin_client.get("/api/agendas/ordinance-history").status_code == 200
 
 
 def test_agenda_and_backlog_crud_lifecycle(anon_client, applicant_client, admin_client):
@@ -40,7 +42,8 @@ def test_agenda_and_backlog_crud_lifecycle(anon_client, applicant_client, admin_
         json={"title": bl_title, "description": "Testing backlog creation"},
     )
     assert bl_res.status_code == 201, bl_res.text
-    bl_id = bl_res.json()["id"]
+    bl_data = bl_res.json()
+    bl_id = bl_data[0]["id"] if isinstance(bl_data, list) else bl_data["id"]
 
     prefs = admin_client.get("/api/agendas/preferences").json()
     governing_body = (prefs.get("bodies") or ["City Council"])[0]
@@ -63,7 +66,8 @@ def test_agenda_and_backlog_crud_lifecycle(anon_client, applicant_client, admin_
         json={"title": "Approve Consent Calendar", "item_type": "action"},
     )
     assert item_res.status_code == 201, item_res.text
-    item_id = item_res.json()["id"]
+    item_data = item_res.json()
+    item_id = (item_data.get("items") or [{}])[-1].get("id") or item_data["id"]
 
     patched_item = admin_client.patch(
         f"/api/agendas/{ag_id}/items/{item_id}",

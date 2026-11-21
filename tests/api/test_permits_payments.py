@@ -54,9 +54,9 @@ def test_parcel_crud_and_property_profile(admin_client):
     assert created.status_code == 201, created.text
     parcel_pk = created.json()["id"]
 
-    profile = admin_client.get(f"/api/permits/parcels/profile?parcel={pid}")
+    profile = admin_client.get(f"/api/permits/parcels/profile?parcel_id={pid}")
     assert profile.status_code == 200
-    assert profile.json().get("parcel_id") == pid
+    assert profile.json().get("parcel", {}).get("parcel_id") == pid
 
     assert admin_client.delete(f"/api/permits/parcels/{parcel_pk}").status_code in (200, 204)
 

@@ -64,38 +64,37 @@ def api_client(api_app):
 
 
 @pytest.fixture()
-def admin_client(api_app):
+def admin_client(api_client, api_app):
     """Authenticated TestClient logged in as the seeded admin user."""
     from fastapi.testclient import TestClient  # noqa: WPS433
 
     username = os.environ.get("CIVICDESK_TEST_ADMIN_USER", "admin")
     password = os.environ.get("CIVICDESK_TEST_ADMIN_PASS", "admin")
-    with TestClient(api_app) as client:
-        res = client.post("/api/login", json={"username": username, "password": password})
-        assert res.status_code == 200, f"Admin login failed: {res.status_code} {res.text}"
-        yield client
+    client = TestClient(api_app)
+    res = client.post("/api/login", json={"username": username, "password": password})
+    assert res.status_code == 200, f"Admin login failed: {res.status_code} {res.text}"
+    return client
 
 
 @pytest.fixture()
-def anon_client(api_app):
+def anon_client(api_client, api_app):
     """Fresh unauthenticated TestClient."""
     from fastapi.testclient import TestClient  # noqa: WPS433
 
-    with TestClient(api_app) as client:
-        yield client
+    return TestClient(api_app)
 
 
 @pytest.fixture()
-def applicant_client(api_app):
+def applicant_client(api_client, api_app):
     """Authenticated TestClient registered as a low-privilege applicant user."""
     import uuid
     from fastapi.testclient import TestClient  # noqa: WPS433
 
     uname = f"test_applicant_{uuid.uuid4().hex[:8]}"
-    with TestClient(api_app) as client:
-        res = client.post(
-            "/api/register",
-            json={"username": uname, "email": f"{uname}@example.com", "password": "TestPassword123!"},
-        )
-        assert res.status_code == 201, f"Applicant register failed: {res.status_code} {res.text}"
-        yield client
+    client = TestClient(api_app)
+    res = client.post(
+        "/api/register",
+        json={"username": uname, "email": f"{uname}@example.com", "password": "TestPassword123!"},
+    )
+    assert res.status_code == 201, f"Applicant register failed: {res.status_code} {res.text}"
+    return client

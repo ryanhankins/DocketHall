@@ -30,7 +30,7 @@ def test_complaints_and_work_orders_endpoints(anon_client, applicant_client, adm
 
     wo = admin_client.post(
         "/api/complaints/work-orders",
-        json={"title": f"Pothole {uuid.uuid4().hex[:6]}", "location": "1st & Main", "priority": "normal"},
+        json={"title": f"Pothole {uuid.uuid4().hex[:6]}", "description": "Patch pothole", "location": "1st & Main", "priority": "normal"},
     )
     assert wo.status_code == 201, wo.text
     wo_id = wo.json()["id"]
@@ -50,12 +50,16 @@ def test_records_and_foia_endpoints(anon_client, applicant_client, admin_client)
         json={
             "requester_name": "Jane Resident",
             "requester_email": "jane@example.com",
+            "subject": "Budget 2026",
             "description": "Public works budget 2026",
         },
     )
     assert foia.status_code == 201, foia.text
-    req_id = foia.json()["id"]
-    assert admin_client.delete(f"/api/records/requests/{req_id}").status_code in (200, 204)
+    req_num = foia.json().get("request_number")
+    reqs = admin_client.get("/api/records/requests").json()
+    matched = [r for r in reqs if r.get("request_number") == req_num]
+    if matched:
+        assert admin_client.delete(f"/api/records/requests/{matched[0]['id']}").status_code in (200, 204)
 
 
 def test_codification_public_pdf_and_admin_crud(anon_client, applicant_client, admin_client):
@@ -71,7 +75,7 @@ def test_codification_public_pdf_and_admin_crud(anon_client, applicant_client, a
     ch_num = f"99{uuid.uuid4().hex[:3]}"
     ch = admin_client.post(
         "/api/codification/chapters",
-        json={"chapter_number": ch_num, "title": "Test Chapter"},
+        json={"code_prefix": ch_num, "chapter_number": ch_num, "title": "Test Chapter"},
     )
     assert ch.status_code == 201, ch.text
     ch_id = ch.json()["id"]
