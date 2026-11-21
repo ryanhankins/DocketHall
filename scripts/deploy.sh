@@ -39,7 +39,6 @@ if [ -z "${CIVICDESK_SECRET_PREFIX+x}" ]; then
 fi
 export CIVICDESK_SECRET_PREFIX
 export CIVICDESK_PORT="${CIVICDESK_PORT:-8080}"
-export SEAWEEDFS_CONSOLE_PORT="${SEAWEEDFS_CONSOLE_PORT:-8888}"
 export S3_REPLICAS="${S3_REPLICAS:-1}"
 export CIVICDESK_TAG="${CIVICDESK_TAG:-latest}"
 export CIVICDESK_REGISTRY="${CIVICDESK_REGISTRY:-}"
@@ -110,5 +109,4 @@ done
 
 echo
 echo "Dashboard:       http://localhost:${CIVICDESK_PORT}"
-echo "SeaweedFS Filer: http://localhost:${SEAWEEDFS_CONSOLE_PORT}"
 echo "Status:        docker stack services $STACK_NAME"

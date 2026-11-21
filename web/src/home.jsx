@@ -21,7 +21,7 @@ import '../app.css';
 import { ROLE_LABELS, formatDate, formatSize, formatTime12h } from './core/api.js';
 import ServiceIcon from './core/ServiceIcon.jsx';
 import CustomFieldsRenderer from './core/CustomFieldsRenderer.jsx';
-import { DocketHallLogo, DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { DocketHallLogo, DirectoryHeaderLink, PublicFooter, PublicHeader, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
 import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
 import { COMPLAINT_STATUSES, ORDINANCE_PRESETS, StatusBadge } from './modules/complaints/constants.jsx';
@@ -1989,6 +1989,7 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {} }) {
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [selected, setSelected] = useState(null);
+  const [trackErr, setTrackErr] = useState('');
   const [loading, setLoading] = useState(true);
 
   // Public complaint filing state
@@ -2262,6 +2263,7 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {} }) {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
+              setTrackErr('');
               const num = (e.currentTarget.elements.trackNum?.value || '').trim();
               if (!num) return;
               try {
@@ -2270,7 +2272,7 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {} }) {
                 if (!r.ok) throw new Error(d.detail || 'Complaint not found');
                 setSelected(d);
               } catch (err) {
-                alert(err.message || 'Complaint not found');
+                setTrackErr(err.message || 'Complaint not found');
               }
             }}
             style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: '.85rem', paddingBottom: '.75rem', borderBottom: '1px solid #e5e7eb' }}
@@ -2279,6 +2281,7 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {} }) {
             <input name="trackNum" placeholder="e.g. COM-2026-0001" style={{ maxWidth: 200 }} />
             <button type="submit" className="btn sm">Look Up</button>
           </form>
+          {trackErr && <div className="error-msg" role="alert" style={{ marginBottom: '.75rem' }}>{trackErr}</div>}
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: '1rem' }}>
             <input style={{ flex: '1 1 240px' }} placeholder="Search complaint #, property, ordinance, resolution…" value={q} onChange={(e) => setQ(e.target.value)} />
             <select aria-label="Filter complaints by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
@@ -3024,33 +3027,6 @@ function NotifyMeCard() {
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ text: '', isError: false });
-  const [paymentsEnabled, setPaymentsEnabled] = useState(false);
-  const [lastReservation, setLastReservation] = useState(null);
-  const [resLookupNum, setResLookupNum] = useState('');
-  const [resLookupRes, setResLookupRes] = useState(null);
-  const [resLookupErr, setResLookupErr] = useState('');
-
-  useEffect(() => {
-    fetch('/api/payments/config')
-      .then((r) => (r.ok ? r.json() : {}))
-      .then((d) => setPaymentsEnabled(Boolean(d?.enabled)))
-      .catch(() => {});
-    const params = new URLSearchParams(window.location.search);
-    const sid = params.get('session_id');
-    if (params.get('payment') === 'success' && sid) {
-      fetch('/api/payments/verify-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sid }),
-      })
-        .then((r) => (r.ok ? r.json() : {}))
-        .then((res) => {
-          if (res?.paid) setMsg({ text: 'Payment received! Thank you.', isError: false });
-          window.history.replaceState({}, '', window.location.pathname + window.location.hash);
-        })
-        .catch(() => {});
-    }
-  }, []);
 
   useEffect(() => {
     fetch('/api/subscriptions/topics')
@@ -3152,6 +3128,9 @@ function PayBillsPublicTab({ billType = '' }) {
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [payingId, setPayingId] = useState(null);
   const [payMsg, setPayMsg] = useState('');
+  const [contestBill, setContestBill] = useState(null);
+  const [contestReason, setContestReason] = useState('');
+  const [contesting, setContesting] = useState(false);
 
   useEffect(() => {
     fetch('/api/payments/config')
@@ -3311,19 +3290,10 @@ function PayBillsPublicTab({ billType = '' }) {
                               <button
                                 type="button"
                                 className="btn sm"
-                                onClick={async () => {
-                                  const reason = window.prompt(`Reason for contesting / requesting hearing on ${b.reference_number}:`);
-                                  if (!reason || !reason.trim()) return;
-                                  try {
-                                    const updated = await api('/api/payments/public/bills/contest', {
-                                      method: 'POST',
-                                      body: JSON.stringify({ reference_number: b.reference_number, reason: reason.trim() }),
-                                    });
-                                    setResults((prev) => (prev || []).map((x) => (x.id === b.id ? updated : x)));
-                                    setPayMsg(`Hearing/contest request submitted for ${b.reference_number}.`);
-                                  } catch (e2) {
-                                    setErr(e2.message || 'Failed to submit contest request.');
-                                  }
+                                onClick={() => {
+                                  setContestBill(b);
+                                  setContestReason('');
+                                  setErr('');
                                 }}
                               >
                                 Contest
@@ -3340,8 +3310,81 @@ function PayBillsPublicTab({ billType = '' }) {
           </div>
         )
       )}
+
+      {contestBill && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="contest-bill-title"
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 1000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget && !contesting) setContestBill(null); }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: '460px', margin: 0 }}>
+            <h3 id="contest-bill-title" style={{ marginTop: 0 }}>Contest Citation — {contestBill.reference_number}</h3>
+            <p className="muted" style={{ marginTop: 0, fontSize: '.88rem' }}>
+              Explain why you are contesting this citation or requesting a formal hearing.
+            </p>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!contestReason.trim()) return;
+                setContesting(true);
+                setErr('');
+                try {
+                  const r = await fetch('/api/payments/public/bills/contest', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reference_number: contestBill.reference_number, reason: contestReason.trim() }),
+                  });
+                  const updated = await r.json().catch(() => ({}));
+                  if (!r.ok) throw new Error(updated.detail || 'Failed to submit contest request.');
+                  setResults((prev) => (prev || []).map((x) => (x.id === contestBill.id ? updated : x)));
+                  setPayMsg(`Hearing/contest request submitted for ${contestBill.reference_number}.`);
+                  setContestBill(null);
+                } catch (e2) {
+                  setErr(e2.message || 'Failed to submit contest request.');
+                } finally {
+                  setContesting(false);
+                }
+              }}
+              style={{ display: 'grid', gap: '.75rem' }}
+            >
+              <div className="field">
+                <label htmlFor="contest-reason-input">Reason for Contest / Hearing Request *</label>
+                <textarea
+                  id="contest-reason-input"
+                  rows={4}
+                  required
+                  value={contestReason}
+                  onChange={(e) => setContestReason(e.target.value)}
+                  placeholder="Describe the reason for your dispute..."
+                />
+              </div>
+              <div className="actions" style={{ justifyContent: 'flex-end' }}>
+                <button type="button" className="btn" disabled={contesting} onClick={() => setContestBill(null)}>Cancel</button>
+                <button type="submit" className="btn primary" disabled={contesting}>{contesting ? 'Submitting…' : 'Submit Request'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+
+function isPublicTabAllowed(tabId, enabledList) {
+  if (!tabId) return false;
+  if (['pay', 'utilities', 'citations', 'transparency'].includes(tabId)) return true;
+  const list = Array.isArray(enabledList) ? enabledList : [];
+  if (list.includes(tabId)) return true;
+  if (['notices', 'directory', 'forms', 'pages'].includes(tabId) && list.includes('communications')) {
+    return true;
+  }
+  return false;
 }
 
 
@@ -3397,7 +3440,7 @@ function PublicHomePage() {
         setEnabledModules(list);
         setPublicFeatures(d && typeof d.features === 'object' && d.features ? d.features : {});
         const hashTab = location.hash.replace(/^#/, '');
-        setActiveTab(list.includes(hashTab) || hashTab === 'pay' ? hashTab : 'overview');
+        setActiveTab(isPublicTabAllowed(hashTab, list) ? hashTab : 'overview');
       })
       .catch(() => { setEnabledModules([]); setPublicFeatures({}); });
   }, [params]);
@@ -3407,7 +3450,7 @@ function PublicHomePage() {
       const h = location.hash.replace(/^#/, '');
       if (!h || h === 'overview') {
         setActiveTab('overview');
-      } else if (h === 'pay' || h === 'utilities' || h === 'citations' || h === 'transparency' || enabledModules?.includes(h)) {
+      } else if (isPublicTabAllowed(h, enabledModules)) {
         setActiveTab(h);
       }
     };
@@ -3462,54 +3505,42 @@ function PublicHomePage() {
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <UrgentAlertBanner branding={branding} />
-      <header>
-        <a
-          href="/#overview"
-          className="brand"
-          style={{ display: 'flex', alignItems: 'center', gap: '.55rem', textDecoration: 'none', color: 'inherit' }}
-          onClick={(e) => {
-            e.preventDefault();
-            selectTab('overview');
-          }}
-        >
-          {branding.has_city_logo && (
-            <img alt="City Logo" src="/api/branding/logo" style={{ height: '52px', width: 'auto', borderRadius: '4px', objectFit: 'contain' }} />
-          )}
-          {branding.city_title && <span>{branding.city_title}</span>}
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
-            <DocketHallLogo size={24} />
-            <span>DocketHall</span>
-          </span>
-        </a>
-        <div className="user-bar">
-          <DirectoryHeaderLink branding={branding} />
-          {me ? (
-            <>
-              <span>{me.username} ({ROLE_LABELS[me.role] || me.role})</span>
-              <a className="btn sm primary" href="/app">Go to Workspace</a>
-              <button
-                type="button"
-                className="btn sm"
-                onClick={async () => {
-                  await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
-                  setMe(null);
-                }}
-              >
-                Sign out
-              </button>
-            </>
-          ) : (
-            <>
-              <button type="button" className="btn sm primary" onClick={() => openAuth('/app', false, '')}>
-                Sign In
-              </button>
-              <button type="button" className="btn sm" onClick={() => openAuth('/app', true, 'Create an applicant account to submit and track permit applications or complaints.')}>
-                Create Account
-              </button>
-            </>
-          )}
-        </div>
-      </header>
+      <PublicHeader
+        branding={branding}
+        brandHref="/#overview"
+        onBrandClick={(e) => {
+          e.preventDefault();
+          selectTab('overview');
+        }}
+        subtitle="DocketHall"
+        logoHeight={52}
+      >
+        {me ? (
+          <>
+            <span>{me.username} ({ROLE_LABELS[me.role] || me.role})</span>
+            <a className="btn sm primary" href="/app">Go to Workspace</a>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={async () => {
+                await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+                setMe(null);
+              }}
+            >
+              Sign out
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="btn sm primary" onClick={() => openAuth('/app', false, '')}>
+              Sign In
+            </button>
+            <button type="button" className="btn sm" onClick={() => openAuth('/app', true, 'Create an applicant account to submit and track permit applications or complaints.')}>
+              Create Account
+            </button>
+          </>
+        )}
+      </PublicHeader>
 
       <main id="main-content" style={{ maxWidth: 1180, margin: '0 auto', padding: '1.25rem' }}>
         {me?.is_default_password && (

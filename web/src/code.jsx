@@ -19,7 +19,7 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../app.css';
 import ServiceIcon from './core/ServiceIcon.jsx';
-import { DocketHallLogo, DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { PublicFooter, PublicHeader, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
 import { HighlightText, LinkedCodeBody, buildSectionMap, getSearchSnippet } from './modules/codification/codeHelpers.jsx';
 
@@ -59,28 +59,10 @@ function PublicCityCode() {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#f5f7fa' }}>
       <UrgentAlertBanner branding={branding} />
-      <header>
-        <a
-          href="/"
-          className="brand"
-          style={{ display: 'flex', alignItems: 'center', gap: '.55rem', textDecoration: 'none', color: 'inherit' }}
-          title="Go to main page"
-        >
-          {branding.has_city_logo && (
-            <img src="/api/branding/logo" alt="City Logo" style={{ height: '56px', width: 'auto', borderRadius: '4px', objectFit: 'contain' }} />
-          )}
-          {branding.city_title && <span>{branding.city_title}</span>}
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
-            <DocketHallLogo size={24} />
-            <span>City Code</span>
-          </span>
-        </a>
-        <div className="user-bar">
-          <DirectoryHeaderLink branding={branding} />
-          <a className="btn sm" href="/portal">Permits Portal</a>
-          <a className="btn sm primary" href="/">Sign In</a>
-        </div>
-      </header>
+      <PublicHeader branding={branding} subtitle="City Code" logoHeight={56}>
+        <a className="btn sm" href="/portal">Permits Portal</a>
+        <a className="btn sm primary" href="/">Sign In</a>
+      </PublicHeader>
 
       <main style={{ margin: '0 auto', width: '100%', maxWidth: '1040px' }}>
         {selectedSec ? (

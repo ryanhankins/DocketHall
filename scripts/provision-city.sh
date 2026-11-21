@@ -17,7 +17,7 @@
 # Provision an isolated CivicDesk stack for a municipality.
 #
 # Example:
-#   STACK_NAME=northfield CIVICDESK_PORT=8081 MINIO_CONSOLE_PORT=9011 \
+#   STACK_NAME=northfield CIVICDESK_PORT=8081 \
 #   APP_BASE_URL=https://portal.northfield.gov COOKIE_SECURE=true \
 #   SMTP_HOST=smtp.postmarkapp.com SMTP_PORT=587 \
 #   SMTP_SENDER_EMAIL=alerts@northfield.gov SMTP_PASSWORD=... \
@@ -33,7 +33,6 @@ fi
 
 export STACK_NAME
 export CIVICDESK_PORT="${CIVICDESK_PORT:-8080}"
-export MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-9001}"
 export COOKIE_SECURE="${COOKIE_SECURE:-true}"
 export APP_BASE_URL="${APP_BASE_URL:-}"
 export SEED_CITY_PROFILE="${SEED_CITY_PROFILE:-}"

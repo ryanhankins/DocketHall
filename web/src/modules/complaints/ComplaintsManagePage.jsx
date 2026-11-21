@@ -70,6 +70,8 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
   const [showQueue, setShowQueue] = useState(false);
   const [showWo, setShowWo] = useState(false);
   const [woList, setWoList] = useState([]);
+  const [editingWo, setEditingWo] = useState(null);
+  const [savingWo, setSavingWo] = useState(false);
   const [reinspQueue, setReinspQueue] = useState([]);
   const [reinspForm, setReinspForm] = useState({
     inspect_date: '',
@@ -351,30 +353,15 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                         <button
                           type="button"
                           className="btn sm"
-                          onClick={async () => {
-                            const crew = window.prompt('Assigned Crew:', wo.assigned_crew || '');
-                            if (crew === null) return;
-                            const prio = window.prompt('Priority (low, normal, high, emergency):', wo.priority || 'normal');
-                            if (prio === null) return;
-                            const asset = window.prompt('Asset ID (optional):', wo.asset_id || '');
-                            if (asset === null) return;
-                            const cost = window.prompt('Estimated Cost (optional):', wo.estimated_cost || '');
-                            if (cost === null) return;
-                            const notes = window.prompt('Completion / Staff Notes:', wo.completion_notes || '');
-                            if (notes === null) return;
-                            const updated = await api(`/api/complaints/work-orders/${wo.id}`, {
-                              method: 'PATCH',
-                              body: JSON.stringify({
-                                assigned_crew: crew,
-                                priority: prio,
-                                asset_id: asset,
-                                estimated_cost: cost,
-                                completion_notes: notes,
-                              }),
-                            });
-                            setWoList((prev) => prev.map((x) => (x.id === wo.id ? updated : x)));
-                            showToast('Work order details saved', 'ok');
-                          }}
+                          onClick={() => setEditingWo({
+                            id: wo.id,
+                            work_order_number: wo.work_order_number,
+                            assigned_crew: wo.assigned_crew || '',
+                            priority: wo.priority || 'normal',
+                            asset_id: wo.asset_id || '',
+                            estimated_cost: wo.estimated_cost || '',
+                            completion_notes: wo.completion_notes || '',
+                          })}
                         >
                           Edit
                         </button>
@@ -1106,6 +1093,83 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
           </div>
         )}
       </div>
+
+      {editingWo && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-wo-title"
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 1000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget && !savingWo) setEditingWo(null); }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: '500px', margin: 0 }}>
+            <h2 id="edit-wo-title" style={{ marginTop: 0 }}>Edit Work Order — {editingWo.work_order_number}</h2>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setSavingWo(true);
+                try {
+                  const updated = await api(`/api/complaints/work-orders/${editingWo.id}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({
+                      assigned_crew: editingWo.assigned_crew,
+                      priority: editingWo.priority,
+                      asset_id: editingWo.asset_id,
+                      estimated_cost: editingWo.estimated_cost,
+                      completion_notes: editingWo.completion_notes,
+                    }),
+                  });
+                  setWoList((prev) => prev.map((x) => (x.id === editingWo.id ? updated : x)));
+                  setEditingWo(null);
+                  showToast('Work order details saved', 'ok');
+                } catch (err) {
+                  showToast(err.message || 'Failed to save work order', 'error');
+                } finally {
+                  setSavingWo(false);
+                }
+              }}
+              style={{ display: 'grid', gap: '.7rem' }}
+            >
+              <div className="row">
+                <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                  <label htmlFor="wo-edit-crew">Assigned Crew</label>
+                  <input id="wo-edit-crew" value={editingWo.assigned_crew} onChange={(e) => setEditingWo((f) => ({ ...f, assigned_crew: e.target.value }))} />
+                </div>
+                <div className="field" style={{ minWidth: 140 }}>
+                  <label htmlFor="wo-edit-prio">Priority</label>
+                  <select id="wo-edit-prio" value={editingWo.priority} onChange={(e) => setEditingWo((f) => ({ ...f, priority: e.target.value }))}>
+                    <option value="low">Low</option>
+                    <option value="normal">Normal</option>
+                    <option value="high">High</option>
+                    <option value="emergency">Emergency</option>
+                  </select>
+                </div>
+              </div>
+              <div className="row">
+                <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                  <label htmlFor="wo-edit-asset">Asset ID (optional)</label>
+                  <input id="wo-edit-asset" value={editingWo.asset_id} onChange={(e) => setEditingWo((f) => ({ ...f, asset_id: e.target.value }))} />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                  <label htmlFor="wo-edit-cost">Estimated Cost (optional)</label>
+                  <input id="wo-edit-cost" value={editingWo.estimated_cost} onChange={(e) => setEditingWo((f) => ({ ...f, estimated_cost: e.target.value }))} />
+                </div>
+              </div>
+              <div className="field">
+                <label htmlFor="wo-edit-notes">Completion / Staff Notes</label>
+                <textarea id="wo-edit-notes" rows={3} value={editingWo.completion_notes} onChange={(e) => setEditingWo((f) => ({ ...f, completion_notes: e.target.value }))} />
+              </div>
+              <div className="actions" style={{ justifyContent: 'flex-end' }}>
+                <button type="button" className="btn" disabled={savingWo} onClick={() => setEditingWo(null)}>Cancel</button>
+                <button type="submit" className="btn primary" disabled={savingWo}>{savingWo ? 'Saving…' : 'Save Details'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

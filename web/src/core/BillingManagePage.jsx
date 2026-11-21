@@ -56,6 +56,11 @@ export default function BillingManagePage({ fixedBillType = '', pageTitle = '', 
   const [lateFeeFlat, setLateFeeFlat] = useState('10.00');
   const [lateFeeEmails, setLateFeeEmails] = useState(false);
   const [applyingLateFees, setApplyingLateFees] = useState(false);
+  const [paymentBill, setPaymentBill] = useState(null);
+  const [payAmount, setPayAmount] = useState('');
+  const [payMethod, setPayMethod] = useState('check');
+  const [payRef, setPayRef] = useState('');
+  const [recordingPayment, setRecordingPayment] = useState(false);
   const csvRef = useRef(null);
 
   const loadBills = useCallback(async () => {
@@ -146,20 +151,29 @@ export default function BillingManagePage({ fixedBillType = '', pageTitle = '', 
     }
   };
 
-  const handleRecordPayment = async (bill) => {
-    const amt = window.prompt(`Record payment amount for ${bill.reference_number} (Due: ${bill.amount_due}):`, bill.amount_due.replace('$', ''));
-    if (!amt) return;
-    const method = window.prompt('Payment method (check, cash, ach, card):', 'check') || 'check';
-    const ref = window.prompt('Check # or Receipt Reference (optional):', '') || '';
+  const handleRecordPayment = (bill) => {
+    setPaymentBill(bill);
+    setPayAmount((bill.amount_due || '').replace('$', ''));
+    setPayMethod('check');
+    setPayRef('');
+  };
+
+  const submitRecordPayment = async (e) => {
+    e.preventDefault();
+    if (!paymentBill || !payAmount.trim()) return;
+    setRecordingPayment(true);
     try {
-      await api(`/api/payments/bills/${bill.id}/record-payment`, {
+      await api(`/api/payments/bills/${paymentBill.id}/record-payment`, {
         method: 'POST',
-        body: JSON.stringify({ payment_amount: amt, payment_method: method, payment_ref: ref }),
+        body: JSON.stringify({ payment_amount: payAmount.trim(), payment_method: payMethod, payment_ref: payRef.trim() }),
       });
-      showToast(`Recorded payment on ${bill.reference_number}`, 'ok');
+      showToast(`Recorded payment on ${paymentBill.reference_number}`, 'ok');
+      setPaymentBill(null);
       await loadBills();
     } catch (err) {
       showToast(err.message || 'Failed to record payment', 'error');
+    } finally {
+      setRecordingPayment(false);
     }
   };
 
@@ -413,6 +427,53 @@ export default function BillingManagePage({ fixedBillType = '', pageTitle = '', 
           </div>
         )}
       </div>
+
+      {paymentBill && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="record-payment-title"
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 1000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget && !recordingPayment) setPaymentBill(null); }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: '440px', margin: 0 }}>
+            <h2 id="record-payment-title" style={{ marginTop: 0 }}>
+              Record Payment — {paymentBill.reference_number}
+            </h2>
+            <p className="muted" style={{ marginTop: 0, fontSize: '.88rem' }}>
+              Amount Due: <strong>{paymentBill.amount_due}</strong>
+            </p>
+            <form onSubmit={submitRecordPayment} style={{ display: 'grid', gap: '.75rem' }}>
+              <div className="field">
+                <label htmlFor="pay-modal-amount">Payment Amount *</label>
+                <input id="pay-modal-amount" required value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="e.g. 75.00" />
+              </div>
+              <div className="field">
+                <label htmlFor="pay-modal-method">Payment Method</label>
+                <select id="pay-modal-method" value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+                  <option value="check">Check</option>
+                  <option value="cash">Cash</option>
+                  <option value="ach">ACH / Bank Transfer</option>
+                  <option value="card">Card</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="pay-modal-ref">Check # or Receipt Reference (optional)</label>
+                <input id="pay-modal-ref" value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="e.g. CHK-1042" />
+              </div>
+              <div className="actions" style={{ justifyContent: 'flex-end', marginTop: '.25rem' }}>
+                <button type="button" className="btn" disabled={recordingPayment} onClick={() => setPaymentBill(null)}>Cancel</button>
+                <button type="submit" className="btn primary" disabled={recordingPayment}>
+                  {recordingPayment ? 'Recording…' : 'Record Payment'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -139,3 +139,42 @@ export function DocketHallLogo({ size = 24 }) {
     />
   );
 }
+
+export function PublicHeader({
+  branding,
+  brandHref = '/',
+  onBrandClick,
+  subtitle = 'DocketHall',
+  logoHeight = 52,
+  children,
+}) {
+  return (
+    <header>
+      <a
+        href={brandHref}
+        className="brand"
+        style={{ display: 'flex', alignItems: 'center', gap: '.55rem', textDecoration: 'none', color: 'inherit' }}
+        title="Go to main page"
+        onClick={onBrandClick}
+      >
+        {branding?.has_city_logo && (
+          <img
+            alt="City Logo"
+            src="/api/branding/logo"
+            style={{ height: `${logoHeight}px`, width: 'auto', borderRadius: '4px', objectFit: 'contain' }}
+            onError={(e) => { e.currentTarget.hidden = true; }}
+          />
+        )}
+        {branding?.city_title && <span>{branding.city_title}</span>}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
+          <DocketHallLogo size={24} />
+          <span>{subtitle}</span>
+        </span>
+      </a>
+      <div className="user-bar">
+        <DirectoryHeaderLink branding={branding} />
+        {children}
+      </div>
+    </header>
+  );
+}

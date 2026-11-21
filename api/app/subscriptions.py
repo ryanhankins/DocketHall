@@ -55,7 +55,7 @@ PUBLIC_TOPICS = [
     },
     {
         "id": "notices",
-        "module_id": "notices",
+        "module_id": "communications",
         "label": "News, Notices & Bids",
         "description": "Get notified when city news, public notices, RFPs/bids, or job postings are published.",
     },

@@ -70,7 +70,7 @@ services:
       S3_SECURE: "false"
       S3_BUCKET: records
       CIVICDESK_UPGRADE_DIR: /upgrade
-      CIVICDESK_GITHUB_REPO: "${CIVICDESK_GITHUB_REPO:-ryanhankins/CivicDesk}"
+      CIVICDESK_GITHUB_REPO: "${CIVICDESK_GITHUB_REPO:-ryanhankins/DocketHall}"
     secrets:
       - postgres_password
     volumes:
@@ -119,13 +119,8 @@ services:
   # ----------------------------------------------------------------- seaweedfs
   seaweedfs:
     image: chrislusf/seaweedfs:latest
+    # Both S3 (:8333) and Filer (:8888) stay internal to the civicdesk overlay network.
     command: "server -dir=/data -s3 -s3.port=8333 -filer -filer.port=8888 -master.volumeSizeLimitMB=1024"
-    ports:
-      # Filer web UI only. The S3 API (8333) stays internal to the overlay network.
-      - target: 8888
-        published: ${SEAWEEDFS_CONSOLE_PORT:-8888}
-        protocol: tcp
-        mode: host
     volumes:
       - seaweedfs_data:/data
     networks: [civicdesk]
@@ -156,9 +151,3 @@ secrets:
   postgres_password:
     external: true
     name: ${CIVICDESK_SECRET_PREFIX:-}postgres_password
-  minio_root_user:
-    external: true
-    name: ${CIVICDESK_SECRET_PREFIX:-}minio_root_user
-  minio_root_password:
-    external: true
-    name: ${CIVICDESK_SECRET_PREFIX:-}minio_root_password

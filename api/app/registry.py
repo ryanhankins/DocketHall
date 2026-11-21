@@ -90,7 +90,10 @@ def register_module(mod: CivicModule) -> None:
 
 
 def _default_enabled_set() -> set[str]:
-    raw = os.environ.get("ENABLED_MODULES", "agendas,permits,codification,records,complaints,calendar")
+    raw = os.environ.get(
+        "ENABLED_MODULES",
+        "agendas,permits,codification,records,complaints,calendar,communications,licensing,utilities,citations",
+    )
     return {m.strip() for m in raw.split(",") if m.strip()}
 
 

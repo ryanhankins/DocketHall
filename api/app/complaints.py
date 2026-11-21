@@ -1066,6 +1066,7 @@ def delete_work_order(wo_id: int, user: dict = Depends(require_permission("compl
 def update_complaint(
     complaint_id: int,
     body: ComplaintPatchIn,
+    request: Request,
     user: dict = Depends(require_permission("complaints.manage")),
 ):
     sets = ["updated_at = now()"]
@@ -1168,11 +1169,11 @@ def update_complaint(
         try:
             from .integrations import send_direct_email
             send_direct_email(
-                to_email=row[8],
-                subject=f"Code Complaint {row[1]} Status Updated: {body.status}",
-                text_body=f"Your complaint {row[1]} status has been updated to: {body.status}.\n\n{body.final_resolution or ''}".strip(),
-                related_entity_type="complaint",
-                related_entity_id=str(complaint_id),
+                [row[8]],
+                f"[DocketHall] Code Complaint {row[1]} Status Updated: {body.status}",
+                f"Your complaint {row[1]} status has been updated to: {body.status}.\n\n{body.final_resolution or ''}".strip(),
+                link_path="/app#my-complaints" if row[5] else "/#complaints",
+                request=request,
             )
         except Exception:
             pass

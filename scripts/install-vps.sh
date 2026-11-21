@@ -19,16 +19,16 @@
 #
 # Example:
 #   DOMAIN=portal.cityofbirchwood.com \
-#   curl -fsSL https://raw.githubusercontent.com/ryanhankins/CivicDesk/main/scripts/install-vps.sh | sudo -E bash
+#   curl -fsSL https://raw.githubusercontent.com/ryanhankins/DocketHall/main/scripts/install-vps.sh | sudo -E bash
 #
 # Optional env:
 #   DOMAIN                 Public domain for automatic Caddy HTTPS (recommended)
 #   INSTALL_DIR            Install path (default: /opt/civicdesk)
-#   REPO_URL               Git repo URL (default: https://github.com/ryanhankins/CivicDesk.git)
+#   REPO_URL               Git repo URL (default: https://github.com/ryanhankins/DocketHall.git)
 #   CIVICDESK_REGISTRY     Container registry prefix (default: ghcr.io/ryanhankins/)
 #   CIVICDESK_PULL_ONLY    Pull prebuilt images without Node/Docker build (default: true)
-#   STORAGE_BACKEND        local (default on VPS) or minio
-#   MINIO_REPLICAS         0 (default when STORAGE_BACKEND=local) or 1
+#   STORAGE_BACKEND        local (default on VPS) or s3
+#   S3_REPLICAS            0 (default when STORAGE_BACKEND=local) or 1
 #   MULTI_TENANT           false (default) or true
 #   TENANT_BASE_DOMAIN     Wildcard base domain when MULTI_TENANT=true (e.g. civicdesk.org)
 #   RESTIC_REPOSITORY      Optional restic repo for nightly incremental off-site backups
@@ -42,14 +42,15 @@ fi
 
 DOMAIN="${DOMAIN:-}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/civicdesk}"
-REPO_URL="${REPO_URL:-https://github.com/ryanhankins/CivicDesk.git}"
+REPO_URL="${REPO_URL:-https://github.com/ryanhankins/DocketHall.git}"
 export CIVICDESK_REGISTRY="${CIVICDESK_REGISTRY:-ghcr.io/ryanhankins/}"
 export CIVICDESK_PULL_ONLY="${CIVICDESK_PULL_ONLY:-true}"
 export STORAGE_BACKEND="${STORAGE_BACKEND:-local}"
-if [ -z "${MINIO_REPLICAS+x}" ]; then
-  if [ "$STORAGE_BACKEND" = "local" ]; then MINIO_REPLICAS=0; else MINIO_REPLICAS=1; fi
+S3_REPLICAS="${S3_REPLICAS:-${MINIO_REPLICAS:-}}"
+if [ -z "$S3_REPLICAS" ]; then
+  if [ "$STORAGE_BACKEND" = "local" ]; then S3_REPLICAS=0; else S3_REPLICAS=1; fi
 fi
-export MINIO_REPLICAS
+export S3_REPLICAS
 export CIVICDESK_PORT="${CIVICDESK_PORT:-8080}"
 
 echo "==> Installing system packages (Docker, Caddy, restic, git)"
@@ -118,7 +119,7 @@ mkdir -p /etc/civicdesk /var/log/civicdesk
 cat >/etc/civicdesk/upgrade.env <<EOF
 DOMAIN=${DOMAIN:-}
 STORAGE_BACKEND=${STORAGE_BACKEND:-local}
-MINIO_REPLICAS=${MINIO_REPLICAS:-0}
+S3_REPLICAS=${S3_REPLICAS:-0}
 SEED_CITY_PROFILE=${SEED_CITY_PROFILE:-}
 MULTI_TENANT=${MULTI_TENANT:-false}
 TENANT_BASE_DOMAIN=${TENANT_BASE_DOMAIN:-}

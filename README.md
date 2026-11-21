@@ -53,8 +53,8 @@ Modules can be enabled or disabled individually under **Administration → Manag
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/ryanhankins/CivicDesk.git
-cd CivicDesk
+git clone https://github.com/ryanhankins/DocketHall.git
+cd DocketHall
 ```
 
 ### 2. Deploy the stack
@@ -72,7 +72,6 @@ Once the services are running:
 - **Public Portal & Web App:** <http://localhost:8080>
 - **Standalone Permits Portal:** <http://localhost:8080/portal>
 - **Standalone Municipal Code:** <http://localhost:8080/code>
-- **MinIO Console:** <http://localhost:9001> (username is stored in the `minio_root_user` Docker secret, defaulting to `civicdesk`)
 
 ### 4. First-time sign-in
 
@@ -125,8 +124,8 @@ Stop and remove the stack **and** delete all volumes, secrets, and configs:
 | `CIVICDESK_TAG` | `latest` | Image tag for built services |
 | `CIVICDESK_REGISTRY` | *(empty)* | Optional registry prefix (e.g. `registry.example.com/`); pushes images if set |
 | `POSTGRES_PASSWORD` | *(random)* | Initial password for `postgres_password` Swarm secret |
-| `MINIO_ROOT_USER` | `civicdesk` | Initial username for `minio_root_user` Swarm secret |
-| `MINIO_ROOT_PASSWORD` | *(random)* | Initial password for `minio_root_password` Swarm secret |
+| `STORAGE_BACKEND` | `s3` | Object storage backend (`s3` for SeaweedFS or `local` for `/data/records`) |
+| `S3_REPLICAS` | `1` | SeaweedFS service replicas (`0` when using `STORAGE_BACKEND=local`) |
 | `COOKIE_SECURE` | `false` | Set to `true` when serving over HTTPS |
 | `APP_BASE_URL` | *(from request)* | Optional override for base URL used in notification email links |
 
@@ -137,7 +136,6 @@ Secrets are created once and are never overwritten by subsequent `./scripts/depl
 - `web/` — Nginx reverse proxy and React 19 + Vite frontend (`index.html`, `app.html`, `portal.html`, `code.html`, `src/core/`, and `src/modules/` for `agendas`, `calendar`, `codification`, `complaints`, `permits`, `records`)
 - `api/` — Python FastAPI backend (`main.py`, `auth.py`, `users.py`, `branding.py`, `integrations.py`, `subscriptions.py`, `backup.py`, `registry.py`, `agenda_pdf.py`, `agendas.py`, `calendar_mod.py`, `codification.py`, `complaints.py`, `permits.py`, `records.py`, and `modules/`)
 - `db/` — PostgreSQL initialization script (`init.sql`)
-- `minio/` — MinIO object storage image and bucket initialization (`minio/init/`)
 - `scripts/` — Swarm deployment (`deploy.sh`) and removal (`teardown.sh`) scripts
 - `docker-stack.yml` — Docker Swarm stack definition
 

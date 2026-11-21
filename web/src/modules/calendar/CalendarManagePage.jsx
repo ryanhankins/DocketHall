@@ -26,6 +26,8 @@ export default function CalendarManagePage() {
   const [events, setEvents] = useState([]);
   const [statusFilter, setStatusFilter] = useState('all');
   const [editingEvId, setEditingEvId] = useState(null);
+  const [editingRes, setEditingRes] = useState(null);
+  const [savingRes, setSavingRes] = useState(false);
 
   const [evForm, setEvForm] = useState({
     title: '',
@@ -181,18 +183,12 @@ export default function CalendarManagePage() {
                         <button
                           type="button"
                           className="btn sm"
-                          onClick={async () => {
-                            const fee = window.prompt(`Fee amount for ${r.reservation_number}:`, r.fee_amount || '');
-                            if (fee === null) return;
-                            const snote = window.prompt(`Staff notes for ${r.reservation_number}:`, r.staff_notes || '');
-                            if (snote === null) return;
-                            await api(`/api/calendar/reservations/${r.id}`, {
-                              method: 'PATCH',
-                              body: JSON.stringify({ fee_amount: fee, staff_notes: snote }),
-                            });
-                            showToast(`Updated ${r.reservation_number}`, 'ok');
-                            await loadAll();
-                          }}
+                          onClick={() => setEditingRes({
+                            id: r.id,
+                            reservation_number: r.reservation_number,
+                            fee_amount: r.fee_amount || '',
+                            staff_notes: r.staff_notes || '',
+                          })}
                         >
                           Edit Notes/Fee
                         </button>
@@ -384,6 +380,56 @@ export default function CalendarManagePage() {
               </tbody>
             </table>
           )}
+        </div>
+      )}
+
+      {editingRes && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-res-title"
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 1000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget && !savingRes) setEditingRes(null); }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: '460px', margin: 0 }}>
+            <h2 id="edit-res-title" style={{ marginTop: 0 }}>Edit Notes &amp; Fee — {editingRes.reservation_number}</h2>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setSavingRes(true);
+                try {
+                  await api(`/api/calendar/reservations/${editingRes.id}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({ fee_amount: editingRes.fee_amount, staff_notes: editingRes.staff_notes }),
+                  });
+                  showToast(`Updated ${editingRes.reservation_number}`, 'ok');
+                  setEditingRes(null);
+                  await loadAll();
+                } catch (err) {
+                  showToast(err.message || 'Failed to update reservation', 'error');
+                } finally {
+                  setSavingRes(false);
+                }
+              }}
+              style={{ display: 'grid', gap: '.75rem' }}
+            >
+              <div className="field">
+                <label htmlFor="res-edit-fee">Fee Amount</label>
+                <input id="res-edit-fee" value={editingRes.fee_amount} onChange={(e) => setEditingRes((f) => ({ ...f, fee_amount: e.target.value }))} placeholder="e.g. $50.00" />
+              </div>
+              <div className="field">
+                <label htmlFor="res-edit-notes">Staff Notes</label>
+                <textarea id="res-edit-notes" rows={3} value={editingRes.staff_notes} onChange={(e) => setEditingRes((f) => ({ ...f, staff_notes: e.target.value }))} />
+              </div>
+              <div className="actions" style={{ justifyContent: 'flex-end' }}>
+                <button type="button" className="btn" disabled={savingRes} onClick={() => setEditingRes(null)}>Cancel</button>
+                <button type="submit" className="btn primary" disabled={savingRes}>{savingRes ? 'Saving…' : 'Save'}</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </section>

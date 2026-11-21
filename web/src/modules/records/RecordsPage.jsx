@@ -17,8 +17,17 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { api, formatDate, formatSize, hasPermission } from '../../core/api.js';
+import ModuleNotificationsCard from '../../core/ModuleNotificationsCard.jsx';
 import PdfComplianceButton from '../../core/PdfComplianceButton.jsx';
 import { useToast } from '../../core/toast.jsx';
+
+const RECORDS_NOTIFICATION_EVENTS = [
+  {
+    key: 'records_foia',
+    label: 'New FOIA / Public Records Request',
+    description: 'Sent to configured staff recipients when a resident submits a public records request online.',
+  },
+];
 
 const CATEGORIES = [
   'Contract',
@@ -95,6 +104,8 @@ export default function RecordsPage({ me }) {
   const [dragOver, setDragOver] = useState(false);
   const [showFoia, setShowFoia] = useState(false);
   const [foiaItems, setFoiaItems] = useState([]);
+  const [editingFoia, setEditingFoia] = useState(null);
+  const [savingFoia, setSavingFoia] = useState(false);
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -380,22 +391,14 @@ export default function RecordsPage({ me }) {
                           <button
                             type="button"
                             className="btn sm"
-                            onClick={async () => {
-                              const assigned = window.prompt('Assigned To:', fr.assigned_to || '');
-                              if (assigned === null) return;
-                              const due = window.prompt('Due Date (YYYY-MM-DD):', fr.due_date || '');
-                              if (due === null) return;
-                              const fee = window.prompt('Fee Estimate:', fr.fee_estimate || '');
-                              if (fee === null) return;
-                              const rnotes = window.prompt('Response Notes:', fr.response_notes || '');
-                              if (rnotes === null) return;
-                              const updated = await api(`/api/records/requests/${fr.id}`, {
-                                method: 'PATCH',
-                                body: JSON.stringify({ assigned_to: assigned, due_date: due, fee_estimate: fee, response_notes: rnotes }),
-                              });
-                              setFoiaItems((prev) => prev.map((x) => (x.id === fr.id ? updated : x)));
-                              showToast('FOIA details saved', 'ok');
-                            }}
+                            onClick={() => setEditingFoia({
+                              id: fr.id,
+                              request_number: fr.request_number,
+                              assigned_to: fr.assigned_to || '',
+                              due_date: fr.due_date || '',
+                              fee_estimate: fr.fee_estimate || '',
+                              response_notes: fr.response_notes || '',
+                            })}
                           >
                             Edit
                           </button>
@@ -959,6 +962,79 @@ export default function RecordsPage({ me }) {
           </div>
         )}
       </div>
+
+      {canManage && (
+        <ModuleNotificationsCard
+          moduleId="records"
+          title="Records &amp; FOIA Email Notifications"
+          events={RECORDS_NOTIFICATION_EVENTS}
+        />
+      )}
+
+      {editingFoia && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-foia-title"
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 1000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget && !savingFoia) setEditingFoia(null); }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: '480px', margin: 0 }}>
+            <h2 id="edit-foia-title" style={{ marginTop: 0 }}>Edit FOIA Request — {editingFoia.request_number}</h2>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setSavingFoia(true);
+                try {
+                  const updated = await api(`/api/records/requests/${editingFoia.id}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({
+                      assigned_to: editingFoia.assigned_to,
+                      due_date: editingFoia.due_date,
+                      fee_estimate: editingFoia.fee_estimate,
+                      response_notes: editingFoia.response_notes,
+                    }),
+                  });
+                  setFoiaItems((prev) => prev.map((x) => (x.id === editingFoia.id ? updated : x)));
+                  setEditingFoia(null);
+                  showToast('FOIA details saved', 'ok');
+                } catch (err) {
+                  showToast(err.message || 'Failed to save FOIA details', 'error');
+                } finally {
+                  setSavingFoia(false);
+                }
+              }}
+              style={{ display: 'grid', gap: '.75rem' }}
+            >
+              <div className="row">
+                <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                  <label htmlFor="foia-edit-assigned">Assigned To</label>
+                  <input id="foia-edit-assigned" value={editingFoia.assigned_to} onChange={(e) => setEditingFoia((f) => ({ ...f, assigned_to: e.target.value }))} />
+                </div>
+                <div className="field" style={{ minWidth: 150 }}>
+                  <label htmlFor="foia-edit-due">Due Date</label>
+                  <input id="foia-edit-due" type="date" value={editingFoia.due_date} onChange={(e) => setEditingFoia((f) => ({ ...f, due_date: e.target.value }))} />
+                </div>
+              </div>
+              <div className="field">
+                <label htmlFor="foia-edit-fee">Fee Estimate</label>
+                <input id="foia-edit-fee" value={editingFoia.fee_estimate} onChange={(e) => setEditingFoia((f) => ({ ...f, fee_estimate: e.target.value }))} placeholder="e.g. $25.00" />
+              </div>
+              <div className="field">
+                <label htmlFor="foia-edit-notes">Response Notes</label>
+                <textarea id="foia-edit-notes" rows={3} value={editingFoia.response_notes} onChange={(e) => setEditingFoia((f) => ({ ...f, response_notes: e.target.value }))} />
+              </div>
+              <div className="actions" style={{ justifyContent: 'flex-end' }}>
+                <button type="button" className="btn" disabled={savingFoia} onClick={() => setEditingFoia(null)}>Cancel</button>
+                <button type="submit" className="btn primary" disabled={savingFoia}>{savingFoia ? 'Saving…' : 'Save Details'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

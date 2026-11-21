@@ -28,7 +28,7 @@ from .auth import require_admin
 router = APIRouter(prefix="/api/system", tags=["system"])
 
 UPGRADE_DIR = os.environ.get("CIVICDESK_UPGRADE_DIR", "/upgrade")
-GITHUB_REPO = os.environ.get("CIVICDESK_GITHUB_REPO", "ryanhankins/CivicDesk").strip()
+GITHUB_REPO = os.environ.get("CIVICDESK_GITHUB_REPO", "ryanhankins/DocketHall").strip()
 
 
 def _current_commit() -> str:

@@ -234,6 +234,8 @@ export default function CodificationAdminPage() {
   const [newSecChapId, setNewSecChapId] = useState('');
   const [newSecNum, setNewSecNum] = useState('');
   const [newSecTitle, setNewSecTitle] = useState('');
+  const [editingChapter, setEditingChapter] = useState(null);
+  const [savingChapter, setSavingChapter] = useState(false);
   const showToast = useToast();
 
   const loadCode = useCallback(async (q = '') => {
@@ -342,18 +344,13 @@ export default function CodificationAdminPage() {
               <button
                 type="button"
                 className="btn sm"
-                onClick={async (e) => {
+                onClick={(e) => {
                   e.preventDefault();
-                  const prefix = window.prompt('Chapter Prefix:', c.code_prefix || '');
-                  if (prefix === null) return;
-                  const title = window.prompt('Chapter Title:', c.title || '');
-                  if (title === null) return;
-                  await api(`/api/codification/chapters/${c.id}`, {
-                    method: 'PATCH',
-                    body: JSON.stringify({ code_prefix: prefix.trim(), title: title.trim() }),
+                  setEditingChapter({
+                    id: c.id,
+                    code_prefix: c.code_prefix || '',
+                    title: c.title || '',
                   });
-                  showToast('Chapter updated', 'ok');
-                  await loadAll();
                 }}
               >
                 Edit Chapter
@@ -367,7 +364,7 @@ export default function CodificationAdminPage() {
                     method: 'PATCH',
                     body: JSON.stringify({ is_published: c.is_published === false }),
                   });
-                  await loadAll();
+                  await loadCode(search);
                 }}
               >
                 {c.is_published !== false ? 'Hide' : 'Publish'}
@@ -380,7 +377,7 @@ export default function CodificationAdminPage() {
                   if (!window.confirm(`Delete chapter "${c.code_prefix} — ${c.title}" and all its sections?`)) return;
                   await api(`/api/codification/chapters/${c.id}`, { method: 'DELETE' });
                   showToast('Chapter deleted', 'ok');
-                  await loadAll();
+                  await loadCode(search);
                 }}
               >
                 Delete
@@ -426,6 +423,59 @@ export default function CodificationAdminPage() {
           </div>
         </details>
       ))}
+
+      {editingChapter && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-chapter-title"
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', zIndex: 1000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget && !savingChapter) setEditingChapter(null); }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: '440px', margin: 0 }}>
+            <h2 id="edit-chapter-title" style={{ marginTop: 0 }}>Edit Code Chapter</h2>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                setSavingChapter(true);
+                try {
+                  await api(`/api/codification/chapters/${editingChapter.id}`, {
+                    method: 'PATCH',
+                    body: JSON.stringify({
+                      code_prefix: editingChapter.code_prefix.trim(),
+                      title: editingChapter.title.trim(),
+                    }),
+                  });
+                  showToast('Chapter updated', 'ok');
+                  setEditingChapter(null);
+                  await loadCode(search);
+                } catch (err) {
+                  showToast(err.message || 'Failed to update chapter', 'error');
+                } finally {
+                  setSavingChapter(false);
+                }
+              }}
+              style={{ display: 'grid', gap: '.75rem' }}
+            >
+              <div className="field">
+                <label htmlFor="chap-edit-prefix">Chapter Prefix *</label>
+                <input id="chap-edit-prefix" required value={editingChapter.code_prefix} onChange={(e) => setEditingChapter((f) => ({ ...f, code_prefix: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label htmlFor="chap-edit-title">Chapter Title *</label>
+                <input id="chap-edit-title" required value={editingChapter.title} onChange={(e) => setEditingChapter((f) => ({ ...f, title: e.target.value }))} />
+              </div>
+              <div className="actions" style={{ justifyContent: 'flex-end' }}>
+                <button type="button" className="btn" disabled={savingChapter} onClick={() => setEditingChapter(null)}>Cancel</button>
+                <button type="submit" className="btn primary" disabled={savingChapter}>{savingChapter ? 'Saving…' : 'Save Chapter'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

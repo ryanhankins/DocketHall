@@ -24,6 +24,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Literal
+import uuid
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from psycopg.errors import UniqueViolation
@@ -34,7 +35,7 @@ from .audit import record_audit
 from .auth import current_user, has_permission, require_admin, require_permission
 from .db import pool
 from .integrations import _mask_key, get_app_base_url
-from .tenancy import get_current_tenant_slug, is_multi_tenant, schema_for_slug, tenant_context
+from .tenancy import get_current_tenant_slug, is_multi_tenant, schema_for_slug, tenant_context, validate_tenant_slug
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
@@ -432,29 +433,37 @@ def _verify_stripe_sig(payload: bytes, sig_header: str, secret: str) -> bool:
 @router.post("/webhook")
 async def stripe_webhook(request: Request):
     raw = await request.body()
-    secrets = _get_active_stripe_secrets()
-    if not secrets:
-        raise HTTPException(status_code=400, detail="Stripe not configured")
-    _, wh_secret, _ = secrets
-    if wh_secret:
-        sig = request.headers.get("stripe-signature", "")
-        if not _verify_stripe_sig(raw, sig, wh_secret):
-            raise HTTPException(status_code=400, detail="Invalid Stripe signature")
     try:
         event = json.loads(raw.decode("utf-8"))
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    if event.get("type") == "checkout.session.completed":
-        obj = (event.get("data") or {}).get("object") or {}
-        if obj.get("payment_status") == "paid":
-            meta = obj.get("metadata") or {}
-            item_type = meta.get("item_type")
-            item_id = int(meta["item_id"]) if str(meta.get("item_id") or "").isdigit() else 0
-            t_slug = (meta.get("tenant_slug") or "default").strip()
-            if item_type in ("permit", "reservation", "bill") and item_id > 0:
-                schema = schema_for_slug(t_slug) if (is_multi_tenant() and t_slug != "default") else "public"
-                with tenant_context(t_slug, schema):
+    obj = ((event.get("data") or {}).get("object") or {}) if isinstance(event, dict) else {}
+    meta = obj.get("metadata") or {}
+    raw_slug = str(meta.get("tenant_slug") or "default").strip()
+    if is_multi_tenant() and raw_slug.lower() != "default":
+        t_slug = validate_tenant_slug(raw_slug)
+        schema = schema_for_slug(t_slug)
+    else:
+        t_slug = "default"
+        schema = "public"
+
+    with tenant_context(t_slug, schema):
+        secrets = _get_active_stripe_secrets()
+        if not secrets:
+            raise HTTPException(status_code=400, detail="Stripe not configured")
+        _, wh_secret, _ = secrets
+        if not wh_secret:
+            raise HTTPException(status_code=400, detail="Stripe webhook secret is not configured")
+        sig = request.headers.get("stripe-signature", "")
+        if not _verify_stripe_sig(raw, sig, wh_secret):
+            raise HTTPException(status_code=400, detail="Invalid Stripe signature")
+
+        if event.get("type") == "checkout.session.completed":
+            if obj.get("payment_status") == "paid":
+                item_type = meta.get("item_type")
+                item_id = int(meta["item_id"]) if str(meta.get("item_id") or "").isdigit() else 0
+                if item_type in ("permit", "reservation", "bill") and item_id > 0:
                     with pool.connection() as conn:
                         changed = _mark_item_paid(conn, item_type, item_id, str(obj.get("id") or "webhook"))
                     if changed:
@@ -600,29 +609,56 @@ def create_bill(body: BillIn, user: dict = Depends(_require_billing_staff)):
     try:
         with pool.connection() as conn:
             if not ref:
-                next_seq = (conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM municipal_bills").fetchone() or [1])[0]
-                ref = f"{prefix}-{next_seq:05d}"
-            row = conn.execute(
-                f"INSERT INTO municipal_bills "
-                "(reference_number, bill_type, account_number, payer_name, payer_email, "
-                "service_address, description, amount_due, due_date, notes, created_by, line_items) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
-                f"RETURNING {_BILL_COLS}",
-                (
-                    ref,
-                    body.bill_type,
-                    body.account_number.strip(),
-                    body.payer_name.strip(),
-                    body.payer_email.strip(),
-                    body.service_address.strip(),
-                    body.description.strip(),
-                    body.amount_due.strip(),
-                    body.due_date.strip(),
-                    body.notes.strip(),
-                    user["username"],
-                    json.dumps(body.line_items or []),
-                ),
-            ).fetchone()
+                with conn.transaction():
+                    tmp_ref = f"{prefix}-TMP-{uuid.uuid4().hex[:8].upper()}"
+                    inserted = conn.execute(
+                        "INSERT INTO municipal_bills "
+                        "(reference_number, bill_type, account_number, payer_name, payer_email, "
+                        "service_address, description, amount_due, due_date, notes, created_by, line_items) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                        "RETURNING id",
+                        (
+                            tmp_ref,
+                            body.bill_type,
+                            body.account_number.strip(),
+                            body.payer_name.strip(),
+                            body.payer_email.strip(),
+                            body.service_address.strip(),
+                            body.description.strip(),
+                            body.amount_due.strip(),
+                            body.due_date.strip(),
+                            body.notes.strip(),
+                            user["username"],
+                            json.dumps(body.line_items or []),
+                        ),
+                    ).fetchone()
+                    ref = f"{prefix}-{inserted[0]:05d}"
+                    row = conn.execute(
+                        f"UPDATE municipal_bills SET reference_number = %s WHERE id = %s RETURNING {_BILL_COLS}",
+                        (ref, inserted[0]),
+                    ).fetchone()
+            else:
+                row = conn.execute(
+                    f"INSERT INTO municipal_bills "
+                    "(reference_number, bill_type, account_number, payer_name, payer_email, "
+                    "service_address, description, amount_due, due_date, notes, created_by, line_items) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
+                    f"RETURNING {_BILL_COLS}",
+                    (
+                        ref,
+                        body.bill_type,
+                        body.account_number.strip(),
+                        body.payer_name.strip(),
+                        body.payer_email.strip(),
+                        body.service_address.strip(),
+                        body.description.strip(),
+                        body.amount_due.strip(),
+                        body.due_date.strip(),
+                        body.notes.strip(),
+                        user["username"],
+                        json.dumps(body.line_items or []),
+                    ),
+                ).fetchone()
     except UniqueViolation:
         raise HTTPException(status_code=409, detail=f"Reference number '{ref}' already exists")
     record_audit(user["username"], "bill.created", "municipal_bills", row[0], f"Created {body.bill_type} bill {ref}")
@@ -754,34 +790,48 @@ async def import_bills_csv(
             if _parse_cents(amt) <= 0:
                 skipped += 1
                 continue
-            ref = (row.get("reference_number") or "").strip().upper()
-            if not ref:
-                next_seq = (conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM municipal_bills").fetchone() or [1])[0]
-                ref = f"{btype[:4].upper()}-{next_seq:05d}"
             acct = (row.get("account_number") or "").strip()
             pname = (row.get("payer_name") or "").strip()
             pemail = (row.get("payer_email") or "").strip()
             addr = (row.get("service_address") or "").strip()
             desc = (row.get("description") or "").strip()
             due = (row.get("due_date") or "").strip()
-            exists = conn.execute("SELECT id FROM municipal_bills WHERE reference_number = %s", (ref,)).fetchone()
-            conn.execute(
-                "INSERT INTO municipal_bills "
-                "(reference_number, bill_type, account_number, payer_name, payer_email, "
-                " service_address, description, amount_due, due_date, created_by) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
-                "ON CONFLICT (reference_number) DO UPDATE SET "
-                "bill_type = EXCLUDED.bill_type, account_number = EXCLUDED.account_number, "
-                "payer_name = EXCLUDED.payer_name, payer_email = EXCLUDED.payer_email, "
-                "service_address = EXCLUDED.service_address, description = EXCLUDED.description, "
-                "amount_due = CASE WHEN municipal_bills.payment_status = 'unpaid' THEN EXCLUDED.amount_due ELSE municipal_bills.amount_due END, "
-                "due_date = EXCLUDED.due_date, updated_at = now()",
-                (ref, btype, acct, pname, pemail, addr, desc, amt, due, user["username"]),
-            )
-            if exists:
-                updated += 1
-            else:
+            ref = (row.get("reference_number") or "").strip().upper()
+            if not ref:
+                with conn.transaction():
+                    tmp_ref = f"{btype[:4].upper()}-TMP-{uuid.uuid4().hex[:8].upper()}"
+                    inserted = conn.execute(
+                        "INSERT INTO municipal_bills "
+                        "(reference_number, bill_type, account_number, payer_name, payer_email, "
+                        " service_address, description, amount_due, due_date, created_by) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                        (tmp_ref, btype, acct, pname, pemail, addr, desc, amt, due, user["username"]),
+                    ).fetchone()
+                    ref = f"{btype[:4].upper()}-{inserted[0]:05d}"
+                    conn.execute(
+                        "UPDATE municipal_bills SET reference_number = %s WHERE id = %s",
+                        (ref, inserted[0]),
+                    )
                 created += 1
+            else:
+                exists = conn.execute("SELECT id FROM municipal_bills WHERE reference_number = %s", (ref,)).fetchone()
+                conn.execute(
+                    "INSERT INTO municipal_bills "
+                    "(reference_number, bill_type, account_number, payer_name, payer_email, "
+                    " service_address, description, amount_due, due_date, created_by) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                    "ON CONFLICT (reference_number) DO UPDATE SET "
+                    "bill_type = EXCLUDED.bill_type, account_number = EXCLUDED.account_number, "
+                    "payer_name = EXCLUDED.payer_name, payer_email = EXCLUDED.payer_email, "
+                    "service_address = EXCLUDED.service_address, description = EXCLUDED.description, "
+                    "amount_due = CASE WHEN municipal_bills.payment_status = 'unpaid' THEN EXCLUDED.amount_due ELSE municipal_bills.amount_due END, "
+                    "due_date = EXCLUDED.due_date, updated_at = now()",
+                    (ref, btype, acct, pname, pemail, addr, desc, amt, due, user["username"]),
+                )
+                if exists:
+                    updated += 1
+                else:
+                    created += 1
             if send_emails and pemail and "@" in pemail:
                 send_direct_email(
                     [pemail],

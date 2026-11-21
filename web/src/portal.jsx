@@ -19,7 +19,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../app.css';
 import ServiceIcon from './core/ServiceIcon.jsx';
-import { DocketHallLogo, DirectoryHeaderLink, PublicFooter, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { PublicFooter, PublicHeader, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
 
 function PublicPermitsPortal() {
@@ -75,37 +75,19 @@ function PublicPermitsPortal() {
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: '#f5f7fa' }}>
       <a className="skip-link" href="#portal-main">Skip To Main Content</a>
       <UrgentAlertBanner branding={branding} />
-      <header>
-        <a
-          href="/"
-          className="brand"
-          style={{ display: 'flex', alignItems: 'center', gap: '.55rem', textDecoration: 'none', color: 'inherit' }}
-          title="Go to main page"
-        >
-          {branding.has_city_logo && (
-            <img src="/api/branding/logo" alt="City Logo" style={{ height: '56px', width: 'auto', borderRadius: '4px', objectFit: 'contain' }} />
-          )}
-          {branding.city_title && <span>{branding.city_title}</span>}
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem' }}>
-            <DocketHallLogo size={24} />
-            <span>Permits Portal</span>
-          </span>
-        </a>
-        <div className="user-bar">
-          <DirectoryHeaderLink branding={branding} />
-          {me ? (
-            <>
-              <span>Signed in as <strong>{me.username}</strong></span>
-              <a className="btn sm primary" href="/app#my-permits">My Permits</a>
-            </>
-          ) : (
-            <>
-              <a className="btn sm" href="/">Sign In</a>
-              <a className="btn sm primary" href="/?register=1">Register</a>
-            </>
-          )}
-        </div>
-      </header>
+      <PublicHeader branding={branding} subtitle="Permits Portal" logoHeight={56}>
+        {me ? (
+          <>
+            <span>Signed in as <strong>{me.username}</strong></span>
+            <a className="btn sm primary" href="/app#my-permits">My Permits</a>
+          </>
+        ) : (
+          <>
+            <a className="btn sm" href="/">Sign In</a>
+            <a className="btn sm primary" href="/?register=1">Register</a>
+          </>
+        )}
+      </PublicHeader>
 
       <main id="portal-main" style={{ margin: '0 auto', width: '100%', maxWidth: '1040px' }}>
         <div className="card">

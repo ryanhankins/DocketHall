@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Unit tests for LocalStorageClient (optional MinIO replacement)."""
+"""Unit tests for LocalStorageClient (local filesystem storage backend)."""
 import io
 import os
 import sys
@@ -32,7 +32,7 @@ except ImportError:
     HAS_STORAGE_DEPS = False
 
 
-@unittest.skipUnless(HAS_STORAGE_DEPS, "API dependencies (minio/psycopg) not installed")
+@unittest.skipUnless(HAS_STORAGE_DEPS, "storage module dependencies not installed")
 class LocalStorageTest(unittest.TestCase):
     def test_put_get_copy_remove_and_path_safety(self):
         with tempfile.TemporaryDirectory() as tmpdir:

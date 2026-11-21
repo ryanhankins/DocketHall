@@ -19,12 +19,6 @@ import os
 import shutil
 from types import SimpleNamespace
 
-import boto3
-from botocore.client import Config
-from botocore.exceptions import ClientError
-
-from .db import _read_secret
-
 
 class LocalObjectResponse:
     """File-like wrapper matching the S3 streaming response interface (.read/.stream/.close/.release_conn)."""
@@ -148,6 +142,11 @@ class BotoS3StorageClient:
     """S3-compatible storage client backed by boto3 (SeaweedFS, AWS S3, R2, B2, etc.)."""
 
     def __init__(self, endpoint: str, *, access_key: str = "", secret_key: str = "", secure: bool = False):
+        import boto3
+        from botocore.client import Config
+        from botocore.exceptions import ClientError
+
+        self._ClientError = ClientError
         ep = endpoint.strip()
         if not ep.startswith(("http://", "https://")):
             ep = f"{'https' if secure else 'http'}://{ep}"
@@ -165,13 +164,13 @@ class BotoS3StorageClient:
         try:
             self._client.head_bucket(Bucket=bucket_name)
             return True
-        except ClientError:
+        except self._ClientError:
             return False
 
     def make_bucket(self, bucket_name: str) -> None:
         try:
             self._client.create_bucket(Bucket=bucket_name)
-        except ClientError as exc:
+        except self._ClientError as exc:
             code = exc.response.get("Error", {}).get("Code", "")
             if code not in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):
                 raise
@@ -241,6 +240,8 @@ def get_storage_client():
         if backend == "local" or not endpoint:
             _storage_client = LocalStorageClient(os.environ.get("LOCAL_RECORDS_DIR", "/data/records"))
         else:
+            from .db import _read_secret
+
             secure = (os.environ.get("S3_SECURE") or os.environ.get("MINIO_SECURE") or "false").lower() == "true"
             access_key = _read_secret("S3_ACCESS_KEY_FILE", "S3_ACCESS_KEY") or _read_secret("MINIO_ACCESS_KEY_FILE", "MINIO_ACCESS_KEY")
             secret_key = _read_secret("S3_SECRET_KEY_FILE", "S3_SECRET_KEY") or _read_secret("MINIO_SECRET_KEY_FILE", "MINIO_SECRET_KEY")

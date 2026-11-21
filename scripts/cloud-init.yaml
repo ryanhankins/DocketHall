@@ -8,10 +8,10 @@ runcmd:
   - |
     export DOMAIN="portal.example.gov"
     export STORAGE_BACKEND="local"
-    export MINIO_REPLICAS="0"
+    export S3_REPLICAS="0"
     # Optional: export SEED_CITY_PROFILE="birchwood"
     # Optional: export MULTI_TENANT="true"
     # Optional: export TENANT_BASE_DOMAIN="civicdesk.org"
     # Optional: export RESTIC_REPOSITORY="s3:s3.us-west-004.backblazeb2.com/my-bucket/civicdesk"
     # Optional: export RESTIC_PASSWORD="change-me-strong-password"
-    curl -fsSL https://raw.githubusercontent.com/ryanhankins/CivicDesk/main/scripts/install-vps.sh | bash
+    curl -fsSL https://raw.githubusercontent.com/ryanhankins/DocketHall/main/scripts/install-vps.sh | bash

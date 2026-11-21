@@ -37,7 +37,7 @@ def global_public_search(q: str = ""):
     results: list[dict] = []
 
     with pool.connection() as conn:
-        if "pages" in enabled:
+        if "communications" in enabled:
             for r in conn.execute(
                 "SELECT title, summary, category FROM city_pages "
                 "WHERE is_public = TRUE AND (title ILIKE %s OR summary ILIKE %s OR body ILIKE %s) "
@@ -65,8 +65,6 @@ def global_public_search(q: str = ""):
                     "tab": "pages",
                     "href": r[2],
                 })
-
-        if "notices" in enabled:
             for r in conn.execute(
                 "SELECT title, summary, category FROM city_notices "
                 "WHERE is_published = TRUE AND (expires_at IS NULL OR expires_at >= CURRENT_DATE) "
@@ -81,8 +79,6 @@ def global_public_search(q: str = ""):
                     "subtitle": r[1] or r[2].replace("_", " ").title(),
                     "tab": "notices",
                 })
-
-        if "forms" in enabled:
             for r in conn.execute(
                 "SELECT title, description, form_kind FROM city_forms "
                 "WHERE is_public = TRUE AND (closes_at IS NULL OR closes_at >= CURRENT_DATE) "
@@ -97,8 +93,6 @@ def global_public_search(q: str = ""):
                     "subtitle": r[1] or "",
                     "tab": "forms",
                 })
-
-        if "directory" in enabled:
             for r in conn.execute(
                 "SELECT name, title_role, department FROM city_directory_entries "
                 "WHERE is_public = TRUE AND (name ILIKE %s OR title_role ILIKE %s OR department ILIKE %s) "
@@ -280,10 +274,10 @@ def public_transparency_snapshot():
                 metrics.append({"label": "Code Cases Resolved (YTD)", "value": int(ce), "tab": "complaints"})
             except Exception:
                 pass
-        if "notices" in enabled:
+        if "communications" in enabled:
             try:
                 nt = conn.execute(
-                    "SELECT COUNT(*) FROM city_notices WHERE is_published = TRUE AND category IN ('bid_rfp','job') "
+                    "SELECT COUNT(*) FROM city_notices WHERE is_published = TRUE AND category IN ('bid','bid_rfp','job') "
                     "AND (expires_at IS NULL OR expires_at >= CURRENT_DATE)"
                 ).fetchone()[0]
                 metrics.append({"label": "Open RFPs / Bids & Jobs", "value": int(nt), "tab": "notices"})

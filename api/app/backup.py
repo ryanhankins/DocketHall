@@ -341,6 +341,15 @@ def _build_backup_zip(include_users: bool, exported_by: str) -> str:
             object_keys.extend(
                 pd["object_key"] for pd in table_data.get("permit_documents", []) if pd.get("object_key")
             )
+            object_keys.extend(
+                cs["object_key"] for cs in table_data.get("code_sections", []) if cs.get("object_key")
+            )
+            object_keys.extend(
+                prr["fulfillment_object_key"] for prr in table_data.get("public_records_requests", []) if prr.get("fulfillment_object_key")
+            )
+            object_keys.extend(
+                cn["attachment_key"] for cn in table_data.get("city_notices", []) if cn.get("attachment_key")
+            )
             for pref in table_data.get("agenda_preferences", []):
                 if pref.get("city_logo_key"):
                     object_keys.append(pref["city_logo_key"])
@@ -499,7 +508,7 @@ async def import_archive(
                         v = row.get(c)
                         if not has_users and c in user_id_fk_cols and isinstance(v, int) and v not in existing_user_ids:
                             v = None
-                        if c in ("object_key", "city_logo_key") and isinstance(v, str) and v:
+                        if c in ("object_key", "city_logo_key", "fulfillment_object_key", "attachment_key") and isinstance(v, str) and v:
                             v = tenant_object_key(strip_tenant_prefix(v))
                         if c == "email" and v is None:
                             v = ""

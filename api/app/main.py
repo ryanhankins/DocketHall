@@ -15,15 +15,18 @@
 
 from contextlib import asynccontextmanager
 import asyncio
+import logging
 import os
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from . import audit, auth, backup, branding, docs, integrations, my_account, payments, pdf_check, permits, registry, search, sla, subscriptions, tenancy, updates, users
 from .db import open_pool, pool
 from .modules import register_builtin_modules
 
+logger = logging.getLogger(__name__)
 register_builtin_modules()
 
 
@@ -44,6 +47,23 @@ def _bootstrap_tenant_schema(slug: str, schema: str) -> None:
 tenancy.register_schema_bootstrapper(_bootstrap_tenant_schema)
 
 
+def _run_daily_jobs_for_all_tenants() -> None:
+    tenants = tenancy.list_active_tenants() if tenancy.is_multi_tenant() else [("default", "public")]
+    for slug, schema in tenants:
+        with tenancy.tenant_context(slug, schema):
+            for label, fn in (
+                ("compliance_digest", permits.run_daily_compliance_digest),
+                ("sla_escalation_digest", sla.run_sla_escalation_digest),
+                ("recurring_renewals", lambda: permits.run_recurring_renewals(days_ahead=60, send_emails=True)),
+                ("scheduled_offsite_backup", backup.run_scheduled_offsite_backup),
+                ("retention_policies", backup.run_retention_policies),
+            ):
+                try:
+                    fn()
+                except Exception:
+                    logger.exception("Daily job %s failed for tenant %s", label, slug)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     open_pool()
@@ -57,22 +77,9 @@ async def lifespan(app: FastAPI):
             while True:
                 await asyncio.sleep(86400)
                 try:
-                    permits.run_daily_compliance_digest()
+                    await run_in_threadpool(_run_daily_jobs_for_all_tenants)
                 except Exception:
-                    pass
-                try:
-                    sla.run_sla_escalation_digest()
-                except Exception:
-                    pass
-                try:
-                    permits.run_recurring_renewals(days_ahead=60, send_emails=True)
-                except Exception:
-                    pass
-                try:
-                    backup.run_scheduled_offsite_backup()
-                    backup.run_retention_policies()
-                except Exception:
-                    pass
+                    logger.exception("Daily digest loop failed")
         digest_task = asyncio.create_task(_digest_loop())
     yield
     if digest_task:

@@ -193,7 +193,7 @@ def get_my_account_summary(user: dict = Depends(_require_authenticated)):
                     for r in rr_rows
                 ]
 
-            if "forms" in enabled:
+            if "communications" in enabled:
                 f_rows = conn.execute(
                     "SELECT s.id, s.form_id, f.title, f.form_kind, s.status, s.created_at "
                     "FROM city_form_submissions s JOIN city_forms f ON f.id = s.form_id "
