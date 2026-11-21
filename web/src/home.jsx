@@ -4047,7 +4047,7 @@ function PublicHomePage() {
               {homeEditErr && <div className="error-msg" role="alert" style={{ marginBottom: '.65rem' }}>{homeEditErr}</div>}
               <div className="actions">
                 <button type="submit" className="btn primary" disabled={homeEditBusy}>
-                  {homeEditBusy ? 'Saving…' : 'Save Custom Text'}
+                  {homeEditBusy ? 'Saving…' : 'Save'}
                 </button>
                 <button type="button" className="btn" onClick={() => setHomeEditOpen(false)}>Cancel</button>
               </div>
