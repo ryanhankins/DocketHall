@@ -43,6 +43,7 @@ export default function CoreShell() {
   const [backupStatus, setBackupStatus] = useState({ overdue: false, reminder_days: 0, days_since_backup: 0, last_backup_at: null });
   const [backlogDueCount, setBacklogDueCount] = useState(0);
   const [hash, setHash] = useState(() => location.hash.replace(/^#/, ''));
+  const [menuFilter, setMenuFilter] = useState('');
   const [openSubmenus, setOpenSubmenus] = useState(() => {
     try {
       const saved = localStorage.getItem('dockethall.openSubmenus');
@@ -51,11 +52,7 @@ export default function CoreShell() {
         if (parsed && typeof parsed === 'object') return parsed;
       }
     } catch { /* ignore storage errors */ }
-    return {
-      'agenda-management': true,
-      'permits-staff': true,
-      'complaints-staff': true,
-    };
+    return {};
   });
 
   useEffect(() => {
@@ -64,15 +61,20 @@ export default function CoreShell() {
     } catch { /* ignore storage errors */ }
   }, [openSubmenus]);
 
-  const collapsibleGroupIds = useMemo(() => {
-    const ids = [];
-    for (const mod of modulesMeta) {
-      for (const grp of (mod.nav_groups || [])) {
-        if ((grp.items || []).length > 1) ids.push(grp.id);
-      }
-    }
-    return ids;
-  }, [modulesMeta]);
+  const moduleMenus = useMemo(() => (
+    modulesMeta
+      .map(mod => ({
+        id: mod.id,
+        name: mod.name,
+        items: (mod.nav_groups || []).flatMap(grp => grp.items || []),
+      }))
+      .filter(mod => mod.items.length > 0)
+  ), [modulesMeta]);
+
+  const collapsibleGroupIds = useMemo(
+    () => moduleMenus.filter(m => m.items.length > 1).map(m => m.id),
+    [moduleMenus],
+  );
 
   const allGroupsOpen = collapsibleGroupIds.length > 0 && collapsibleGroupIds.every(id => !!openSubmenus[id]);
 
@@ -392,7 +394,7 @@ export default function CoreShell() {
       <div className="shell">
         {me && (
           <nav id="menu">
-            <div style={{ marginBottom: '.5rem', paddingBottom: '.5rem', borderBottom: '1px solid #e2e8f0' }}>
+            <div style={{ marginBottom: '.45rem', paddingBottom: '.45rem', borderBottom: '1px solid #e2e8f0' }}>
               <button
                 type="button"
                 className={activeSection === 'my-account' ? 'active' : ''}
@@ -401,8 +403,21 @@ export default function CoreShell() {
                 My Civic Account
               </button>
             </div>
-            {collapsibleGroupIds.length >= 2 && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '.25rem' }}>
+            {(moduleMenus.reduce((acc, m) => acc + m.items.length, 0) >= 6 || isAdmin || canManageSettings) && (
+              <input
+                type="search"
+                className="nav-filter"
+                aria-label="Filter navigation menu"
+                placeholder="Filter menu..."
+                value={menuFilter}
+                onChange={(e) => setMenuFilter(e.target.value)}
+              />
+            )}
+            {collapsibleGroupIds.length >= 2 && !menuFilter.trim() && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '0 .4rem .25rem' }}>
+                <span style={{ fontSize: '.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: '#64748b' }}>
+                  Modules
+                </span>
                 <button
                   type="button"
                   onClick={() => {
@@ -419,7 +434,7 @@ export default function CoreShell() {
                     border: 'none',
                     padding: '2px 4px',
                     margin: 0,
-                    fontSize: '.78rem',
+                    fontSize: '.74rem',
                     fontWeight: 500,
                     color: '#64748b',
                     cursor: 'pointer',
@@ -429,18 +444,101 @@ export default function CoreShell() {
                 </button>
               </div>
             )}
-            {modulesMeta.map(mod => {
-              if (!mod.nav_groups?.length) return null;
+            {moduleMenus.map(mod => {
+              const q = menuFilter.trim().toLowerCase();
+              const modMatches = !q || mod.name.toLowerCase().includes(q);
+              const visibleItems = q
+                ? (modMatches ? mod.items : mod.items.filter(it => it.label.toLowerCase().includes(q)))
+                : mod.items;
+              if (visibleItems.length === 0) return null;
+
+              if (mod.items.length === 1) {
+                const it = visibleItems[0];
+                return (
+                  <button
+                    key={mod.id}
+                    type="button"
+                    className={activeSection === it.section ? 'active' : ''}
+                    onClick={() => navigate(`#${it.section}`)}
+                    title={it.label}
+                  >
+                    <ServiceIcon id={mod.id} size={15} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mod.name}</span>
+                  </button>
+                );
+              }
+
+              const hasActiveChild = mod.items.some(it => it.section === activeSection);
+              const isOpen = q ? true : (!!openSubmenus[mod.id] || hasActiveChild);
               return (
-                <div key={mod.id}>
-                  <h2 style={{ display: 'flex', alignItems: 'center', gap: '.4rem' }}>
-                    <ServiceIcon id={mod.id} size={14} />
-                    <span>{mod.name}</span>
-                  </h2>
-                  {mod.nav_groups.map(grp => {
-                    if (grp.items.length === 1) {
-                      const it = grp.items[0];
-                      return (
+                <div key={mod.id} className="nav-group">
+                  <button
+                    type="button"
+                    className="nav-parent"
+                    aria-expanded={isOpen}
+                    onClick={() => setOpenSubmenus(prev => ({ ...prev, [mod.id]: !isOpen }))}
+                    title={mod.name}
+                  >
+                    <span className="nav-parent-label">
+                      <ServiceIcon id={mod.id} size={15} />
+                      <span>{mod.name}</span>
+                    </span>
+                    <span className="nav-arrow" aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
+                  </button>
+                  {isOpen && (
+                    <div className="nav-submenu">
+                      {visibleItems.map(it => (
+                        <button
+                          key={it.section}
+                          type="button"
+                          className={activeSection === it.section ? 'active' : ''}
+                          onClick={() => navigate(`#${it.section}`)}
+                        >
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.label}</span>
+                          {it.badge === 'backlog' && backlogDueCount > 0 && (
+                            <> <span className="badge draft">{backlogDueCount}</span></>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {(isAdmin || canManageSettings) && (() => {
+              const adminItems = [
+                isAdmin && { section: 'users', label: 'Manage Users' },
+                isAdmin && { section: 'modules', label: 'Manage Modules' },
+                canManageSettings && { section: 'preferences-general', label: 'General & Branding' },
+                isAdmin && { section: 'integrations', label: 'Email & Integrations' },
+                isAdmin && { section: 'audit', label: 'Audit Log' },
+                canManageSettings && { section: 'billing', label: 'Utility Bills & Citations' },
+                canManageSettings && { section: 'sla-rules', label: 'SLA & Escalations' },
+                canManageSettings && { section: 'preferences-backup', label: 'Backup & Restore' },
+              ].filter(Boolean);
+              const q = menuFilter.trim().toLowerCase();
+              const visibleAdmin = q
+                ? ('administration'.includes(q) ? adminItems : adminItems.filter(it => it.label.toLowerCase().includes(q)))
+                : adminItems;
+              if (visibleAdmin.length === 0) return null;
+              const adminActive = adminItems.some(it => it.section === activeSection);
+              const adminOpen = q ? true : (!!openSubmenus['admin-section'] || adminActive);
+              return (
+                <div id="menu-admin" style={{ borderTop: '1px solid #e2e8f0', paddingTop: '.55rem', marginTop: '.4rem' }}>
+                  <button
+                    type="button"
+                    className="nav-parent"
+                    aria-expanded={adminOpen}
+                    onClick={() => setOpenSubmenus(prev => ({ ...prev, 'admin-section': !adminOpen }))}
+                    style={{ fontWeight: 700, fontSize: '.76rem', textTransform: 'uppercase', letterSpacing: '.05em', color: '#475569' }}
+                  >
+                    <span>Administration</span>
+                    <span className="nav-arrow" aria-hidden="true">{adminOpen ? '▾' : '▸'}</span>
+                  </button>
+                  {adminOpen && (
+                    <div className="nav-submenu">
+                      {visibleAdmin.map(it => (
                         <button
                           key={it.section}
                           type="button"
@@ -449,134 +547,12 @@ export default function CoreShell() {
                         >
                           {it.label}
                         </button>
-                      );
-                    }
-                    const isOpen = !!openSubmenus[grp.id];
-                    return (
-                      <div key={grp.id} className="nav-group">
-                        <button
-                          type="button"
-                          className="nav-parent"
-                          aria-expanded={isOpen}
-                          onClick={() => setOpenSubmenus(prev => ({ ...prev, [grp.id]: !prev[grp.id] }))}
-                        >
-                          <span>{grp.label}</span>
-                          <span className="nav-arrow" aria-hidden="true">{isOpen ? '▾' : '▸'}</span>
-                        </button>
-                        {isOpen && (
-                          <div className="nav-submenu">
-                            {grp.items.map(it => (
-                              <button
-                                key={it.section}
-                                type="button"
-                                className={activeSection === it.section ? 'active' : ''}
-                                onClick={() => navigate(`#${it.section}`)}
-                              >
-                                {it.label}
-                                {it.badge === 'backlog' && backlogDueCount > 0 && (
-                                  <> <span className="badge draft">{backlogDueCount}</span></>
-                                )}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
-            })}
-
-            {(isAdmin || canManageSettings) && (
-              <div id="menu-admin" style={{ borderTop: '1px solid #e2e8f0', paddingTop: '.65rem', marginTop: '.35rem' }}>
-                <button
-                  type="button"
-                  className="nav-parent"
-                  aria-expanded={!!openSubmenus['admin-section']}
-                  onClick={() => setOpenSubmenus(prev => ({ ...prev, 'admin-section': !prev['admin-section'] }))}
-                  style={{ fontWeight: 700, fontSize: '.85rem', textTransform: 'uppercase', letterSpacing: '.04em', color: '#475569' }}
-                >
-                  <span>Administration</span>
-                  <span className="nav-arrow" aria-hidden="true">{openSubmenus['admin-section'] ? '▾' : '▸'}</span>
-                </button>
-                {openSubmenus['admin-section'] && (
-                  <div className="nav-submenu">
-                    {isAdmin && (
-                      <button
-                        type="button"
-                        className={activeSection === 'users' ? 'active' : ''}
-                        onClick={() => navigate('#users')}
-                      >
-                        Manage Users
-                      </button>
-                    )}
-                    {isAdmin && (
-                      <button
-                        type="button"
-                        className={activeSection === 'modules' ? 'active' : ''}
-                        onClick={() => navigate('#modules')}
-                      >
-                        Manage Modules
-                      </button>
-                    )}
-                    {canManageSettings && (
-                      <button
-                        type="button"
-                        className={activeSection === 'preferences-general' ? 'active' : ''}
-                        onClick={() => navigate('#preferences-general')}
-                      >
-                        General &amp; Branding
-                      </button>
-                    )}
-                    {isAdmin && (
-                      <button
-                        type="button"
-                        className={activeSection === 'integrations' ? 'active' : ''}
-                        onClick={() => navigate('#integrations')}
-                      >
-                        Email &amp; Integrations
-                      </button>
-                    )}
-                    {isAdmin && (
-                      <button
-                        type="button"
-                        className={activeSection === 'audit' ? 'active' : ''}
-                        onClick={() => navigate('#audit')}
-                      >
-                        Audit Log
-                      </button>
-                    )}
-                    {canManageSettings && (
-                      <button
-                        type="button"
-                        className={activeSection === 'billing' ? 'active' : ''}
-                        onClick={() => navigate('#billing')}
-                      >
-                        Utility Bills &amp; Citations
-                      </button>
-                    )}
-                    {canManageSettings && (
-                      <button
-                        type="button"
-                        className={activeSection === 'sla-rules' ? 'active' : ''}
-                        onClick={() => navigate('#sla-rules')}
-                      >
-                        SLA &amp; Escalations
-                      </button>
-                    )}
-                    {canManageSettings && (
-                      <button
-                        type="button"
-                        className={activeSection === 'preferences-backup' ? 'active' : ''}
-                        onClick={() => navigate('#preferences-backup')}
-                      >
-                        Backup &amp; Restore
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+            })()}
           </nav>
         )}
 

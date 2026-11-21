@@ -53,22 +53,29 @@ header {
 .user-bar { display: flex; align-items: center; gap: .75rem; font-size: .9rem; color: var(--cd-header-muted); }
 .shell { display: flex; flex: 1; min-height: 0; }
 nav {
-  width: 220px; background: var(--cd-surface); border-right: 1px solid var(--cd-border); padding: 1rem .75rem;
+  width: 252px; flex-shrink: 0; background: var(--cd-surface); border-right: 1px solid var(--cd-border); padding: .85rem .7rem;
 }
-nav h2 {
-  margin: .75rem .6rem .4rem; font-size: .72rem; text-transform: uppercase;
-  letter-spacing: .06em; color: #4a5568;
+nav h2, .nav-section-label {
+  margin: .7rem .5rem .3rem; font-size: .7rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: #64748b;
 }
 nav h2:first-child { margin-top: 0; }
 nav button {
-  width: 100%; text-align: left; padding: .55rem .75rem; border: 0; border-radius: 6px;
-  background: transparent; color: #334e68; font-size: .95rem; cursor: pointer;
+  width: 100%; text-align: left; padding: .46rem .65rem; border: 0; border-radius: 6px;
+  background: transparent; color: #334e68; font-size: .88rem; cursor: pointer;
+  display: flex; align-items: center; gap: .45rem; line-height: 1.25;
 }
+nav button:hover { background: #f8fafc; }
 nav button.active { background: var(--cd-tint); color: var(--cd-primary); font-weight: 600; }
-.nav-parent { display: flex; align-items: center; justify-content: space-between; }
-.nav-submenu { display: flex; flex-direction: column; padding-left: .9rem; gap: .15rem; margin: .15rem 0 .25rem; }
+.nav-parent { display: flex; align-items: center; justify-content: space-between; font-weight: 600; color: #1e293b; }
+.nav-parent-label { display: inline-flex; align-items: center; gap: .45rem; min-width: 0; }
+.nav-parent-label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-arrow { font-size: .72rem; color: #64748b; flex-shrink: 0; }
+.nav-submenu { display: flex; flex-direction: column; padding-left: 1.35rem; gap: .1rem; margin: .1rem 0 .25rem; }
 .nav-submenu[hidden] { display: none; }
-.nav-submenu button { font-size: .88rem; padding: .42rem .75rem; }
+.nav-submenu button { font-size: .84rem; padding: .36rem .6rem; color: #475569; }
+.nav-filter { width: 100%; box-sizing: border-box; padding: .38rem .55rem; font-size: .82rem; border: 1px solid #cbd5e1; border-radius: 6px; margin-bottom: .5rem; background: #f8fafc; }
+.nav-filter:focus { background: #fff; border-color: var(--cd-primary); outline: none; }
 main { flex: 1; padding: 1.75rem 2rem; max-width: 1040px; }
 h1 { margin: 0 0 1.25rem; font-size: 1.35rem; }
 .card {
