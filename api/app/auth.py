@@ -38,7 +38,7 @@ ROLE_PRESET_PERMISSIONS: dict[str, list[str]] = {
         "records.manage", "records.view",
         "complaints.manage", "complaints.submit", "complaints.log",
         "calendar.manage", "notices.manage", "directory.manage",
-        "pages.manage", "forms.manage", "licensing.manage",
+        "pages.manage", "forms.manage", "blog.manage", "licensing.manage",
         "utilities.manage", "citations.manage",
         "settings.manage",
     ],

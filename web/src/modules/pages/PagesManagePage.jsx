@@ -19,6 +19,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { api } from '../../core/api.js';
 import { getLinkTextWarnings } from '../../core/a11y.js';
 import { useToast } from '../../core/toast.jsx';
+import RichTextEditor from '../../core/RichTextEditor.jsx';
 
 const EMPTY_PAGE = {
   title: '',
@@ -162,12 +163,15 @@ export default function PagesManagePage() {
                 <label htmlFor="pg-sum">Short Summary</label>
                 <input id="pg-sum" value={pageForm.summary} onChange={(e) => setPageForm((f) => ({ ...f, summary: e.target.value }))} />
               </div>
-              <div className="field" style={{ marginBottom: '.75rem' }}>
-                <label htmlFor="pg-body">Page Content</label>
-                <textarea id="pg-body" rows={6} value={pageForm.body} onChange={(e) => setPageForm((f) => ({ ...f, body: e.target.value }))} />
-                {getLinkTextWarnings(pageForm.body).map((w) => (
-                  <div key={w} className="muted" role="status" style={{ color: '#92400e', fontSize: '.82rem', marginTop: '.25rem' }}>{w}</div>
-                ))}
+              <div style={{ marginBottom: '.75rem' }}>
+                <RichTextEditor
+                  id="pg-body"
+                  label="Page Content (Rich Custom Formatting)"
+                  rows={8}
+                  value={pageForm.body}
+                  onChange={(next) => setPageForm((f) => ({ ...f, body: next }))}
+                  helpText="Supports headings, bold/italic, bullet/numbered lists, callout quotes, links, and dividers."
+                />
               </div>
               <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', cursor: 'pointer', fontSize: '.9rem', marginBottom: '.85rem' }}>
                 <input type="checkbox" style={{ width: 'auto', flexShrink: 0 }} checked={pageForm.is_public} onChange={(e) => setPageForm((f) => ({ ...f, is_public: e.target.checked }))} />

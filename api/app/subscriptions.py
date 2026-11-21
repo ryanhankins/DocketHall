@@ -59,6 +59,12 @@ PUBLIC_TOPICS = [
         "label": "News, Notices & Bids",
         "description": "Get notified when city news, public notices, RFPs/bids, or job postings are published.",
     },
+    {
+        "id": "blog",
+        "module_id": "communications",
+        "label": "City Blog & Community Articles",
+        "description": "Get notified when new blog articles and community updates are published.",
+    },
 ]
 _VALID_TOPIC_IDS = {t["id"] for t in PUBLIC_TOPICS}
 _TOPIC_LABELS = {t["id"]: t["label"] for t in PUBLIC_TOPICS}
@@ -270,7 +276,7 @@ class BulletinIn(BaseModel):
 def send_email_bulletin(
     body: BulletinIn,
     request: Request,
-    user: dict = Depends(require_permission("settings.manage", "notices.manage", "agendas.manage")),
+    user: dict = Depends(require_permission("settings.manage", "notices.manage", "agendas.manage", "blog.manage")),
 ):
     subj = body.subject.strip()
     msg_body = body.body.strip()

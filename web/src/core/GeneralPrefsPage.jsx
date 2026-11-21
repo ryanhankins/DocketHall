@@ -18,6 +18,7 @@
 import React, { useEffect, useState } from 'react';
 import { api } from './api.js';
 import { DEFAULT_THEME, THEME_PRESETS, applyTheme, getThemeContrastWarnings } from './theme.js';
+import RichTextEditor from './RichTextEditor.jsx';
 
 const COLOR_FIELDS = [
   { key: 'theme_primary', label: 'Primary Accent (buttons, links, active tabs)' },
@@ -41,6 +42,8 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
   const [cityWebsiteLabel, setCityWebsiteLabel] = useState('');
   const [directoryUrl, setDirectoryUrl] = useState('');
   const [directoryLabel, setDirectoryLabel] = useState('');
+  const [homeHeading, setHomeHeading] = useState('');
+  const [homeIntroBody, setHomeIntroBody] = useState('');
   const [themeColors, setThemeColors] = useState(() => ({ ...DEFAULT_THEME }));
   const [hasLogo, setHasLogo] = useState(false);
   const [logoVer, setLogoVer] = useState(() => Date.now());
@@ -62,6 +65,8 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
         setCityWebsiteLabel(b.city_website_label || '');
         setDirectoryUrl(b.directory_url || '');
         setDirectoryLabel(b.directory_label || '');
+        setHomeHeading(b.home_heading || '');
+        setHomeIntroBody(b.home_intro_body || '');
         setThemeColors({
           theme_primary: b.theme_primary || DEFAULT_THEME.theme_primary,
           theme_secondary: b.theme_secondary || DEFAULT_THEME.theme_secondary,
@@ -131,6 +136,8 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
           city_website_label: cityWebsiteLabel.trim(),
           directory_url: directoryUrl.trim(),
           directory_label: directoryLabel.trim(),
+          home_heading: homeHeading.trim(),
+          home_intro_body: homeIntroBody.trim(),
           ...themeColors,
         }),
       });
@@ -212,6 +219,30 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
             >
               Drag &amp; drop a city logo image (PNG, JPG, GIF, WEBP) here
             </div>
+          </div>
+
+          <h2 style={{ margin: '1.25rem 0 .4rem', fontSize: '1.05rem' }}>Public Portal Welcome &amp; Custom Page Text</h2>
+          <p className="muted" style={{ margin: '0 0 .75rem', fontSize: '.88rem' }}>
+            Customize the welcome heading and rich intro text displayed on the Public Portal overview page.
+          </p>
+          <div className="field" style={{ marginBottom: '.75rem' }}>
+            <label htmlFor="pref-home-heading">Portal Welcome Heading (blank uses default)</label>
+            <input
+              id="pref-home-heading"
+              placeholder="Public Services & Records Portal"
+              value={homeHeading}
+              onChange={(e) => setHomeHeading(e.target.value)}
+            />
+          </div>
+          <div style={{ marginBottom: '1.1rem' }}>
+            <RichTextEditor
+              id="pref-home-intro"
+              label="Custom Portal Page Text (blank uses default intro)"
+              rows={5}
+              placeholder="Add custom announcements, City Hall welcome notes, hours, or formatted links..."
+              value={homeIntroBody}
+              onChange={setHomeIntroBody}
+            />
           </div>
 
           <h2 style={{ margin: '1.25rem 0 .4rem', fontSize: '1.05rem' }}>Urgent Public Alert Banner</h2>

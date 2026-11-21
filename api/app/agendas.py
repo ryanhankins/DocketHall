@@ -274,6 +274,8 @@ ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_tint TEXT NOT NULL
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_bg TEXT NOT NULL DEFAULT '#f3f5f8';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_surface TEXT NOT NULL DEFAULT '#ffffff';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_header_bg TEXT NOT NULL DEFAULT '#ffffff';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_heading TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_intro_body TEXT NOT NULL DEFAULT '';
 """
 
 def _minio():
@@ -755,6 +757,8 @@ class GeneralPreferencesIn(BaseModel):
     theme_bg: str = "#f3f5f8"
     theme_surface: str = "#ffffff"
     theme_header_bg: str = "#ffffff"
+    home_heading: str = ""
+    home_intro_body: str = ""
 
 
 class AgendaPreferencesIn(BaseModel):
@@ -800,7 +804,7 @@ def _load_preferences(conn) -> dict:
         "       alert_enabled, alert_level, alert_title, alert_message, alert_link_url, alert_link_label, "
         "       footer_text, city_website_url, city_website_label, "
         "       theme_primary, theme_secondary, theme_tint, theme_bg, theme_surface, theme_header_bg, "
-        "       directory_url, directory_label "
+        "       directory_url, directory_label, home_heading, home_intro_body "
         "FROM agenda_preferences WHERE id = 1"
     ).fetchone()
     if not row:
@@ -828,6 +832,8 @@ def _load_preferences(conn) -> dict:
             "city_website_label": "",
             "directory_url": "",
             "directory_label": "",
+            "home_heading": "",
+            "home_intro_body": "",
             **DEFAULT_THEME_COLORS,
             "city_logo_key": "",
             "has_city_logo": False,
@@ -871,6 +877,8 @@ def _load_preferences(conn) -> dict:
         "theme_header_bg": row[27] or DEFAULT_THEME_COLORS["theme_header_bg"],
         "directory_url": row[28] or "",
         "directory_label": row[29] or "",
+        "home_heading": row[30] or "",
+        "home_intro_body": row[31] or "",
         "city_logo_key": logo_key,
         "has_city_logo": bool(logo_key),
     }
@@ -900,6 +908,8 @@ def get_preferences_branding():
         "city_website_label": prefs.get("city_website_label", ""),
         "directory_url": prefs.get("directory_url", ""),
         "directory_label": prefs.get("directory_label", ""),
+        "home_heading": prefs.get("home_heading", ""),
+        "home_intro_body": prefs.get("home_intro_body", ""),
         "theme_primary": prefs.get("theme_primary", DEFAULT_THEME_COLORS["theme_primary"]),
         "theme_secondary": prefs.get("theme_secondary", DEFAULT_THEME_COLORS["theme_secondary"]),
         "theme_tint": prefs.get("theme_tint", DEFAULT_THEME_COLORS["theme_tint"]),
@@ -935,8 +945,8 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
             "(id, city_title, alert_enabled, alert_level, alert_title, alert_message, "
             " alert_link_url, alert_link_label, footer_text, city_website_url, city_website_label, "
             " theme_primary, theme_secondary, theme_tint, theme_bg, theme_surface, theme_header_bg, "
-            " directory_url, directory_label, updated_at) "
-            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
+            " directory_url, directory_label, home_heading, home_intro_body, updated_at) "
+            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
             "ON CONFLICT (id) DO UPDATE SET "
             "city_title = EXCLUDED.city_title, "
             "alert_enabled = EXCLUDED.alert_enabled, "
@@ -956,6 +966,8 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
             "theme_header_bg = EXCLUDED.theme_header_bg, "
             "directory_url = EXCLUDED.directory_url, "
             "directory_label = EXCLUDED.directory_label, "
+            "home_heading = EXCLUDED.home_heading, "
+            "home_intro_body = EXCLUDED.home_intro_body, "
             "updated_at = now()",
             (
                 body.city_title.strip(),
@@ -976,9 +988,26 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
                 theme_header_bg,
                 directory_url,
                 body.directory_label.strip(),
+                body.home_heading.strip(),
+                body.home_intro_body.strip(),
             ),
         )
         return _load_preferences(conn)
+
+
+def update_home_text(home_heading: str, home_intro_body: str) -> dict:
+    """Update only the custom public portal welcome heading and body text."""
+    with pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO agenda_preferences (id, home_heading, home_intro_body, updated_at) "
+            "VALUES (1, %s, %s, now()) "
+            "ON CONFLICT (id) DO UPDATE SET "
+            "home_heading = EXCLUDED.home_heading, "
+            "home_intro_body = EXCLUDED.home_intro_body, "
+            "updated_at = now()",
+            (home_heading.strip(), home_intro_body.strip()),
+        )
+    return get_preferences_branding()
 
 
 _LOGO_MEDIA = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}

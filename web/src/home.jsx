@@ -23,6 +23,9 @@ import ServiceIcon from './core/ServiceIcon.jsx';
 import CustomFieldsRenderer from './core/CustomFieldsRenderer.jsx';
 import { DocketHallLogo, DirectoryHeaderLink, PublicFooter, PublicHeader, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
+import RichTextContent from './core/RichTextContent.jsx';
+import RichTextEditor from './core/RichTextEditor.jsx';
+import BlogPublicTab from './modules/blog/BlogPublicTab.jsx';
 import CodeLibraryViewer from './modules/codification/CodeLibraryViewer.jsx';
 import { COMPLAINT_STATUSES, ORDINANCE_PRESETS, StatusBadge } from './modules/complaints/constants.jsx';
 
@@ -68,6 +71,12 @@ const TAB_DEFS = [
     label: 'News, Notices, Bids & Jobs',
     description: 'Read city news flashes, public hearing notices, open RFPs/bids, and job postings.',
     actionLabel: 'View Notices & Bids →',
+  },
+  {
+    id: 'blog',
+    label: 'Blog & Community Updates',
+    description: 'Read city articles, community stories, RSS feeds, and share moderated comments.',
+    actionLabel: 'Read Blog →',
   },
   {
     id: 'directory',
@@ -182,7 +191,7 @@ function GlobalSearchBar({ onSelectTab }) {
                     } else if (item.href === '/portal') {
                       window.location.href = '/portal';
                     } else {
-                      onSelectTab(item.tab);
+                      onSelectTab(item.tab, item.slug || '');
                     }
                   }}
                   style={{
@@ -302,9 +311,9 @@ function PagesPublicTab() {
                   </div>
                   {p.summary && <p className="muted" style={{ margin: '.35rem 0 0', fontSize: '.9rem' }}>{p.summary}</p>}
                   {isOpen && p.body && (
-                    <pre style={{ margin: '.65rem 0 0', paddingTop: '.65rem', borderTop: '1px solid #e2e8f0', whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: '.92rem', lineHeight: 1.6, color: '#1e293b' }}>
-                      {p.body}
-                    </pre>
+                    <div style={{ marginTop: '.65rem', paddingTop: '.65rem', borderTop: '1px solid #e2e8f0' }}>
+                      <RichTextContent text={p.body} />
+                    </div>
                   )}
                 </div>
               );
@@ -3226,15 +3235,102 @@ function PayBillsPublicTab({ billType = '' }) {
 }
 
 
-function isPublicTabAllowed(tabId, enabledList) {
+function LatestBlogPreviewCard({ enabled, onOpenPost, onViewAll }) {
+  const [posts, setPosts] = useState([]);
+
+  useEffect(() => {
+    if (!enabled) {
+      setPosts([]);
+      return;
+    }
+    fetch('/api/blog/public?home_only=true&limit=3')
+      .then((r) => (r.ok ? r.json() : { posts: [] }))
+      .then((d) => setPosts(Array.isArray(d?.posts) ? d.posts : []))
+      .catch(() => setPosts([]));
+  }, [enabled]);
+
+  if (!enabled || posts.length === 0) return null;
+
+  return (
+    <div className="card" style={{ marginBottom: 0 }}>
+      <div className="between" style={{ marginBottom: '.65rem' }}>
+        <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <ServiceIcon id="blog" size={18} badge />
+          <span>Latest from the Blog</span>
+        </h2>
+        <div className="actions">
+          <a href="/api/blog/rss.xml" target="_blank" rel="noreferrer" className="btn sm">RSS</a>
+          <button type="button" className="btn sm" onClick={onViewAll}>View All Blog Posts →</button>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '.75rem' }}>
+        {posts.map((p) => (
+          <div
+            key={p.id}
+            role="button"
+            tabIndex={0}
+            onClick={() => onOpenPost(p.slug)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onOpenPost(p.slug);
+              }
+            }}
+            style={{
+              border: '1px solid #e2e8f0',
+              borderRadius: 8,
+              padding: '.75rem .9rem',
+              background: '#f8fafc',
+              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: '.45rem',
+            }}
+          >
+            <div>
+              <div style={{ display: 'flex', gap: '.35rem', flexWrap: 'wrap', marginBottom: '.3rem' }}>
+                <span className="badge draft">{p.category_name}</span>
+                <span className="muted" style={{ fontSize: '.78rem' }}>{formatDate(p.publish_at)}</span>
+              </div>
+              <div style={{ fontWeight: 600, fontSize: '.98rem', color: '#0f172a', marginBottom: '.25rem' }}>{p.title}</div>
+              {p.lead_in && (
+                <div className="muted" style={{ fontSize: '.84rem', lineHeight: 1.4 }}>{p.lead_in}</div>
+              )}
+            </div>
+            <div style={{ fontSize: '.84rem', fontWeight: 600, color: 'var(--cd-primary)' }}>Read Article →</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+
+function isPublicTabAllowed(tabId, enabledList, publicFeatures = {}) {
   if (!tabId) return false;
   if (['pay', 'utilities', 'citations', 'transparency'].includes(tabId)) return true;
   const list = Array.isArray(enabledList) ? enabledList : [];
+  if (tabId === 'blog') {
+    return list.includes('blog') || (list.includes('communications') && publicFeatures?.communications?.blog !== false);
+  }
   if (list.includes(tabId)) return true;
   if (['notices', 'directory', 'forms', 'pages'].includes(tabId) && list.includes('communications')) {
     return true;
   }
   return false;
+}
+
+
+function parsePublicHash(rawHash) {
+  const clean = (rawHash || '').replace(/^#/, '');
+  if (!clean) return { tab: 'overview', slug: '' };
+  const slashIdx = clean.indexOf('/');
+  if (slashIdx === -1) return { tab: clean, slug: '' };
+  return {
+    tab: clean.slice(0, slashIdx),
+    slug: decodeURIComponent(clean.slice(slashIdx + 1)),
+  };
 }
 
 
@@ -3252,6 +3348,12 @@ function PublicHomePage() {
   });
   const [me, setMe] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const [blogPostSlug, setBlogPostSlug] = useState('');
+  const [homeEditOpen, setHomeEditOpen] = useState(false);
+  const [homeHeadingDraft, setHomeHeadingDraft] = useState('');
+  const [homeIntroDraft, setHomeIntroDraft] = useState('');
+  const [homeEditBusy, setHomeEditBusy] = useState(false);
+  const [homeEditErr, setHomeEditErr] = useState('');
 
   const [authModal, setAuthModal] = useState(() => ({
     open: params.has('next') || params.get('register') === '1' || params.has('reset'),
@@ -3287,34 +3389,46 @@ function PublicHomePage() {
       .then((r) => (r.ok ? r.json() : { enabled: [], features: {} }))
       .then((d) => {
         const list = Array.isArray(d.enabled) ? d.enabled : [];
+        const feats = d && typeof d.features === 'object' && d.features ? d.features : {};
         setEnabledModules(list);
-        setPublicFeatures(d && typeof d.features === 'object' && d.features ? d.features : {});
-        const hashTab = location.hash.replace(/^#/, '');
-        setActiveTab(isPublicTabAllowed(hashTab, list) ? hashTab : 'overview');
+        setPublicFeatures(feats);
+        const parsed = parsePublicHash(location.hash);
+        if (isPublicTabAllowed(parsed.tab, list, feats)) {
+          setActiveTab(parsed.tab);
+          setBlogPostSlug(parsed.tab === 'blog' ? parsed.slug : '');
+        } else {
+          setActiveTab('overview');
+          setBlogPostSlug('');
+        }
       })
       .catch(() => { setEnabledModules([]); setPublicFeatures({}); });
   }, [params]);
 
   useEffect(() => {
     const onHash = () => {
-      const h = location.hash.replace(/^#/, '');
-      if (!h || h === 'overview') {
+      const parsed = parsePublicHash(location.hash);
+      if (!parsed.tab || parsed.tab === 'overview') {
         setActiveTab('overview');
-      } else if (isPublicTabAllowed(h, enabledModules)) {
-        setActiveTab(h);
+        setBlogPostSlug('');
+      } else if (isPublicTabAllowed(parsed.tab, enabledModules, publicFeatures)) {
+        setActiveTab(parsed.tab);
+        setBlogPostSlug(parsed.tab === 'blog' ? parsed.slug : '');
       }
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
-  }, [enabledModules]);
+  }, [enabledModules, publicFeatures]);
 
   const visibleTabs = useMemo(() => {
     if (!enabledModules) return [];
     const hasComms = enabledModules.includes('communications');
+    const blogEnabled = hasComms && publicFeatures?.communications?.blog !== false;
     const cmsIds = new Set(['notices', 'directory', 'forms', 'pages']);
-    const out = TAB_DEFS.filter((t) => (
-      cmsIds.has(t.id) ? (hasComms || enabledModules.includes(t.id)) : enabledModules.includes(t.id)
-    ));
+    const out = TAB_DEFS.filter((t) => {
+      if (t.id === 'blog') return blogEnabled || enabledModules.includes('blog');
+      if (cmsIds.has(t.id)) return hasComms || enabledModules.includes(t.id);
+      return enabledModules.includes(t.id);
+    });
     if (enabledModules.includes('utilities')) {
       out.push({
         id: 'utilities',
@@ -3332,22 +3446,54 @@ function PublicHomePage() {
       });
     }
     return out;
-  }, [enabledModules]);
+  }, [enabledModules, publicFeatures]);
 
   const overviewTabs = useMemo(() => {
     if (showAllServices || visibleTabs.length <= 4) return visibleTabs;
     return visibleTabs.slice(0, 4);
   }, [visibleTabs, showAllServices]);
 
+  const canEditHomeText = Boolean(
+    me && Array.isArray(me.permissions) && ['*', 'settings.manage', 'pages.manage', 'blog.manage', 'agendas.manage'].some((p) => me.permissions.includes(p))
+  );
+
   function openAuth(nextUrl = '/app', register = false, reason = '') {
     setAuthModal({ open: true, register, nextUrl, reason });
   }
 
-  function selectTab(tabId) {
+  function selectTab(tabId, slug = '') {
     setActiveTab(tabId);
-    const targetHash = tabId === 'overview' ? '#overview' : `#${tabId}`;
+    setBlogPostSlug(tabId === 'blog' ? (slug || '') : '');
+    const targetHash = tabId === 'overview'
+      ? '#overview'
+      : (tabId === 'blog' && slug ? `#blog/${encodeURIComponent(slug)}` : `#${tabId}`);
     if (location.hash !== targetHash) {
       history.pushState(null, '', targetHash);
+    }
+  }
+
+  async function saveHomeText(e) {
+    e.preventDefault();
+    setHomeEditBusy(true);
+    setHomeEditErr('');
+    try {
+      const res = await fetch('/api/branding/home-text', {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          home_heading: homeHeadingDraft.trim(),
+          home_intro_body: homeIntroDraft.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Failed (${res.status})`);
+      setBranding(data);
+      setHomeEditOpen(false);
+    } catch (err) {
+      setHomeEditErr(err.message);
+    } finally {
+      setHomeEditBusy(false);
     }
   }
 
@@ -3414,10 +3560,30 @@ function PublicHomePage() {
         ) : activeTab === 'overview' ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             <div className="card">
-              <h1 style={{ margin: '0 0 .35rem' }}>Public Services &amp; Records Portal</h1>
-              <p className="muted" style={{ margin: 0 }}>
-                Explore public city services below — no account required to view finalized agendas, City Code, public records, permit schedules, or to file a complaint.
-              </p>
+              <div className="between" style={{ gap: '.5rem', marginBottom: '.35rem' }}>
+                <h1 style={{ margin: 0 }}>{branding.home_heading || 'Public Services & Records Portal'}</h1>
+                {canEditHomeText && (
+                  <button
+                    type="button"
+                    className="btn sm"
+                    onClick={() => {
+                      setHomeEditErr('');
+                      setHomeHeadingDraft(branding.home_heading || '');
+                      setHomeIntroDraft(branding.home_intro_body || '');
+                      setHomeEditOpen(true);
+                    }}
+                  >
+                    Edit Page Text
+                  </button>
+                )}
+              </div>
+              {branding.home_intro_body ? (
+                <RichTextContent text={branding.home_intro_body} />
+              ) : (
+                <p className="muted" style={{ margin: 0 }}>
+                  Explore public city services below — no account required to view finalized agendas, City Code, public records, permit schedules, or to file a complaint.
+                </p>
+              )}
             </div>
 
             <GlobalSearchBar onSelectTab={selectTab} />
@@ -3483,6 +3649,12 @@ function PublicHomePage() {
               </div>
             )}
 
+            <LatestBlogPreviewCard
+              enabled={enabledModules.includes('communications') && publicFeatures?.communications?.blog !== false}
+              onOpenPost={(slug) => selectTab('blog', slug)}
+              onViewAll={() => selectTab('blog')}
+            />
+
             <TransparencySnapshotBar onSelectTab={selectTab} />
 
             <NotifyMeCard />
@@ -3508,6 +3680,13 @@ function PublicHomePage() {
             {activeTab === 'complaints' && <ComplaintsPublicTab me={me} onRequireAuth={openAuth} features={publicFeatures.complaints || {}} />}
             {activeTab === 'calendar' && <CalendarPublicTab features={publicFeatures.calendar || {}} />}
             {activeTab === 'notices' && <NoticesPublicTab features={publicFeatures.notices || {}} />}
+            {activeTab === 'blog' && (
+              <BlogPublicTab
+                me={me}
+                initialPostSlug={blogPostSlug}
+                onSlugChange={(slug) => selectTab('blog', slug)}
+              />
+            )}
             {activeTab === 'directory' && <DirectoryPublicTab features={publicFeatures.directory || {}} />}
             {activeTab === 'forms' && <FormsPublicTab />}
             {activeTab === 'pages' && <PagesPublicTab />}
@@ -3527,6 +3706,57 @@ function PublicHomePage() {
         reason={authModal.reason}
         onClose={() => setAuthModal((prev) => ({ ...prev, open: false, resetToken: '' }))}
       />
+      {homeEditOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 120,
+            background: 'rgba(15, 23, 42, .45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+          }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: 680, maxHeight: '90vh', overflowY: 'auto', marginBottom: 0 }}>
+            <div className="between" style={{ marginBottom: '.75rem' }}>
+              <h2 style={{ margin: 0 }}>Edit Public Portal Custom Page Text</h2>
+              <button type="button" className="btn sm" onClick={() => setHomeEditOpen(false)}>Close</button>
+            </div>
+            <form onSubmit={saveHomeText}>
+              <div className="field" style={{ marginBottom: '.75rem' }}>
+                <label htmlFor="home-edit-heading">Portal Welcome Heading (blank uses default)</label>
+                <input
+                  id="home-edit-heading"
+                  placeholder="Public Services & Records Portal"
+                  value={homeHeadingDraft}
+                  onChange={(e) => setHomeHeadingDraft(e.target.value)}
+                />
+              </div>
+              <div style={{ marginBottom: '.75rem' }}>
+                <RichTextEditor
+                  id="home-edit-intro"
+                  label="Custom Page Text (supports headings, bold, lists, callouts, and links)"
+                  rows={7}
+                  placeholder="Add custom announcements, City Hall welcome text, office hours, or helpful links..."
+                  value={homeIntroDraft}
+                  onChange={setHomeIntroDraft}
+                />
+              </div>
+              {homeEditErr && <div className="error-msg" role="alert" style={{ marginBottom: '.65rem' }}>{homeEditErr}</div>}
+              <div className="actions">
+                <button type="submit" className="btn primary" disabled={homeEditBusy}>
+                  {homeEditBusy ? 'Saving…' : 'Save Custom Text'}
+                </button>
+                <button type="button" className="btn" onClick={() => setHomeEditOpen(false)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       <PublicFooter branding={branding} />
     </div>
   );

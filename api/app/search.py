@@ -80,6 +80,23 @@ def global_public_search(q: str = ""):
                     "tab": "notices",
                 })
             for r in conn.execute(
+                "SELECT p.title, p.lead_in, c.name, p.slug FROM blog_posts p "
+                "JOIN blog_categories c ON c.id = p.category_id "
+                "WHERE c.is_public = TRUE AND p.is_published = TRUE "
+                "AND p.publish_at <= now() AND (p.expires_at IS NULL OR p.expires_at >= CURRENT_DATE) "
+                "AND (p.title ILIKE %s OR p.lead_in ILIKE %s OR p.body ILIKE %s OR p.tags::text ILIKE %s) "
+                "ORDER BY p.is_featured DESC, p.publish_at DESC LIMIT 6",
+                (like, like, like, like),
+            ).fetchall():
+                results.append({
+                    "module_id": "blog",
+                    "module_label": "Blog Post",
+                    "title": r[0],
+                    "subtitle": r[1] or r[2],
+                    "tab": "blog",
+                    "slug": r[3],
+                })
+            for r in conn.execute(
                 "SELECT title, description, form_kind FROM city_forms "
                 "WHERE is_public = TRUE AND (closes_at IS NULL OR closes_at >= CURRENT_DATE) "
                 "AND (title ILIKE %s OR description ILIKE %s) "

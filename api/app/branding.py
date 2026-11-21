@@ -15,6 +15,7 @@
 
 """Core site branding & general preferences endpoints."""
 from fastapi import APIRouter, Depends, File, UploadFile
+from pydantic import BaseModel
 
 from . import agendas
 from .auth import require_permission
@@ -27,12 +28,25 @@ def get_branding():
     return agendas.get_preferences_branding()
 
 
+class HomeTextIn(BaseModel):
+    home_heading: str = ""
+    home_intro_body: str = ""
+
+
 @router.put("")
 def update_branding(
     body: agendas.GeneralPreferencesIn,
     user: dict = Depends(require_permission("settings.manage", "agendas.manage")),
 ):
     return agendas.update_general_preferences(body, user)
+
+
+@router.put("/home-text")
+def update_branding_home_text(
+    body: HomeTextIn,
+    _: dict = Depends(require_permission("settings.manage", "pages.manage", "blog.manage", "agendas.manage")),
+):
+    return agendas.update_home_text(body.home_heading, body.home_intro_body)
 
 
 @router.get("/logo")

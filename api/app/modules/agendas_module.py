@@ -113,7 +113,7 @@ AGENDAS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
             "alert_link_url", "alert_link_label", "footer_text",
             "city_website_url", "city_website_label", "directory_url", "directory_label",
             "theme_primary", "theme_secondary", "theme_tint", "theme_bg",
-            "theme_surface", "theme_header_bg", "updated_at",
+            "theme_surface", "theme_header_bg", "home_heading", "home_intro_body", "updated_at",
         ],
         {"bodies", "sections", "categories"},
         False,

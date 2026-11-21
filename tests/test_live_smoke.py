@@ -64,11 +64,19 @@ class LiveSmokeTest(unittest.TestCase):
             public_paths.append("/api/records/public")
         if "directory" in enabled:
             public_paths.append("/api/directory/public")
+        if "communications" in enabled:
+            public_paths.append("/api/blog/public")
 
         for path in public_paths:
             st, ct, _ = self._get(path)
             self.assertEqual(st, 200, path)
             self.assertIn("application/json", ct, path)
+
+        if "communications" in enabled:
+            st, ct, rss_raw = self._get("/api/blog/rss.xml")
+            self.assertEqual(st, 200)
+            self.assertIn("xml", ct)
+            self.assertIn(b"<rss", rss_raw)
 
         if "codification" in enabled:
             st, ct, pdf = self._get("/api/codification/public/full.pdf")
@@ -117,6 +125,12 @@ class LiveSmokeTest(unittest.TestCase):
             admin_paths.append("/api/records/requests")
         if "complaints" in ids:
             admin_paths.append("/api/complaints/work-orders")
+        if "communications" in ids:
+            admin_paths.extend([
+                "/api/blog/categories",
+                "/api/blog/posts",
+                "/api/blog/comments",
+            ])
 
         for admin_path in admin_paths:
             with opener.open(BASE + admin_path, timeout=10) as r:

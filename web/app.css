@@ -445,3 +445,44 @@ dialog .dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; m
   .code-lib-layout { display: block !important; }
   .code-lib-reader { border: 0 !important; box-shadow: none !important; padding: 0 !important; }
 }
+
+/* ------------------------------------------- Rich Custom Text & Municipal Blog */
+.rte-toolbar {
+  display: flex; flex-wrap: wrap; gap: .3rem; padding: .4rem .5rem;
+  background: #f8fafc; border: 1px solid #829ab1; border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+}
+.rte-btn {
+  padding: .22rem .5rem; font-size: .8rem; font-weight: 600;
+  background: #fff; color: #334e68; border: 1px solid #cbd5e1;
+  border-radius: 4px; cursor: pointer;
+}
+.rte-btn:hover { background: var(--cd-tint); border-color: var(--cd-primary); color: var(--cd-primary); }
+.rte-preview {
+  padding: .85rem 1rem; border: 1px solid #cbd5e1; border-radius: 6px;
+  background: #fff; min-height: 120px;
+}
+.rich-content { font-size: .96rem; line-height: 1.65; color: #1e293b; }
+.rich-content > :first-child { margin-top: 0; }
+.rich-content > :last-child { margin-bottom: 0; }
+.rich-content h2 { font-size: 1.25rem; margin: 1.15rem 0 .45rem; color: #0f172a; }
+.rich-content h3 { font-size: 1.08rem; margin: 1rem 0 .4rem; color: #0f172a; }
+.rich-content h4 { font-size: .98rem; margin: .85rem 0 .35rem; color: #1e293b; }
+.rich-content p { margin: .6rem 0; }
+.rich-content ul, .rich-content ol { margin: .55rem 0 .55rem 1.35rem; padding: 0; }
+.rich-content li { margin: .25rem 0; }
+.rich-content blockquote {
+  margin: .75rem 0; padding: .55rem .9rem;
+  border-left: 4px solid var(--cd-primary); background: var(--cd-tint);
+  border-radius: 0 6px 6px 0; color: #1e293b;
+}
+.rich-content a { color: var(--cd-primary); font-weight: 500; text-decoration: underline; }
+.rich-content hr { border: 0; border-top: 1px solid #e2e8f0; margin: 1rem 0; }
+.rich-content code { background: #f1f5f9; padding: .1rem .35rem; border-radius: 4px; font-size: .88em; }
+.blog-card-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 1rem;
+}
+.blog-cover-img {
+  width: 100%; max-height: 360px; object-fit: cover; border-radius: 8px;
+  margin-bottom: 1rem; border: 1px solid #e2e8f0;
+}

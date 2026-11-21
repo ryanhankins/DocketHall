@@ -17,6 +17,7 @@
 
 import React from 'react';
 
+const BlogManagePage = React.lazy(() => import('../blog/BlogManagePage.jsx'));
 const NoticesManagePage = React.lazy(() => import('../notices/NoticesManagePage.jsx'));
 const DirectoryManagePage = React.lazy(() => import('../directory/DirectoryManagePage.jsx'));
 const PagesManagePage = React.lazy(() => import('../pages/PagesManagePage.jsx'));
@@ -26,6 +27,11 @@ const communicationsModule = {
   id: 'communications',
   prefNavItems: [],
   routes: [
+    {
+      match: (hash) => (hash === 'blog-manage' ? {} : null),
+      permission: 'blog.manage',
+      component: BlogManagePage,
+    },
     {
       match: (hash) => (hash === 'notices-manage' ? {} : null),
       permission: 'notices.manage',
