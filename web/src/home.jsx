@@ -3045,7 +3045,7 @@ function NotifyMeCard() {
 }
 
 
-function PayBillsPublicTab() {
+function PayBillsPublicTab({ billType = '' }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -3091,7 +3091,8 @@ function PayBillsPublicTab() {
         const d = await r.json().catch(() => ({}));
         throw new Error(d.detail || 'Lookup failed');
       }
-      setResults(await r.json());
+      const list = await r.json();
+      setResults(billType ? (Array.isArray(list) ? list.filter((b) => b.bill_type === billType) : []) : list);
     } catch (ex) {
       setErr(ex.message || 'Lookup failed');
       setResults(null);
@@ -3123,8 +3124,12 @@ function PayBillsPublicTab() {
   return (
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', marginBottom: '.5rem' }}>
-        <ServiceIcon id="pay" size={20} badge />
-        <h2 style={{ margin: 0 }}>Pay Utility Bill, Citation or Municipal Fee</h2>
+        <ServiceIcon id={billType === 'utility' ? 'utilities' : (billType === 'citation' ? 'citations' : 'pay')} size={20} badge />
+        <h2 style={{ margin: 0 }}>
+          {billType === 'utility'
+            ? 'Pay Utility Bill'
+            : (billType === 'citation' ? 'Pay or Contest Municipal Citation' : 'Pay Utility Bill, Citation or Municipal Fee')}
+        </h2>
       </div>
       <p className="muted" style={{ marginTop: 0 }}>
         Look up water/sewer utility statements, municipal or parking citations, license renewals, or other city fees by your exact Account # or Reference / Citation #.
@@ -3303,7 +3308,7 @@ function PublicHomePage() {
       const h = location.hash.replace(/^#/, '');
       if (!h || h === 'overview') {
         setActiveTab('overview');
-      } else if (h === 'pay' || enabledModules?.includes(h)) {
+      } else if (h === 'pay' || h === 'utilities' || h === 'citations' || h === 'transparency' || enabledModules?.includes(h)) {
         setActiveTab(h);
       }
     };
@@ -3313,15 +3318,28 @@ function PublicHomePage() {
 
   const visibleTabs = useMemo(() => {
     if (!enabledModules) return [];
-    return [
-      ...TAB_DEFS.filter((t) => enabledModules.includes(t.id)),
-      {
-        id: 'pay',
-        label: 'Utility Billing & Citations',
-        description: 'Look up and pay water/sewer utility bills, municipal citations, license renewals, and fees online.',
-        actionLabel: 'Look Up & Pay →',
-      },
-    ];
+    const hasComms = enabledModules.includes('communications');
+    const cmsIds = new Set(['notices', 'directory', 'forms', 'pages']);
+    const out = TAB_DEFS.filter((t) => (
+      cmsIds.has(t.id) ? (hasComms || enabledModules.includes(t.id)) : enabledModules.includes(t.id)
+    ));
+    if (enabledModules.includes('utilities')) {
+      out.push({
+        id: 'utilities',
+        label: 'Pay Utility Bill',
+        description: 'Look up your water, sewer, or trash account balance and pay online via Stripe.',
+        actionLabel: 'Look Up Utility Bill →',
+      });
+    }
+    if (enabledModules.includes('citations')) {
+      out.push({
+        id: 'citations',
+        label: 'Pay / Contest Citation',
+        description: 'Look up a parking or municipal code citation to pay online or request a hearing.',
+        actionLabel: 'Look Up Citation →',
+      });
+    }
+    return out;
   }, [enabledModules]);
 
   const overviewTabs = useMemo(() => {
@@ -3514,6 +3532,8 @@ function PublicHomePage() {
             {activeTab === 'forms' && <FormsPublicTab />}
             {activeTab === 'pages' && <PagesPublicTab />}
             {activeTab === 'pay' && <PayBillsPublicTab />}
+            {activeTab === 'utilities' && <PayBillsPublicTab billType="utility" />}
+            {activeTab === 'citations' && <PayBillsPublicTab billType="citation" />}
             {activeTab === 'transparency' && <TransparencyPublicTab />}
           </div>
         )}

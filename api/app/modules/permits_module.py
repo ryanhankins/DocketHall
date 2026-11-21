@@ -118,34 +118,10 @@ PERMITS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         True,
     ),
     (
-        "contractor_licenses",
-        [
-            "id", "license_number", "business_name", "license_type", "contact_name",
-            "email", "phone", "address", "license_expires_at",
-            "insurance_carrier", "insurance_policy_no", "insurance_expires_at",
-            "bond_amount", "bond_expires_at", "status", "notes",
-            "created_at", "updated_at",
-        ],
-        set(),
-        True,
-    ),
-    (
         "permit_fee_entries",
         [
             "id", "permit_id", "entry_type", "description", "amount_cents",
             "payment_method", "reference_number", "recorded_by", "notes", "created_at",
-        ],
-        set(),
-        True,
-    ),
-    (
-        "recurring_compliance_programs",
-        [
-            "id", "program_type", "property_address", "parcel_id", "unit_count",
-            "owner_name", "local_agent_name", "local_agent_phone", "local_agent_email",
-            "cycle_months", "last_inspected_date", "next_inspection_date",
-            "last_result", "inspector", "certificate_number", "status", "notes",
-            "created_at", "updated_at",
         ],
         set(),
         True,
@@ -155,7 +131,7 @@ PERMITS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
 MODULE = CivicModule(
     id="permits",
     name="City Permitting",
-    description="Online permit catalog, applications, document uploads, and staff review.",
+    description="Online permit catalog, applications, document uploads, field inspections, and staff review.",
     routers=[permits.router],
     bootstrap=permits.bootstrap,
     permissions=[
@@ -165,8 +141,6 @@ MODULE = CivicModule(
     features=[
         {"key": "property_360", "label": "Property / Parcel 360° View", "description": "Unified parcel lookup linking permits, complaints, and inspections.", "default": True},
         {"key": "reports", "label": "Reports & Revenue Analytics", "description": "Permit volume, fee revenue, and turnaround reporting.", "default": True},
-        {"key": "contractors", "label": "Contractor Licensing & Registry", "description": "Track contractor licenses, insurance, and bond expirations.", "default": True},
-        {"key": "compliance_programs", "label": "Rental & Fire Compliance Programs", "description": "Recurring inspection cycles for rental properties and businesses.", "default": True},
     ],
     nav_groups=[
         {
@@ -179,9 +153,6 @@ MODULE = CivicModule(
                 {"section": "field-inspector", "label": "Field Inspector Mode", "permission": "permits.manage"},
                 {"section": "properties", "label": "Property 360° Lookup", "permission": "permits.manage", "feature": "property_360"},
                 {"section": "permits-reports", "label": "Reports & Revenue", "permission": "permits.manage", "feature": "reports"},
-                {"section": "contractors", "label": "Contractors & Licenses", "permission": "permits.manage", "feature": "contractors"},
-                {"section": "compliance-programs", "label": "Rental & Fire Compliance", "permission": "permits.manage", "feature": "compliance_programs"},
-                {"section": "renewals", "label": "Recurring Renewals", "permission": "permits.manage"},
                 {"section": "preferences-permits", "label": "Permit Preferences", "permission": "permits.manage"},
             ],
         },

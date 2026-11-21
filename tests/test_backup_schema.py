@@ -24,8 +24,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 API_APP = os.path.join(ROOT, "api", "app")
 
 EXPECTED_MODULES = {
-    "agendas", "permits", "codification", "records", "complaints",
-    "calendar", "notices", "directory", "forms", "pages", "utilities", "citations",
+    "agendas", "permits", "licensing", "codification", "records", "complaints",
+    "calendar", "communications", "utilities", "citations",
 }
 EPHEMERAL_TABLES = {"sessions", "password_reset_tokens"}
 

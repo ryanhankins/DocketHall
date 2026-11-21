@@ -45,32 +45,30 @@ _REGISTERED: dict[str, CivicModule] = {}
 MODULE_PRESETS: dict[str, dict] = {
     "starter": {
         "label": "Starter Town",
-        "description": "Essential city website & council basics: Agendas & Minutes, Public Notices, Info Pages, Directory, and basic 311 Complaints.",
-        "enabled_modules": ["agendas", "notices", "directory", "pages", "complaints"],
+        "description": "Essential city website & council basics: Agendas & Minutes, Website & Communications, and basic 311 Complaints.",
+        "enabled_modules": ["agendas", "communications", "complaints"],
         "features": {
             "agendas": {"backlog": False, "council_submissions": False},
-            "notices": {"bids": False, "jobs": False},
-            "directory": {"resources": False},
+            "communications": {"bids": False, "jobs": False, "resources": False},
             "complaints": {"work_orders": False, "nov_enforcement": False},
         },
     },
     "standard": {
         "label": "Growing Municipality",
-        "description": "Adds Online Permits (core applications & review), Public Records/FOIA, and City Calendar (without advanced licensing/compliance modules).",
-        "enabled_modules": ["agendas", "permits", "records", "complaints", "calendar", "notices", "directory", "pages"],
+        "description": "Adds Online Permits, Public Records/FOIA, City Calendar, and Municipal Citations.",
+        "enabled_modules": ["agendas", "permits", "records", "complaints", "calendar", "communications", "citations"],
         "features": {
             "agendas": {"backlog": True, "council_submissions": True},
-            "permits": {"property_360": True, "reports": False, "contractors": False, "compliance_programs": False},
+            "permits": {"property_360": True, "reports": False},
             "records": {"foia_requests": True},
             "complaints": {"work_orders": True, "nov_enforcement": False},
             "calendar": {"reservations": False},
-            "notices": {"bids": True, "jobs": True},
-            "directory": {"resources": True},
+            "communications": {"bids": True, "jobs": True, "resources": True},
         },
     },
     "full": {
         "label": "Full Civic Suite",
-        "description": "All 10 municipal modules and every advanced capability enabled (Parcel 360°, Contractor Licensing, Compliance Programs, Code, Forms & Polls).",
+        "description": "All 10 municipal modules and every advanced capability enabled (Licensing, Utility Billing, Citations, Code, and Website & Comms).",
         "enabled_modules": None,  # all registered modules
         "features": {},  # all features true
     },

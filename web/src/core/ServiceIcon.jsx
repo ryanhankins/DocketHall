@@ -20,15 +20,19 @@ import React from 'react';
 const SERVICE_STYLES = {
   agendas: { color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe' },
   permits: { color: '#059669', bg: '#ecfdf5', border: '#a7f3d0' },
+  licensing: { color: '#0f766e', bg: '#f0fdfa', border: '#99f6e4' },
   codification: { color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe' },
   records: { color: '#d97706', bg: '#fffbeb', border: '#fde68a' },
   complaints: { color: '#dc2626', bg: '#fef2f2', border: '#fecaca' },
   calendar: { color: '#0284c7', bg: '#f0f9ff', border: '#bae6fd' },
+  communications: { color: '#0d9488', bg: '#f0fdfa', border: '#99f6e4' },
   notices: { color: '#0d9488', bg: '#f0fdfa', border: '#99f6e4' },
   directory: { color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc' },
   forms: { color: '#db2777', bg: '#fdf2f8', border: '#fbcfe8' },
   pages: { color: '#6366f1', bg: '#eef2ff', border: '#c7d2fe' },
   pay: { color: '#047857', bg: '#ecfdf5', border: '#a7f3d0' },
+  utilities: { color: '#0284c7', bg: '#f0f9ff', border: '#bae6fd' },
+  citations: { color: '#b45309', bg: '#fffbeb', border: '#fde68a' },
   alerts: { color: '#4f46e5', bg: '#eef2ff', border: '#c7d2fe' },
 };
 
@@ -146,6 +150,33 @@ function renderGlyph(id, size) {
         <svg {...props}>
           <rect x="3" y="3" width="18" height="18" rx="2" />
           <path d="M3 9h18M9 21V9" />
+        </svg>
+      );
+    case 'utilities':
+      return (
+        <svg {...props}>
+          <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" />
+        </svg>
+      );
+    case 'citations':
+      return (
+        <svg {...props}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6M9 15l2 2 4-4" />
+        </svg>
+      );
+    case 'licensing':
+      return (
+        <svg {...props}>
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          <path d="m9 12 2 2 4-4" />
+        </svg>
+      );
+    case 'communications':
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="10" />
+          <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
         </svg>
       );
     default:

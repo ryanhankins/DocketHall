@@ -25,14 +25,12 @@
 const MODULE_LOADERS = {
   agendas: () => import('../modules/agendas/index.jsx'),
   permits: () => import('../modules/permits/index.jsx'),
+  licensing: () => import('../modules/licensing/index.jsx'),
   codification: () => import('../modules/codification/index.jsx'),
   records: () => import('../modules/records/index.jsx'),
   complaints: () => import('../modules/complaints/index.jsx'),
   calendar: () => import('../modules/calendar/index.jsx'),
-  notices: () => import('../modules/notices/index.jsx'),
-  directory: () => import('../modules/directory/index.jsx'),
-  forms: () => import('../modules/forms/index.jsx'),
-  pages: () => import('../modules/pages/index.jsx'),
+  communications: () => import('../modules/communications/index.jsx'),
   utilities: () => import('../modules/utilities/index.jsx'),
   citations: () => import('../modules/citations/index.jsx'),
 };
