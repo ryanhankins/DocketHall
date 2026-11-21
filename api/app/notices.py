@@ -57,6 +57,18 @@ CREATE TABLE IF NOT EXISTS city_notices (
 ALTER TABLE city_notices ADD COLUMN IF NOT EXISTS attachment_key TEXT NOT NULL DEFAULT '';
 ALTER TABLE city_notices ADD COLUMN IF NOT EXISTS attachment_filename TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS city_notices_cat_idx ON city_notices(category, is_published, publish_at DESC);
+CREATE TABLE IF NOT EXISTS city_notice_responses (
+    id              BIGSERIAL PRIMARY KEY,
+    notice_id       BIGINT NOT NULL REFERENCES city_notices(id) ON DELETE CASCADE,
+    response_type   TEXT NOT NULL DEFAULT 'job_application',
+    applicant_name  TEXT NOT NULL,
+    applicant_email TEXT NOT NULL DEFAULT '',
+    applicant_phone TEXT NOT NULL DEFAULT '',
+    organization    TEXT NOT NULL DEFAULT '',
+    cover_note      TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS city_notice_responses_idx ON city_notice_responses(notice_id, id DESC);
 """
 
 
@@ -341,3 +353,76 @@ def download_notice_attachment(notice_id: int):
         media_type=media,
         headers={"Content-Disposition": f'inline; filename="{fname}"'},
     )
+
+
+class NoticeResponseIn(BaseModel):
+    applicant_name: str
+    applicant_email: str = ""
+    applicant_phone: str = ""
+    organization: str = ""
+    cover_note: str = ""
+
+
+@router.post("/public/{notice_id}/respond", status_code=201)
+def submit_notice_response(notice_id: int, body: NoticeResponseIn):
+    name = body.applicant_name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Your name is required")
+    with pool.connection() as conn:
+        n = conn.execute(
+            "SELECT id, category, is_published FROM city_notices WHERE id = %s",
+            (notice_id,),
+        ).fetchone()
+        if not n or not n[2]:
+            raise HTTPException(status_code=404, detail="Posting not found")
+        if n[1] not in ("job", "bid"):
+            raise HTTPException(status_code=400, detail="Responses are only enabled for job and bid postings")
+        rtype = "job_application" if n[1] == "job" else "bid_planholder"
+        row = conn.execute(
+            "INSERT INTO city_notice_responses "
+            "(notice_id, response_type, applicant_name, applicant_email, applicant_phone, organization, cover_note) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+            "RETURNING id, notice_id, response_type, applicant_name, applicant_email, applicant_phone, organization, cover_note, created_at",
+            (
+                notice_id,
+                rtype,
+                name,
+                body.applicant_email.strip(),
+                body.applicant_phone.strip(),
+                body.organization.strip(),
+                body.cover_note.strip(),
+            ),
+        ).fetchone()
+    return {
+        "id": row[0],
+        "notice_id": row[1],
+        "response_type": row[2],
+        "applicant_name": row[3],
+        "created_at": row[8].isoformat() if row[8] else None,
+    }
+
+
+@router.get("/{notice_id}/responses")
+def list_notice_responses(notice_id: int, _: dict = Depends(require_permission("notices.manage"))):
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT id, notice_id, response_type, applicant_name, applicant_email, applicant_phone, organization, cover_note, created_at "
+            "FROM city_notice_responses WHERE notice_id = %s ORDER BY id DESC",
+            (notice_id,),
+        ).fetchall()
+    return {
+        "items": [
+            {
+                "id": r[0],
+                "notice_id": r[1],
+                "response_type": r[2],
+                "applicant_name": r[3],
+                "applicant_email": r[4],
+                "applicant_phone": r[5],
+                "organization": r[6],
+                "cover_note": r[7],
+                "created_at": r[8].isoformat() if r[8] else None,
+            }
+            for r in rows
+        ]
+    }

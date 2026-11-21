@@ -743,6 +743,63 @@ def create_calendar_event(body: CalendarEventIn, user: dict = Depends(require_pe
     return _row_to_event(row)
 
 
+class CalendarEventPatch(BaseModel):
+    title: str | None = None
+    event_date: str | None = None
+    start_time: str | None = None
+    end_time: str | None = None
+    location: str | None = None
+    category: str | None = None
+    description: str | None = None
+    is_public: bool | None = None
+
+
+@router.patch("/events/{ev_id}")
+def update_calendar_event(ev_id: int, body: CalendarEventPatch, _: dict = Depends(require_permission("calendar.manage"))):
+    sets: list[str] = []
+    params: list = []
+    if body.title is not None:
+        t = body.title.strip()
+        if not t:
+            raise HTTPException(status_code=400, detail="Event title cannot be empty")
+        sets.append("title = %s")
+        params.append(t)
+    if body.event_date is not None:
+        sets.append("event_date = %s")
+        params.append(_parse_date(body.event_date, "Event date"))
+    if body.start_time is not None:
+        sets.append("start_time = %s")
+        params.append(body.start_time.strip())
+    if body.end_time is not None:
+        sets.append("end_time = %s")
+        params.append(body.end_time.strip())
+    if body.location is not None:
+        sets.append("location = %s")
+        params.append(body.location.strip())
+    if body.category is not None:
+        cat = body.category.strip() if body.category.strip() in EVENT_CATEGORIES else "Community Event"
+        sets.append("category = %s")
+        params.append(cat)
+    if body.description is not None:
+        sets.append("description = %s")
+        params.append(body.description.strip())
+    if body.is_public is not None:
+        sets.append("is_public = %s")
+        params.append(bool(body.is_public))
+    if not sets:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    params.append(ev_id)
+    with pool.connection() as conn:
+        row = conn.execute(
+            f"UPDATE calendar_events SET {', '.join(sets)} WHERE id = %s "
+            "RETURNING id, title, event_date, start_time, end_time, location, category, description, is_public, created_by, created_at",
+            tuple(params),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Event not found")
+    return _row_to_event(row)
+
+
 @router.delete("/events/{ev_id}")
 def delete_calendar_event(ev_id: int, _: dict = Depends(require_permission("calendar.manage"))):
     with pool.connection() as conn:

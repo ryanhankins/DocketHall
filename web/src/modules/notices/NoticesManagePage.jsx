@@ -363,6 +363,27 @@ export default function NoticesManagePage() {
                   <td>
                     <div className="actions">
                       <button type="button" className="btn sm" onClick={() => startEdit(n)}>Edit</button>
+                      {(n.category === 'job' || n.category === 'bid') && (
+                        <button
+                          type="button"
+                          className="btn sm"
+                          onClick={async () => {
+                            try {
+                              const d = await api(`/api/notices/${n.id}/responses`);
+                              const list = d.items || [];
+                              if (!list.length) {
+                                window.alert(`No ${n.category === 'job' ? 'applications' : 'plan-holders'} submitted yet for "${n.title}".`);
+                              } else {
+                                window.alert(list.map((r) => `${r.applicant_name}${r.organization ? ` (${r.organization})` : ''} — ${r.applicant_email || r.applicant_phone || 'No contact'}\n${r.cover_note || ''}`).join('\n\n'));
+                              }
+                            } catch (e) {
+                              window.alert(e.message || 'Failed to load responses');
+                            }
+                          }}
+                        >
+                          Responses
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn sm"

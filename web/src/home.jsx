@@ -732,6 +732,9 @@ function NoticesPublicTab({ features = {} }) {
   const [cat, setCat] = useState('');
   const [q, setQ] = useState('');
   const [expandedId, setExpandedId] = useState(null);
+  const [respondId, setRespondId] = useState(null);
+  const [respForm, setRespForm] = useState({ applicant_name: '', applicant_email: '', applicant_phone: '', organization: '', cover_note: '' });
+  const [respMsg, setRespMsg] = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
@@ -830,6 +833,58 @@ function NoticesPublicTab({ features = {} }) {
                         >
                           View Attachment / PDF
                         </a>
+                      )}
+                      {(n.category === 'job' || n.category === 'bid') && (
+                        <button
+                          type="button"
+                          className="btn sm primary"
+                          style={{ marginLeft: '.4rem' }}
+                          onClick={() => {
+                            setRespMsg('');
+                            setRespondId(respondId === n.id ? null : n.id);
+                          }}
+                        >
+                          {n.category === 'job' ? 'Apply Online' : 'Register as Plan-Holder'}
+                        </button>
+                      )}
+                      {respondId === n.id && (
+                        <form
+                          style={{ marginTop: '.65rem', padding: '.75rem', border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc', display: 'grid', gap: '.5rem' }}
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            setRespMsg('');
+                            try {
+                              const r = await fetch(`/api/notices/public/${n.id}/respond`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(respForm),
+                              });
+                              if (!r.ok) {
+                                const d = await r.json().catch(() => ({}));
+                                throw new Error(d.detail || 'Submission failed');
+                              }
+                              setRespForm({ applicant_name: '', applicant_email: '', applicant_phone: '', organization: '', cover_note: '' });
+                              setRespMsg(n.category === 'job' ? 'Application submitted!' : 'Plan-holder registration recorded!');
+                            } catch (err2) {
+                              setRespMsg(err2.message || 'Submission failed');
+                            }
+                          }}
+                        >
+                          <strong>{n.category === 'job' ? 'Online Job Application' : 'Vendor / Plan-Holder Registration'}</strong>
+                          <div className="row" style={{ gap: '.5rem' }}>
+                            <input required placeholder="Full Name *" value={respForm.applicant_name} onChange={(e) => setRespForm((f) => ({ ...f, applicant_name: e.target.value }))} style={{ flex: 1 }} />
+                            <input type="email" placeholder="Email" value={respForm.applicant_email} onChange={(e) => setRespForm((f) => ({ ...f, applicant_email: e.target.value }))} style={{ flex: 1 }} />
+                            <input placeholder="Phone" value={respForm.applicant_phone} onChange={(e) => setRespForm((f) => ({ ...f, applicant_phone: e.target.value }))} style={{ flex: 1 }} />
+                          </div>
+                          {n.category === 'bid' && (
+                            <input placeholder="Company / Organization" value={respForm.organization} onChange={(e) => setRespForm((f) => ({ ...f, organization: e.target.value }))} />
+                          )}
+                          <textarea rows={2} placeholder={n.category === 'job' ? 'Qualifications / cover note…' : 'Notes or trade categories…'} value={respForm.cover_note} onChange={(e) => setRespForm((f) => ({ ...f, cover_note: e.target.value }))} />
+                          <div className="actions">
+                            <button type="submit" className="btn sm primary">Submit</button>
+                            {respMsg && <span className="muted" style={{ fontSize: '.86rem' }}>{respMsg}</span>}
+                          </div>
+                        </form>
                       )}
                       {isOpen && (
                         <div style={{ marginTop: '.65rem', paddingTop: '.6rem', borderTop: '1px solid #e2e8f0', fontSize: '.9rem', lineHeight: 1.55 }}>

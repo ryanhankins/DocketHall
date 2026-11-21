@@ -31,6 +31,15 @@ COMMUNICATIONS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         True,
     ),
     (
+        "city_notice_responses",
+        [
+            "id", "notice_id", "response_type", "applicant_name", "applicant_email",
+            "applicant_phone", "organization", "cover_note", "created_at",
+        ],
+        set(),
+        True,
+    ),
+    (
         "city_directory_entries",
         [
             "id", "name", "title_role", "department", "email", "phone",
