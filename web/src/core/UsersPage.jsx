@@ -20,6 +20,25 @@ import { ROLE_LABELS, api, formatDate } from './api.js';
 import { InlineEditable } from './InlineEditable.jsx';
 import { useToast } from './toast.jsx';
 
+const MODULE_LABELS = {
+  core: 'Core & Settings',
+  agendas: 'Agendas & Minutes',
+  permits: 'Building & Zoning Permits',
+  complaints: 'Code Complaints & 311',
+  citations: 'Municipal Citations',
+  utilities: 'Utility Billing',
+  records: 'Records & FOIA',
+  licensing: 'Licensing & Compliance',
+  communications: 'Website & Communications',
+  calendar: 'City Calendar & Rentals',
+  codification: 'Municipal Codification',
+};
+
+function moduleTitle(modId) {
+  if (MODULE_LABELS[modId]) return MODULE_LABELS[modId];
+  return (modId || 'Other').replace(/[_-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
 export default function UsersPage({ me, permissionsCatalog = [] }) {
   const [users, setUsers] = useState([]);
   const [username, setUsername] = useState('');
@@ -31,7 +50,25 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
   const [copied, setCopied] = useState(false);
   const [userSearch, setUserSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
+  const [grantsUser, setGrantsUser] = useState(null);
+  const [grantsDraft, setGrantsDraft] = useState([]);
+  const [savingGrants, setSavingGrants] = useState(false);
   const showToast = useToast();
+
+  const { groupedPerms, permByKey } = useMemo(() => {
+    const groups = new Map();
+    const byKey = new Map();
+    for (const p of permissionsCatalog) {
+      byKey.set(p.key, p);
+      const modId = p.module || 'other';
+      if (!groups.has(modId)) groups.set(modId, []);
+      groups.get(modId).push(p);
+    }
+    return {
+      groupedPerms: Array.from(groups.entries()).map(([id, items]) => ({ id, title: moduleTitle(id), items })),
+      permByKey: byKey,
+    };
+  }, [permissionsCatalog]);
 
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
@@ -79,17 +116,30 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
     }
   };
 
-  const handleToggleUserPerm = async (u, permKey) => {
-    const cur = Array.isArray(u.permissions) ? u.permissions : [];
-    const next = cur.includes(permKey) ? cur.filter(p => p !== permKey) : [...cur, permKey];
+  const openGrantsModal = (u) => {
+    setGrantsUser(u);
+    setGrantsDraft(Array.isArray(u.permissions) ? [...u.permissions] : []);
+  };
+
+  const toggleDraftPerm = (key) => {
+    setGrantsDraft(prev => (prev.includes(key) ? prev.filter(p => p !== key) : [...prev, key]));
+  };
+
+  const handleSaveGrants = async () => {
+    if (!grantsUser) return;
+    setSavingGrants(true);
     try {
-      await api(`/api/users/${u.id}`, {
+      await api(`/api/users/${grantsUser.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ permissions: next }),
+        body: JSON.stringify({ permissions: grantsDraft }),
       });
+      setGrantsUser(null);
       await loadUsers();
+      showToast('Module grants updated.', 'success');
     } catch (error) {
       showToast(error.message, 'error');
+    } finally {
+      setSavingGrants(false);
     }
   };
 
@@ -160,25 +210,34 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
           </div>
           <button type="submit" className="btn primary">Create User</button>
         </form>
-        {permissionsCatalog.length > 0 && (
-          <div style={{ marginTop: '.75rem' }}>
-            <div className="muted" style={{ fontSize: '.8rem', marginBottom: '.35rem' }}>
-              Additional Module Permissions (optional, beyond role preset):
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: '.45rem 1rem', alignItems: 'start' }}>
-              {permissionsCatalog.map(p => (
-                <label key={p.key} style={{ display: 'flex', alignItems: 'flex-start', gap: '.45rem', fontSize: '.86rem', cursor: 'pointer', lineHeight: 1.35 }}>
-                  <input
-                    type="checkbox"
-                    style={{ width: 'auto', margin: '0.18rem 0 0', flexShrink: 0 }}
-                    checked={newPerms.includes(p.key)}
-                    onChange={() => toggleNewPerm(p.key)}
-                  />
-                  <span>{p.label}</span>
-                </label>
+        {groupedPerms.length > 0 && (
+          <details style={{ marginTop: '.75rem' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '.85rem', fontWeight: 600, color: '#334e68' }}>
+              Additional Module Permissions (optional{newPerms.length > 0 ? ` — ${newPerms.length} selected` : ''})
+            </summary>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '.75rem', marginTop: '.65rem' }}>
+              {groupedPerms.map(grp => (
+                <div key={grp.id} style={{ border: '1px solid #e2e8f0', borderRadius: '6px', padding: '.6rem .75rem', background: '#f8fafc' }}>
+                  <div style={{ fontSize: '.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: '#475569', marginBottom: '.4rem' }}>
+                    {grp.title}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '.35rem' }}>
+                    {grp.items.map(p => (
+                      <label key={p.key} style={{ display: 'flex', alignItems: 'flex-start', gap: '.45rem', fontSize: '.84rem', cursor: 'pointer', lineHeight: 1.35 }}>
+                        <input
+                          type="checkbox"
+                          style={{ width: 'auto', margin: '0.18rem 0 0', flexShrink: 0 }}
+                          checked={newPerms.includes(p.key)}
+                          onChange={() => toggleNewPerm(p.key)}
+                        />
+                        <span>{p.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
-          </div>
+          </details>
         )}
         {err && <div className="error-msg" role="alert">{err}</div>}
       </div>
@@ -275,20 +334,45 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
                   </td>
                   <td>
                     {u.role === 'admin' ? (
-                      <span className="muted">All (*)</span>
+                      <span className="muted" style={{ whiteSpace: 'nowrap' }}>All permissions (*)</span>
                     ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '.2rem' }}>
-                        {permissionsCatalog.map(p => (
-                          <label key={p.key} style={{ display: 'inline-flex', alignItems: 'center', gap: '.3rem', fontSize: '.8rem', cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              style={{ width: 'auto' }}
-                              checked={explicit.includes(p.key)}
-                              onChange={() => handleToggleUserPerm(u, p.key)}
-                            />
-                            <span>{p.key}</span>
-                          </label>
-                        ))}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '.45rem', flexWrap: 'wrap' }}>
+                        {explicit.length === 0 ? (
+                          <span className="muted" style={{ fontSize: '.82rem', whiteSpace: 'nowrap' }}>Role preset only</span>
+                        ) : (
+                          <>
+                            {explicit.slice(0, 2).map(key => {
+                              const p = permByKey.get(key);
+                              return (
+                                <span
+                                  key={key}
+                                  className="badge"
+                                  title={p ? `${p.label} (${key})` : key}
+                                  style={{ background: '#eff6ff', color: '#1d4ed8', fontWeight: 500, maxWidth: '210px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                >
+                                  {p ? p.label : key}
+                                </span>
+                              );
+                            })}
+                            {explicit.length > 2 && (
+                              <span
+                                className="badge"
+                                title={explicit.slice(2).map(k => permByKey.get(k)?.label || k).join('\n')}
+                                style={{ background: '#f1f5f9', color: '#475569', whiteSpace: 'nowrap' }}
+                              >
+                                +{explicit.length - 2} more
+                              </span>
+                            )}
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          className="btn sm"
+                          style={{ whiteSpace: 'nowrap' }}
+                          onClick={() => openGrantsModal(u)}
+                        >
+                          Edit Grants
+                        </button>
                       </div>
                     )}
                   </td>
@@ -347,6 +431,79 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
           </tbody>
         </table>
       </div>
+
+      {grantsUser && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="grants-modal-title"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+            zIndex: 1000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget && !savingGrants) setGrantsUser(null); }}
+        >
+          <div className="card" style={{ width: '100%', maxWidth: '760px', maxHeight: '85vh', overflowY: 'auto', margin: 0 }}>
+            <div className="between" style={{ marginBottom: '.4rem' }}>
+              <h2 id="grants-modal-title" style={{ margin: 0 }}>
+                Module Grants — {grantsUser.username}
+              </h2>
+              <span className="badge" style={{ background: '#f1f5f9', color: '#334e68' }}>
+                {ROLE_LABELS[grantsUser.role] || grantsUser.role}
+              </span>
+            </div>
+            <p className="muted" style={{ fontSize: '.86rem', marginTop: 0, marginBottom: '.85rem' }}>
+              Select any additional module permissions to grant beyond this user&apos;s default role preset.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '.75rem' }}>
+              {groupedPerms.map(grp => (
+                <div key={grp.id} style={{ border: '1px solid #e2e8f0', borderRadius: '6px', padding: '.65rem .8rem', background: '#f8fafc' }}>
+                  <div style={{ fontSize: '.78rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: '#475569', marginBottom: '.45rem' }}>
+                    {grp.title}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '.4rem' }}>
+                    {grp.items.map(p => (
+                      <label key={p.key} style={{ display: 'flex', alignItems: 'flex-start', gap: '.45rem', fontSize: '.86rem', cursor: 'pointer', lineHeight: 1.35 }}>
+                        <input
+                          type="checkbox"
+                          style={{ width: 'auto', margin: '0.18rem 0 0', flexShrink: 0 }}
+                          checked={grantsDraft.includes(p.key)}
+                          onChange={() => toggleDraftPerm(p.key)}
+                        />
+                        <span>{p.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="between" style={{ marginTop: '1rem', paddingTop: '.75rem', borderTop: '1px solid #e2e8f0' }}>
+              <button
+                type="button"
+                className="btn sm"
+                disabled={savingGrants || grantsDraft.length === 0}
+                onClick={() => setGrantsDraft([])}
+              >
+                Clear Extra Grants ({grantsDraft.length})
+              </button>
+              <div className="actions">
+                <button type="button" className="btn" disabled={savingGrants} onClick={() => setGrantsUser(null)}>
+                  Cancel
+                </button>
+                <button type="button" className="btn primary" disabled={savingGrants} onClick={handleSaveGrants}>
+                  {savingGrants ? 'Saving…' : 'Save Grants'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
