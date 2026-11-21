@@ -830,3 +830,154 @@ def trigger_retention_policies(user: dict = Depends(require_permission("settings
         f"Pruned complaints={res['complaints_pruned']}, foia={res['foia_pruned']}, audit={res['audit_pruned']}",
     )
     return res
+
+
+@router.get("/readiness")
+def get_launch_readiness(_: dict = Depends(require_permission("settings.manage", "agendas.manage"))):
+    """Return live city launch & onboarding readiness checks."""
+    from . import agendas
+    from .auth import DEFAULT_ADMIN_PASSWORD, verify_password
+
+    branding = agendas.get_preferences_branding() or {}
+    city_title_set = bool((branding.get("city_title") or "").strip())
+    logo_set = bool(branding.get("has_city_logo"))
+    reminder_days = int(branding.get("backup_reminder_days") or 0)
+
+    with pool.connection() as conn:
+        admin_row = conn.execute("SELECT password_hash FROM users WHERE username = 'admin'").fetchone()
+        default_pw = bool(admin_row and verify_password(DEFAULT_ADMIN_PASSWORD, admin_row[0]))
+        smtp_row = conn.execute("SELECT enabled FROM core_integrations WHERE provider = 'gmail_smtp'").fetchone()
+        smtp_configured = bool(smtp_row and smtp_row[0])
+        policy = _load_policy_cfg(conn)
+        backup_configured = bool(policy.get("enabled") or reminder_days > 0)
+
+        def _count(sql: str) -> int:
+            try:
+                return int(conn.execute(sql).fetchone()[0] or 0)
+            except Exception:
+                return 0
+
+        counts = {
+            "agendas": _count("SELECT COUNT(*) FROM agendas"),
+            "code_chapters": _count("SELECT COUNT(*) FROM code_chapters"),
+            "blog_posts": _count("SELECT COUNT(*) FROM blog_posts"),
+            "permit_types": _count("SELECT COUNT(*) FROM permit_types"),
+        }
+
+    return {
+        "checks": [
+            {
+                "id": "branding",
+                "label": "City Title & Seal Configured",
+                "done": city_title_set and logo_set,
+                "route": "/app/preferences-general",
+            },
+            {
+                "id": "password",
+                "label": "Default Admin Password Changed",
+                "done": not default_pw,
+                "route": "/app/my-account",
+            },
+            {
+                "id": "smtp",
+                "label": "Outgoing SMTP Email Configured",
+                "done": smtp_configured,
+                "route": "/app/integrations",
+            },
+            {
+                "id": "backup",
+                "label": "Backup Reminder or Offsite S3 Schedule Set",
+                "done": backup_configured,
+                "route": "/app/preferences-backup",
+            },
+            {
+                "id": "content",
+                "label": "Public Content Ready (Agenda, Code, Blog, or Permits)",
+                "done": sum(counts.values()) > 0,
+                "route": "/app/preferences-backup",
+            },
+        ],
+        "counts": counts,
+    }
+
+
+@router.post("/seed-demo")
+def seed_demo_city_data(user: dict = Depends(require_permission("settings.manage"))):
+    """Idempotently populate realistic sample city data for evaluation and onboarding."""
+    created = {"agendas": 0, "code_chapters": 0, "blog_posts": 0, "bills": 0}
+    with pool.connection() as conn:
+        try:
+            ag_cnt = conn.execute("SELECT COUNT(*) FROM agendas").fetchone()[0]
+            if ag_cnt == 0:
+                ag = conn.execute(
+                    "INSERT INTO agendas (title, body, meeting_date, meeting_time, status, finalized_at, created_by) "
+                    "VALUES (%s, %s, CURRENT_DATE + 7, '18:30', 'Finalized Agendas', now(), %s) RETURNING id",
+                    ("Regular City Council Meeting (Sample)", "City Council", user["username"]),
+                ).fetchone()
+                for pos, sec, ttl, pres, mot, fisc in [
+                    (1, "Call to Order", "Call to Order & Roll Call", "Mayor", "", ""),
+                    (2, "New Business", "Ordinance 2026-01: Water & Sewer Utility Rate Schedule", "Public Works Director", "Move to adopt Ordinance 2026-01.", "$18,500 projected annual utility fund revenue"),
+                    (3, "New Business", "Approve 2026 Street Sealcoat Contract", "City Engineer", "Move to award contract to low bidder.", "$42,000 Street Improvement Fund"),
+                ]:
+                    conn.execute(
+                        "INSERT INTO agenda_items (agenda_id, position, section, title, presenter, recommended_motion, fiscal_impact) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                        (ag[0], pos, sec, ttl, pres, mot, fisc),
+                    )
+                created["agendas"] = 1
+        except Exception:
+            pass
+
+        try:
+            ch_cnt = conn.execute("SELECT COUNT(*) FROM code_chapters").fetchone()[0]
+            if ch_cnt == 0:
+                ch = conn.execute(
+                    "INSERT INTO code_chapters (code_prefix, title, description, sort_order, is_published) "
+                    "VALUES ('100', 'General Provisions', 'Definitions, rules of construction, and general penalties.', 1, TRUE) RETURNING id"
+                ).fetchone()
+                conn.execute(
+                    "INSERT INTO code_sections (chapter_id, section_number, title, body, sort_order, is_published) "
+                    "VALUES (%s, '100.010', 'Definitions and Rules of Construction', %s, 1, TRUE)",
+                    (ch[0], "Unless the context otherwise requires, 'City' means the Municipality and 'Code' means this Municipal Code of Ordinances."),
+                )
+                created["code_chapters"] = 1
+        except Exception:
+            pass
+
+        try:
+            post_cnt = conn.execute("SELECT COUNT(*) FROM blog_posts").fetchone()[0]
+            if post_cnt == 0:
+                cat = conn.execute(
+                    "INSERT INTO blog_categories (slug, name, description, is_public) "
+                    "VALUES ('city-updates', 'City Updates', 'Official news and community announcements.', TRUE) "
+                    "ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name RETURNING id"
+                ).fetchone()
+                conn.execute(
+                    "INSERT INTO blog_posts (category_id, slug, title, lead_in, body, author_name, is_featured, is_published, created_by) "
+                    "VALUES (%s, 'welcome-to-our-city-portal', 'Welcome to Our Online City Portal', "
+                    "'Browse meeting agendas, apply for permits, pay utility bills, and submit 311 requests online.', "
+                    "'Residents and businesses can now access city agendas, municipal code, public records, and permit applications 24/7.', "
+                    "%s, TRUE, TRUE, %s) ON CONFLICT (slug) DO NOTHING",
+                    (cat[0], user["username"], user["username"]),
+                )
+                created["blog_posts"] = 1
+        except Exception:
+            pass
+
+        try:
+            bill_cnt = conn.execute("SELECT COUNT(*) FROM municipal_bills").fetchone()[0]
+            if bill_cnt == 0:
+                conn.execute(
+                    "INSERT INTO municipal_bills "
+                    "(reference_number, bill_type, account_number, payer_name, service_address, description, amount_due, due_date, gl_account_code, created_by) "
+                    "VALUES ('UTIL-DEMO-01', 'utility', 'ACCT-DEMO-100', 'Sample Resident', '100 Main St', "
+                    "'Quarterly Water & Sewer Statement (Sample)', '$68.50', to_char(CURRENT_DATE + 15, 'YYYY-MM-DD'), '601-43200', %s) "
+                    "ON CONFLICT (reference_number) DO NOTHING",
+                    (user["username"],),
+                )
+                created["bills"] = 1
+        except Exception:
+            pass
+
+    record_audit(user["username"], "backup.seed_demo", f"Seeded demo data: {created}")
+    return {"seeded": created}

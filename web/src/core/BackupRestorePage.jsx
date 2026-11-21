@@ -46,8 +46,21 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [runningOffsite, setRunningOffsite] = useState(false);
   const [runningRetention, setRunningRetention] = useState(false);
+  const [readiness, setReadiness] = useState(null);
+  const [seedingDemo, setSeedingDemo] = useState(false);
   const fileRef = useRef(null);
   const showToast = useToast();
+
+  const loadReadiness = useCallback(async () => {
+    try {
+      const d = await api('/api/backup/readiness');
+      setReadiness(d);
+    } catch {
+      // Ignore if insufficient perms
+    }
+  }, []);
+
+  useEffect(() => { loadReadiness(); }, [loadReadiness]);
 
   useEffect(() => {
     setDays(String(reminderDays ?? 0));
@@ -171,7 +184,65 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
         <button type="button" className={`btn sm${tab === 'retention' ? ' active' : ''}`} onClick={() => setTab('retention')}>
           Record Retention
         </button>
+        <button type="button" className={`btn sm${tab === 'onboarding' ? ' active' : ''}`} onClick={() => setTab('onboarding')}>
+          Launch &amp; Demo Setup
+        </button>
       </div>
+
+      {tab === 'onboarding' && (
+        <div style={{ display: 'grid', gap: '1rem' }}>
+          <div className="card" style={{ marginBottom: 0 }}>
+            <h2 style={{ marginTop: 0 }}>City Launch Readiness Checklist</h2>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Verify core configuration before sharing your public portal with residents.
+            </p>
+            {!readiness ? (
+              <p className="muted">Loading readiness checks…</p>
+            ) : (
+              <div style={{ display: 'grid', gap: '.5rem' }}>
+                {(readiness.checks || []).map((chk) => (
+                  <div key={chk.id} className="between" style={{ padding: '.55rem .75rem', border: '1px solid #e2e8f0', borderRadius: 6, gap: '.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '.55rem' }}>
+                      <span className={`badge ${chk.done ? 'active' : 'draft'}`}>{chk.done ? 'Done' : 'Pending'}</span>
+                      <strong>{chk.label}</strong>
+                    </div>
+                    {!chk.done && (
+                      <a className="btn sm" href={chk.route}>Configure &rarr;</a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="card" style={{ marginBottom: 0 }}>
+            <h2 style={{ marginTop: 0 }}>One-Click Demo / Sample City Data</h2>
+            <p className="muted" style={{ marginTop: 0 }}>
+              Evaluating DocketHall? Populate sample council agendas, a city code chapter, a welcome blog post, and a sample utility bill without overwriting any existing records.
+            </p>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={seedingDemo}
+              onClick={async () => {
+                setSeedingDemo(true);
+                try {
+                  const res = await api('/api/backup/seed-demo', { method: 'POST' });
+                  const total = Object.values(res.seeded || {}).reduce((a, b) => a + b, 0);
+                  showToast(total > 0 ? `Loaded ${total} sample item group(s)` : 'Sample data already present (nothing overwritten)', 'ok');
+                  await loadReadiness();
+                } catch (err) {
+                  showToast(err.message || 'Failed to seed demo data', 'error');
+                } finally {
+                  setSeedingDemo(false);
+                }
+              }}
+            >
+              {seedingDemo ? 'Loading Sample Data…' : 'Load Sample City Data'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {tab === 'manual' && (
       <div className="card" style={{ marginBottom: '1rem' }}>
