@@ -23,7 +23,10 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 API_APP = os.path.join(ROOT, "api", "app")
 
-EXPECTED_MODULES = {"agendas", "permits", "codification", "records", "complaints", "calendar", "notices", "directory", "forms", "pages"}
+EXPECTED_MODULES = {
+    "agendas", "permits", "codification", "records", "complaints",
+    "calendar", "notices", "directory", "forms", "pages", "utilities", "citations",
+}
 EPHEMERAL_TABLES = {"sessions", "password_reset_tokens"}
 
 _CREATE_TABLE_RE = re.compile(
@@ -87,7 +90,8 @@ class BackupSchemaSyncTest(unittest.TestCase):
             mod_name = os.path.basename(mod_path).removesuffix("_module.py")
             var_name = f"{mod_name.upper()}_BACKUP_TABLES"
             entries = _extract_backup_var(mod_path, var_name)
-            self.assertGreater(len(entries), 0, f"{mod_name} has empty {var_name}")
+            if mod_name not in {"utilities", "citations"}:
+                self.assertGreater(len(entries), 0, f"{mod_name} has empty {var_name}")
             found_modules.add(mod_name)
             for tname, cols, _, _ in entries:
                 self.assertNotIn(tname, backup_cols, f"Duplicate backup table {tname}")

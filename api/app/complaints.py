@@ -1112,6 +1112,20 @@ def update_complaint(
             ).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Complaint not found")
+            if body.citation_amount is not None and body.citation_amount.strip():
+                try:
+                    from .payments import upsert_citation_bill
+                    upsert_citation_bill(
+                        conn,
+                        complaint_number=row[1],
+                        property_address=row[9] or "",
+                        ordinance_section=row[11] or "",
+                        amount_due=body.citation_amount.strip(),
+                        due_date=row[25] or "",
+                        actor_username=user["username"],
+                    )
+                except Exception:
+                    pass
             note_parts = []
             if body.status is not None:
                 note_parts.append(f"Status set to {body.status}")

@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, formatDate } from './api.js';
 import { useToast } from './toast.jsx';
 
@@ -39,16 +39,24 @@ const EMPTY_FORM = {
   notes: '',
 };
 
-export default function BillingManagePage() {
+export default function BillingManagePage({ fixedBillType = '', pageTitle = '', pageSubtitle = '' }) {
   const showToast = useToast();
   const [bills, setBills] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [typeFilter, setTypeFilter] = useState('');
+  const [typeFilter, setTypeFilter] = useState(fixedBillType || '');
   const [statusFilter, setStatusFilter] = useState('');
   const [q, setQ] = useState('');
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [showTools, setShowTools] = useState(false);
+  const [form, setForm] = useState({ ...EMPTY_FORM, bill_type: fixedBillType || 'utility' });
+  const [lineItemsText, setLineItemsText] = useState('');
   const [saving, setSaving] = useState(false);
+  const [sendImportEmails, setSendImportEmails] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [lateFeeFlat, setLateFeeFlat] = useState('10.00');
+  const [lateFeeEmails, setLateFeeEmails] = useState(false);
+  const [applyingLateFees, setApplyingLateFees] = useState(false);
+  const csvRef = useRef(null);
 
   const loadBills = useCallback(async () => {
     setLoading(true);
@@ -75,18 +83,83 @@ export default function BillingManagePage() {
     e.preventDefault();
     setSaving(true);
     try {
+      const line_items = lineItemsText
+        .split('\n')
+        .map(l => l.trim())
+        .filter(Boolean)
+        .map(line => {
+          const idx = line.lastIndexOf(':');
+          if (idx > 0) {
+            return { label: line.slice(0, idx).trim(), amount: line.slice(idx + 1).trim() };
+          }
+          return { label: line, amount: '' };
+        });
       const created = await api('/api/payments/bills', {
         method: 'POST',
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, line_items }),
       });
       showToast(`Created ${created.reference_number}`, 'ok');
       setForm({ ...EMPTY_FORM });
+      setLineItemsText('');
       setShowForm(false);
       await loadBills();
     } catch (err) {
       showToast(err.message || 'Failed to create bill', 'error');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleImportCsv = async (e) => {
+    e.preventDefault();
+    const file = csvRef.current?.files?.[0];
+    if (!file) return;
+    setImporting(true);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('send_emails', String(sendImportEmails));
+      const res = await api('/api/payments/bills/import-csv', { method: 'POST', body: fd });
+      showToast(`Imported CSV: ${res.created} created, ${res.updated} updated, ${res.emailed} emailed`, 'ok');
+      if (csvRef.current) csvRef.current.value = '';
+      await loadBills();
+    } catch (err) {
+      showToast(err.message || 'CSV import failed', 'error');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleApplyLateFees = async () => {
+    setApplyingLateFees(true);
+    try {
+      const res = await api('/api/payments/bills/apply-late-fees', {
+        method: 'POST',
+        body: JSON.stringify({ flat_fee: lateFeeFlat, send_emails: lateFeeEmails }),
+      });
+      showToast(`Applied late fees to ${res.applied} overdue bill(s) (${res.emailed} emailed)`, 'ok');
+      await loadBills();
+    } catch (err) {
+      showToast(err.message || 'Failed to apply late fees', 'error');
+    } finally {
+      setApplyingLateFees(false);
+    }
+  };
+
+  const handleRecordPayment = async (bill) => {
+    const amt = window.prompt(`Record payment amount for ${bill.reference_number} (Due: ${bill.amount_due}):`, bill.amount_due.replace('$', ''));
+    if (!amt) return;
+    const method = window.prompt('Payment method (check, cash, ach, card):', 'check') || 'check';
+    const ref = window.prompt('Check # or Receipt Reference (optional):', '') || '';
+    try {
+      await api(`/api/payments/bills/${bill.id}/record-payment`, {
+        method: 'POST',
+        body: JSON.stringify({ payment_amount: amt, payment_method: method, payment_ref: ref }),
+      });
+      showToast(`Recorded payment on ${bill.reference_number}`, 'ok');
+      await loadBills();
+    } catch (err) {
+      showToast(err.message || 'Failed to record payment', 'error');
     }
   };
 
@@ -119,17 +192,57 @@ export default function BillingManagePage() {
 
   return (
     <section id="section-billing">
-      <div className="between" style={{ marginBottom: '1rem' }}>
+      <div className="between" style={{ marginBottom: '1rem', flexWrap: 'wrap', gap: '.5rem' }}>
         <div>
-          <h1 style={{ margin: 0 }}>Utility Bills, Citations &amp; Misc. Fees</h1>
+          <h1 style={{ margin: 0 }}>{pageTitle || 'Utility Bills, Citations & Misc. Fees'}</h1>
           <p className="muted" style={{ margin: '.25rem 0 0' }}>
-            Create utility bills, municipal citations, license renewals, or fees for online lookup &amp; Stripe payment at <code>/#pay</code>.
+            {pageSubtitle || <>Manage utility statements, municipal citations, batch CSV imports, late-fee aging, and PDF invoices for <code>/#pay</code>.</>}
           </p>
         </div>
-        <button type="button" className="btn primary" onClick={() => setShowForm(v => !v)}>
-          {showForm ? 'Close Form' : '+ New Bill / Citation'}
-        </button>
+        <div className="actions">
+          <button type="button" className="btn" onClick={() => setShowTools(v => !v)}>
+            {showTools ? 'Hide Batch Tools' : 'Batch CSV & Late Fees'}
+          </button>
+          <button type="button" className="btn primary" onClick={() => setShowForm(v => !v)}>
+            {showForm ? 'Close Form' : '+ New Bill / Citation'}
+          </button>
+        </div>
       </div>
+
+      {showTools && (
+        <div className="card" style={{ display: 'grid', gap: '1rem' }}>
+          <form onSubmit={handleImportCsv} className="row" style={{ alignItems: 'flex-end', gap: '.65rem', flexWrap: 'wrap' }}>
+            <div className="field" style={{ flex: 1, minWidth: 240 }}>
+              <label htmlFor="bill-csv-file">Batch Import Utility Bills / Citations (.csv)</label>
+              <input id="bill-csv-file" ref={csvRef} type="file" accept=".csv" required />
+            </div>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem', paddingBottom: '.45rem' }}>
+              <input type="checkbox" checked={sendImportEmails} onChange={e => setSendImportEmails(e.target.checked)} />
+              Email notices
+            </label>
+            <a className="btn sm" href="/api/payments/bills/import-template.csv" download="dockethall-bills-import-template.csv">
+              Download Template CSV
+            </a>
+            <button type="submit" className="btn sm primary" disabled={importing}>
+              {importing ? 'Importing…' : 'Import CSV'}
+            </button>
+          </form>
+
+          <div className="row" style={{ alignItems: 'flex-end', gap: '.65rem', flexWrap: 'wrap', borderTop: '1px solid #e2e8f0', paddingTop: '.85rem' }}>
+            <div className="field" style={{ maxWidth: 200 }}>
+              <label htmlFor="late-fee-flat">Overdue Late Fee ($)</label>
+              <input id="late-fee-flat" value={lateFeeFlat} onChange={e => setLateFeeFlat(e.target.value)} />
+            </div>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.35rem', paddingBottom: '.45rem' }}>
+              <input type="checkbox" checked={lateFeeEmails} onChange={e => setLateFeeEmails(e.target.checked)} />
+              Email past-due notices
+            </label>
+            <button type="button" className="btn sm" onClick={handleApplyLateFees} disabled={applyingLateFees}>
+              {applyingLateFees ? 'Applying…' : 'Apply Late Fees to Overdue Bills'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <div className="card">
@@ -156,7 +269,7 @@ export default function BillingManagePage() {
             </div>
             <div className="row" style={{ marginBottom: '.75rem' }}>
               <div className="field" style={{ flex: 1, minWidth: 160 }}>
-                <label htmlFor="bill-amt">Amount Due *</label>
+                <label htmlFor="bill-amt">Total Amount Due *</label>
                 <input id="bill-amt" required placeholder="e.g. $65.00" value={form.amount_due} onChange={e => setForm(f => ({ ...f, amount_due: e.target.value }))} />
               </div>
               <div className="field" style={{ flex: 1, minWidth: 150 }}>
@@ -182,6 +295,16 @@ export default function BillingManagePage() {
                 <input id="bill-addr" value={form.service_address} onChange={e => setForm(f => ({ ...f, service_address: e.target.value }))} />
               </div>
             </div>
+            <div className="field" style={{ marginBottom: '.75rem' }}>
+              <label htmlFor="bill-lines">Line Items (optional, one per line as <code>Label: $Amount</code>)</label>
+              <textarea
+                id="bill-lines"
+                rows={2}
+                placeholder={'Water Base & Usage: $42.00\nSewer Service: $23.00'}
+                value={lineItemsText}
+                onChange={e => setLineItemsText(e.target.value)}
+              />
+            </div>
             <button type="submit" className="btn primary" disabled={saving}>
               {saving ? 'Saving…' : 'Create Bill / Citation'}
             </button>
@@ -198,10 +321,12 @@ export default function BillingManagePage() {
             onChange={e => setQ(e.target.value)}
             style={{ flex: 2, minWidth: 220 }}
           />
-          <select aria-label="Filter by bill type" value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={{ width: 'auto' }}>
-            <option value="">All Types</option>
-            {Object.entries(BILL_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-          </select>
+          {!fixedBillType && (
+            <select aria-label="Filter by bill type" value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={{ width: 'auto' }}>
+              <option value="">All Types</option>
+              {Object.entries(BILL_TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          )}
           <select aria-label="Filter by payment status" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ width: 'auto' }}>
             <option value="">All Statuses</option>
             <option value="unpaid">Unpaid</option>
@@ -232,7 +357,11 @@ export default function BillingManagePage() {
               <tbody>
                 {bills.map(b => (
                   <tr key={b.id}>
-                    <td><strong>{b.reference_number}</strong></td>
+                    <td>
+                      <strong>{b.reference_number}</strong>
+                      {b.late_fee_applied && <div><span className="badge draft">Late Fee</span></div>}
+                      {b.dispute_status === 'contested' && <div><span className="badge draft">Contested</span></div>}
+                    </td>
                     <td>
                       <div>{BILL_TYPE_LABELS[b.bill_type] || b.bill_type}</div>
                       {b.account_number && <div className="muted" style={{ fontSize: '.78rem' }}>Acct: {b.account_number}</div>}
@@ -242,7 +371,10 @@ export default function BillingManagePage() {
                       <div className="muted" style={{ fontSize: '.78rem' }}>{b.service_address || b.payer_email || ''}</div>
                     </td>
                     <td>{b.description || '—'}</td>
-                    <td><strong>{b.amount_due}</strong></td>
+                    <td>
+                      <strong>{b.amount_due}</strong>
+                      {b.amount_paid && <div className="muted" style={{ fontSize: '.78rem' }}>Paid: {b.amount_paid}</div>}
+                    </td>
                     <td>{b.due_date ? formatDate(b.due_date) : '—'}</td>
                     <td>
                       <span className={`badge ${b.payment_status === 'paid' ? 'active' : (b.payment_status === 'waived' ? 'draft' : 'disabled')}`}>
@@ -251,10 +383,18 @@ export default function BillingManagePage() {
                     </td>
                     <td>
                       <div className="actions">
+                        <a className="btn sm" href={`/api/payments/bills/${b.id}/receipt.pdf`} target="_blank" rel="noreferrer">
+                          PDF
+                        </a>
                         {b.payment_status !== 'paid' && (
-                          <button type="button" className="btn sm" onClick={() => handleSetStatus(b, 'paid')}>
-                            Mark Paid
-                          </button>
+                          <>
+                            <button type="button" className="btn sm" onClick={() => handleRecordPayment(b)}>
+                              Payment
+                            </button>
+                            <button type="button" className="btn sm" onClick={() => handleSetStatus(b, 'paid')}>
+                              Mark Paid
+                            </button>
+                          </>
                         )}
                         {b.payment_status === 'unpaid' && (
                           <button type="button" className="btn sm" onClick={() => handleSetStatus(b, 'waived')}>

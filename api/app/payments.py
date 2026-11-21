@@ -25,7 +25,7 @@ import urllib.parse
 import urllib.request
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from psycopg.errors import UniqueViolation
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
@@ -59,8 +59,18 @@ CREATE TABLE IF NOT EXISTS municipal_bills (
     notes            TEXT NOT NULL DEFAULT '',
     created_by       TEXT NOT NULL DEFAULT '',
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    line_items       JSONB NOT NULL DEFAULT '[]'::jsonb,
+    amount_paid      TEXT NOT NULL DEFAULT '',
+    late_fee_applied BOOLEAN NOT NULL DEFAULT FALSE,
+    dispute_status   TEXT NOT NULL DEFAULT '',
+    dispute_notes    TEXT NOT NULL DEFAULT ''
 );
+ALTER TABLE municipal_bills ADD COLUMN IF NOT EXISTS line_items JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE municipal_bills ADD COLUMN IF NOT EXISTS amount_paid TEXT NOT NULL DEFAULT '';
+ALTER TABLE municipal_bills ADD COLUMN IF NOT EXISTS late_fee_applied BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE municipal_bills ADD COLUMN IF NOT EXISTS dispute_status TEXT NOT NULL DEFAULT '';
+ALTER TABLE municipal_bills ADD COLUMN IF NOT EXISTS dispute_notes TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS municipal_bills_ref_idx ON municipal_bills(reference_number);
 CREATE INDEX IF NOT EXISTS municipal_bills_acct_idx ON municipal_bills(account_number);
 CREATE INDEX IF NOT EXISTS municipal_bills_email_idx ON municipal_bills(LOWER(payer_email));
@@ -467,6 +477,7 @@ class BillIn(BaseModel):
     amount_due: str = ""
     due_date: str = ""
     notes: str = ""
+    line_items: list[dict] | None = None
 
 
 class BillPatchIn(BaseModel):
@@ -482,6 +493,10 @@ class BillPatchIn(BaseModel):
     payment_method: str | None = None
     payment_ref: str | None = None
     notes: str | None = None
+    amount_paid: str | None = None
+    dispute_status: str | None = None
+    dispute_notes: str | None = None
+    line_items: list[dict] | None = None
 
 
 def _row_to_bill(r, include_private: bool = True) -> dict:
@@ -497,6 +512,10 @@ def _row_to_bill(r, include_private: bool = True) -> dict:
         "payment_status": r[10],
         "paid_at": r[11].isoformat() if r[11] else None,
         "created_at": r[16].isoformat() if r[16] else None,
+        "line_items": r[18] if len(r) > 18 and isinstance(r[18], list) else [],
+        "amount_paid": (r[19] or "") if len(r) > 19 else "",
+        "late_fee_applied": bool(r[20]) if len(r) > 20 else False,
+        "dispute_status": (r[21] or "") if len(r) > 21 else "",
     }
     if include_private:
         out.update({
@@ -507,6 +526,7 @@ def _row_to_bill(r, include_private: bool = True) -> dict:
             "notes": r[14],
             "created_by": r[15],
             "updated_at": r[17].isoformat() if r[17] else None,
+            "dispute_notes": (r[22] or "") if len(r) > 22 else "",
         })
     return out
 
@@ -514,7 +534,8 @@ def _row_to_bill(r, include_private: bool = True) -> dict:
 _BILL_COLS = (
     "id, reference_number, bill_type, account_number, payer_name, payer_email, "
     "service_address, description, amount_due, due_date, payment_status, paid_at, "
-    "payment_method, payment_ref, notes, created_by, created_at, updated_at"
+    "payment_method, payment_ref, notes, created_by, created_at, updated_at, "
+    "line_items, amount_paid, late_fee_applied, dispute_status, dispute_notes"
 )
 
 
@@ -534,12 +555,16 @@ def public_lookup_bills(q: str = Query(..., min_length=3, max_length=64)):
     return [_row_to_bill(r, include_private=False) for r in rows]
 
 
+def _require_billing_staff(user: dict = Depends(require_permission("settings.manage", "utilities.manage", "citations.manage"))) -> dict:
+    return user
+
+
 @router.get("/bills")
 def list_bills(
     bill_type: str = "",
     payment_status: str = "",
     q: str = "",
-    _: dict = Depends(require_permission("settings.manage")),
+    _: dict = Depends(_require_billing_staff),
 ):
     clauses = ["TRUE"]
     params: list = []
@@ -566,7 +591,7 @@ def list_bills(
 
 
 @router.post("/bills", status_code=201)
-def create_bill(body: BillIn, user: dict = Depends(require_permission("settings.manage"))):
+def create_bill(body: BillIn, user: dict = Depends(_require_billing_staff)):
     if _parse_cents(body.amount_due) <= 0:
         raise HTTPException(status_code=400, detail="Enter a positive dollar amount due (e.g. $45.00)")
     prefix_map = {"utility": "UTIL", "citation": "CIT", "license": "LIC", "misc": "FEE"}
@@ -580,8 +605,8 @@ def create_bill(body: BillIn, user: dict = Depends(require_permission("settings.
             row = conn.execute(
                 f"INSERT INTO municipal_bills "
                 "(reference_number, bill_type, account_number, payer_name, payer_email, "
-                "service_address, description, amount_due, due_date, notes, created_by) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "service_address, description, amount_due, due_date, notes, created_by, line_items) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb) "
                 f"RETURNING {_BILL_COLS}",
                 (
                     ref,
@@ -595,6 +620,7 @@ def create_bill(body: BillIn, user: dict = Depends(require_permission("settings.
                     body.due_date.strip(),
                     body.notes.strip(),
                     user["username"],
+                    json.dumps(body.line_items or []),
                 ),
             ).fetchone()
     except UniqueViolation:
@@ -607,19 +633,23 @@ def create_bill(body: BillIn, user: dict = Depends(require_permission("settings.
 def update_bill(
     bill_id: int,
     body: BillPatchIn,
-    user: dict = Depends(require_permission("settings.manage")),
+    user: dict = Depends(_require_billing_staff),
 ):
     sets: list[str] = ["updated_at = now()"]
     params: list = []
     for field in (
         "bill_type", "account_number", "payer_name", "payer_email",
         "service_address", "description", "amount_due", "due_date",
-        "payment_method", "payment_ref", "notes",
+        "payment_method", "payment_ref", "notes", "amount_paid",
+        "dispute_status", "dispute_notes",
     ):
         val = getattr(body, field)
         if val is not None:
             sets.append(f"{field} = %s")
             params.append(val.strip())
+    if body.line_items is not None:
+        sets.append("line_items = %s::jsonb")
+        params.append(json.dumps(body.line_items))
     if body.payment_status is not None:
         sets.append("payment_status = %s")
         params.append(body.payment_status)
@@ -640,7 +670,7 @@ def update_bill(
 
 
 @router.delete("/bills/{bill_id}")
-def delete_bill(bill_id: int, user: dict = Depends(require_permission("settings.manage"))):
+def delete_bill(bill_id: int, user: dict = Depends(_require_billing_staff)):
     with pool.connection() as conn:
         row = conn.execute(
             "DELETE FROM municipal_bills WHERE id = %s RETURNING reference_number",
@@ -650,3 +680,310 @@ def delete_bill(bill_id: int, user: dict = Depends(require_permission("settings.
             raise HTTPException(status_code=404, detail="Bill not found")
     record_audit(user["username"], "bill.deleted", "municipal_bills", bill_id, f"Deleted bill {row[0]}")
     return {"deleted": True}
+
+
+def upsert_citation_bill(
+    conn,
+    *,
+    complaint_number: str,
+    property_address: str,
+    ordinance_section: str,
+    amount_due: str,
+    due_date: str = "",
+    actor_username: str = "system",
+) -> None:
+    """Auto-create or update a payable citation bill when a Code Enforcement citation is assessed."""
+    if _parse_cents(amount_due) <= 0:
+        return
+    ref = f"CIT-{complaint_number.strip().upper()}"
+    desc = f"Code Enforcement Citation ({ordinance_section})" if ordinance_section else f"Code Enforcement Citation ({complaint_number})"
+    line_items = [{"label": desc, "amount": amount_due.strip()}]
+    conn.execute(
+        "INSERT INTO municipal_bills "
+        "(reference_number, bill_type, account_number, service_address, description, amount_due, due_date, created_by, line_items) "
+        "VALUES (%s, 'citation', %s, %s, %s, %s, %s, %s, %s::jsonb) "
+        "ON CONFLICT (reference_number) DO UPDATE SET "
+        "amount_due = CASE WHEN municipal_bills.payment_status = 'unpaid' THEN EXCLUDED.amount_due ELSE municipal_bills.amount_due END, "
+        "due_date = COALESCE(NULLIF(EXCLUDED.due_date, ''), municipal_bills.due_date), "
+        "description = EXCLUDED.description, line_items = EXCLUDED.line_items, updated_at = now()",
+        (ref, complaint_number, property_address or "", desc, amount_due.strip(), due_date or "", actor_username, json.dumps(line_items)),
+    )
+
+
+@router.get("/bills/import-template.csv")
+def download_bills_csv_template(_: dict = Depends(_require_billing_staff)):
+    import csv
+    import io
+    from fastapi.responses import Response
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["reference_number", "bill_type", "account_number", "payer_name", "payer_email", "service_address", "description", "amount_due", "due_date"])
+    w.writerow(["UTIL-2026-1001", "utility", "ACCT-1001", "Jane Resident", "jane@example.com", "101 Main St", "November Water & Sewer", "78.50", "2026-12-15"])
+    w.writerow(["CIT-2026-0042", "citation", "", "John Driver", "", "200 Oak Ave", "Overnight Street Parking", "35.00", "2026-12-01"])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="dockethall-bills-import-template.csv"'},
+    )
+
+
+@router.post("/bills/import-csv")
+async def import_bills_csv(
+    request: Request,
+    file: UploadFile = File(...),
+    send_emails: bool = Form(False),
+    user: dict = Depends(_require_billing_staff),
+):
+    import csv
+    import io
+    from .integrations import send_direct_email
+
+    raw = await file.read()
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    created = 0
+    updated = 0
+    skipped = 0
+    emailed = 0
+    with pool.connection() as conn:
+        for row in reader:
+            btype = (row.get("bill_type") or "utility").strip().lower()
+            if btype not in ("utility", "citation", "license", "misc"):
+                btype = "utility"
+            amt = (row.get("amount_due") or "").strip()
+            if _parse_cents(amt) <= 0:
+                skipped += 1
+                continue
+            ref = (row.get("reference_number") or "").strip().upper()
+            if not ref:
+                next_seq = (conn.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM municipal_bills").fetchone() or [1])[0]
+                ref = f"{btype[:4].upper()}-{next_seq:05d}"
+            acct = (row.get("account_number") or "").strip()
+            pname = (row.get("payer_name") or "").strip()
+            pemail = (row.get("payer_email") or "").strip()
+            addr = (row.get("service_address") or "").strip()
+            desc = (row.get("description") or "").strip()
+            due = (row.get("due_date") or "").strip()
+            exists = conn.execute("SELECT id FROM municipal_bills WHERE reference_number = %s", (ref,)).fetchone()
+            conn.execute(
+                "INSERT INTO municipal_bills "
+                "(reference_number, bill_type, account_number, payer_name, payer_email, "
+                " service_address, description, amount_due, due_date, created_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+                "ON CONFLICT (reference_number) DO UPDATE SET "
+                "bill_type = EXCLUDED.bill_type, account_number = EXCLUDED.account_number, "
+                "payer_name = EXCLUDED.payer_name, payer_email = EXCLUDED.payer_email, "
+                "service_address = EXCLUDED.service_address, description = EXCLUDED.description, "
+                "amount_due = CASE WHEN municipal_bills.payment_status = 'unpaid' THEN EXCLUDED.amount_due ELSE municipal_bills.amount_due END, "
+                "due_date = EXCLUDED.due_date, updated_at = now()",
+                (ref, btype, acct, pname, pemail, addr, desc, amt, due, user["username"]),
+            )
+            if exists:
+                updated += 1
+            else:
+                created += 1
+            if send_emails and pemail and "@" in pemail:
+                send_direct_email(
+                    [pemail],
+                    f"[DocketHall] New {btype.title()} Statement — {ref}",
+                    f"Hello {pname or 'Resident'},\n\nA municipal statement ({ref}) for {amt} has been issued ({desc or btype}). Due date: {due or 'Upon receipt'}.\n\nLook up and pay online using Reference #{ref}.",
+                    link_path="/#pay",
+                    request=request,
+                )
+                emailed += 1
+    record_audit(user["username"], "bill.import_csv", f"created={created}, updated={updated}, skipped={skipped}, emailed={emailed}")
+    return {"created": created, "updated": updated, "skipped": skipped, "emailed": emailed}
+
+
+class LateFeeIn(BaseModel):
+    flat_fee: str = "10.00"
+    percent_fee: float = 0.0
+    send_emails: bool = False
+
+
+@router.post("/bills/apply-late-fees")
+def apply_late_fees(
+    body: LateFeeIn,
+    request: Request,
+    user: dict = Depends(_require_billing_staff),
+):
+    from datetime import date
+    from .integrations import send_direct_email
+
+    today_str = date.today().isoformat()
+    flat_cents = _parse_cents(body.flat_fee)
+    pct = max(0.0, float(body.percent_fee or 0.0))
+    applied = 0
+    emailed = 0
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"SELECT {_BILL_COLS} FROM municipal_bills "
+            "WHERE payment_status = 'unpaid' AND late_fee_applied = FALSE AND due_date <> '' AND due_date < %s",
+            (today_str,),
+        ).fetchall()
+        for r in rows:
+            cur_cents = _parse_cents(r[8])
+            if cur_cents <= 0:
+                continue
+            fee_cents = flat_cents if flat_cents > 0 else int(round(cur_cents * (pct / 100.0)))
+            if fee_cents <= 0:
+                continue
+            new_total_cents = cur_cents + fee_cents
+            items = list(r[18]) if len(r) > 18 and isinstance(r[18], list) else [{"label": r[7] or "Principal Balance", "amount": f"${cur_cents / 100:.2f}"}]
+            items.append({"label": "Past-Due Late Fee", "amount": f"${fee_cents / 100:.2f}"})
+            new_amt = f"${new_total_cents / 100:.2f}"
+            conn.execute(
+                "UPDATE municipal_bills SET amount_due = %s, line_items = %s::jsonb, late_fee_applied = TRUE, updated_at = now() WHERE id = %s",
+                (new_amt, json.dumps(items), r[0]),
+            )
+            applied += 1
+            if body.send_emails and r[5] and "@" in r[5]:
+                send_direct_email(
+                    [r[5]],
+                    f"[DocketHall] Past-Due Notice & Late Fee — {r[1]}",
+                    f"Hello {r[4] or 'Resident'},\n\nStatement {r[1]} (originally due {r[9]}) is past due. A late fee of ${fee_cents / 100:.2f} has been applied. New total due: {new_amt}.",
+                    link_path="/#pay",
+                    request=request,
+                )
+                emailed += 1
+    record_audit(user["username"], "bill.apply_late_fees", f"Applied late fees to {applied} overdue bill(s)")
+    return {"applied": applied, "emailed": emailed}
+
+
+class RecordPaymentIn(BaseModel):
+    payment_amount: str
+    payment_method: str = "check"
+    payment_ref: str = ""
+
+
+@router.post("/bills/{bill_id}/record-payment")
+def record_partial_or_full_payment(
+    bill_id: int,
+    body: RecordPaymentIn,
+    user: dict = Depends(_require_billing_staff),
+):
+    pay_cents = _parse_cents(body.payment_amount)
+    if pay_cents <= 0:
+        raise HTTPException(status_code=400, detail="Enter a positive payment amount")
+    with pool.connection() as conn:
+        r = conn.execute(f"SELECT {_BILL_COLS} FROM municipal_bills WHERE id = %s", (bill_id,)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Bill not found")
+        due_cents = _parse_cents(r[8])
+        prev_paid = _parse_cents(r[19] if len(r) > 19 else "")
+        new_paid = prev_paid + pay_cents
+        is_paid = new_paid >= due_cents > 0
+        row = conn.execute(
+            f"UPDATE municipal_bills SET "
+            f"amount_paid = %s, payment_method = %s, payment_ref = %s, "
+            f"payment_status = CASE WHEN %s THEN 'paid' ELSE payment_status END, "
+            f"paid_at = CASE WHEN %s THEN COALESCE(paid_at, now()) ELSE paid_at END, "
+            f"updated_at = now() WHERE id = %s RETURNING {_BILL_COLS}",
+            (
+                f"${new_paid / 100:.2f}",
+                body.payment_method.strip() or "check",
+                body.payment_ref.strip(),
+                is_paid,
+                is_paid,
+                bill_id,
+            ),
+        ).fetchone()
+    record_audit(user["username"], "bill.payment_recorded", f"{row[1]}: +${pay_cents / 100:.2f} via {body.payment_method}")
+    return _row_to_bill(row, include_private=True)
+
+
+class ContestCitationIn(BaseModel):
+    reference_number: str
+    reason: str = ""
+
+
+@router.post("/public/bills/contest")
+def contest_public_citation(body: ContestCitationIn):
+    ref = body.reference_number.strip().upper()
+    reason = body.reason.strip()
+    if not ref or not reason:
+        raise HTTPException(status_code=400, detail="Reference number and reason are required")
+    with pool.connection() as conn:
+        row = conn.execute(
+            f"UPDATE municipal_bills SET dispute_status = 'contested', dispute_notes = %s, updated_at = now() "
+            f"WHERE UPPER(reference_number) = %s AND bill_type = 'citation' AND payment_status = 'unpaid' "
+            f"RETURNING {_BILL_COLS}",
+            (reason, ref),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Unpaid citation not found")
+    return _row_to_bill(row, include_private=False)
+
+
+def _render_bill_pdf(bill: dict) -> bytes:
+    import io
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    w, h = letter
+    y = h - 55
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, y, "DocketHall Municipal Billing & Receipt")
+    y -= 24
+    c.setFont("Helvetica", 10)
+    c.drawString(50, y, f"Reference #: {bill['reference_number']}    Type: {bill['bill_type'].upper()}    Status: {bill['payment_status'].upper()}")
+    y -= 16
+    if bill.get("account_number"):
+        c.drawString(50, y, f"Account #: {bill['account_number']}")
+        y -= 16
+    if bill.get("service_address"):
+        c.drawString(50, y, f"Service / Property Address: {bill['service_address']}")
+        y -= 16
+    if bill.get("due_date"):
+        c.drawString(50, y, f"Due Date: {bill['due_date']}")
+        y -= 16
+    y -= 10
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, y, "Itemized Charges")
+    y -= 18
+    c.setFont("Helvetica", 10)
+    items = bill.get("line_items") or [{"label": bill.get("description") or "Municipal Charge", "amount": bill.get("amount_due")}]
+    for it in items:
+        c.drawString(60, y, str(it.get("label") or "Charge")[:65])
+        c.drawRightString(w - 50, y, str(it.get("amount") or ""))
+        y -= 15
+    y -= 8
+    c.line(50, y, w - 50, y)
+    y -= 18
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, y, f"Total Billed: {bill.get('amount_due') or '$0.00'}")
+    if bill.get("amount_paid"):
+        c.drawRightString(w - 50, y, f"Amount Paid: {bill['amount_paid']}")
+    y -= 18
+    if bill.get("dispute_status"):
+        c.setFont("Helvetica", 10)
+        c.drawString(50, y, f"Dispute / Hearing Status: {bill['dispute_status'].upper()}")
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+@router.get("/bills/{bill_id}/receipt.pdf")
+def download_staff_bill_pdf(bill_id: int, _: dict = Depends(_require_billing_staff)):
+    from fastapi.responses import Response
+    with pool.connection() as conn:
+        r = conn.execute(f"SELECT {_BILL_COLS} FROM municipal_bills WHERE id = %s", (bill_id,)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Bill not found")
+        bill = _row_to_bill(r, include_private=True)
+    pdf = _render_bill_pdf(bill)
+    return Response(content=pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{bill["reference_number"]}.pdf"'})
+
+
+@router.get("/public/bills/{reference_number}/receipt.pdf")
+def download_public_bill_pdf(reference_number: str):
+    from fastapi.responses import Response
+    with pool.connection() as conn:
+        r = conn.execute(f"SELECT {_BILL_COLS} FROM municipal_bills WHERE UPPER(reference_number) = UPPER(%s)", (reference_number.strip(),)).fetchone()
+        if not r:
+            raise HTTPException(status_code=404, detail="Bill not found")
+        bill = _row_to_bill(r, include_private=False)
+    pdf = _render_bill_pdf(bill)
+    return Response(content=pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{bill["reference_number"]}.pdf"'})

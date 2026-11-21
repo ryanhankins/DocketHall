@@ -3164,29 +3164,70 @@ function PayBillsPublicTab() {
               <tbody>
                 {results.map((b) => (
                   <tr key={b.id}>
-                    <td><strong>{b.reference_number}</strong></td>
+                    <td>
+                      <strong>{b.reference_number}</strong>
+                      {b.late_fee_applied && <div><span className="badge draft">Late Fee Added</span></div>}
+                      {b.dispute_status === 'contested' && <div><span className="badge draft">Hearing Requested</span></div>}
+                    </td>
                     <td>{b.bill_type}</td>
                     <td>{b.account_number || b.service_address || '—'}</td>
-                    <td>{b.description || '—'}</td>
+                    <td>
+                      <div>{b.description || '—'}</div>
+                      {Array.isArray(b.line_items) && b.line_items.length > 0 && (
+                        <div className="muted" style={{ fontSize: '.78rem' }}>
+                          {b.line_items.map((li) => `${li.label}${li.amount ? `: ${li.amount}` : ''}`).join(' · ')}
+                        </div>
+                      )}
+                    </td>
                     <td>{b.due_date ? formatDate(b.due_date) : '—'}</td>
-                    <td><strong>{b.amount_due}</strong></td>
+                    <td>
+                      <strong>{b.amount_due}</strong>
+                      {b.amount_paid && <div className="muted" style={{ fontSize: '.78rem' }}>Paid: {b.amount_paid}</div>}
+                    </td>
                     <td>
                       <span className={`badge ${b.payment_status === 'paid' ? 'active' : (b.payment_status === 'waived' ? 'draft' : 'disabled')}`}>
                         {b.payment_status}
                       </span>
                     </td>
                     <td>
-                      {b.payment_status === 'unpaid' ? (
-                        paymentsEnabled ? (
-                          <button type="button" className="btn sm primary" disabled={payingId === b.id} onClick={() => startPay(b)}>
-                            {payingId === b.id ? 'Redirecting…' : 'Pay Online'}
-                          </button>
-                        ) : (
-                          <span className="muted" style={{ fontSize: '.82rem' }}>Pay at City Hall</span>
-                        )
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
+                      <div className="actions">
+                        <a className="btn sm" href={`/api/payments/public/bills/${encodeURIComponent(b.reference_number)}/receipt.pdf`} target="_blank" rel="noreferrer">
+                          PDF
+                        </a>
+                        {b.payment_status === 'unpaid' && (
+                          <>
+                            {paymentsEnabled ? (
+                              <button type="button" className="btn sm primary" disabled={payingId === b.id} onClick={() => startPay(b)}>
+                                {payingId === b.id ? 'Redirecting…' : 'Pay Online'}
+                              </button>
+                            ) : (
+                              <span className="muted" style={{ fontSize: '.82rem' }}>Pay at City Hall</span>
+                            )}
+                            {b.bill_type === 'citation' && b.dispute_status !== 'contested' && (
+                              <button
+                                type="button"
+                                className="btn sm"
+                                onClick={async () => {
+                                  const reason = window.prompt(`Reason for contesting / requesting hearing on ${b.reference_number}:`);
+                                  if (!reason || !reason.trim()) return;
+                                  try {
+                                    const updated = await api('/api/payments/public/bills/contest', {
+                                      method: 'POST',
+                                      body: JSON.stringify({ reference_number: b.reference_number, reason: reason.trim() }),
+                                    });
+                                    setResults((prev) => (prev || []).map((x) => (x.id === b.id ? updated : x)));
+                                    setPayMsg(`Hearing/contest request submitted for ${b.reference_number}.`);
+                                  } catch (e2) {
+                                    setErr(e2.message || 'Failed to submit contest request.');
+                                  }
+                                }}
+                              >
+                                Contest
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
