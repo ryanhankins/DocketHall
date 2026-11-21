@@ -35,6 +35,14 @@ const BillingManagePage = React.lazy(() => import('./BillingManagePage.jsx'));
 const SlaEscalationPage = React.lazy(() => import('./SlaEscalationPage.jsx'));
 const BlogManagePage = React.lazy(() => import('../modules/blog/BlogManagePage.jsx'));
 
+function getWorkspaceRoute() {
+  const p = location.pathname || '';
+  if (p.startsWith('/app/')) {
+    return p.slice('/app/'.length).replace(/^\/+/, '') + (location.search || '');
+  }
+  return (location.hash || '').replace(/^#/, '');
+}
+
 export default function CoreShell() {
   const [me, setMe] = useState(null);
   const [modulesMeta, setModulesMeta] = useState([]);
@@ -43,7 +51,7 @@ export default function CoreShell() {
   const [branding, setBranding] = useState({ cityTitle: '', hasLogo: false, logoVer: Date.now() });
   const [backupStatus, setBackupStatus] = useState({ overdue: false, reminder_days: 0, days_since_backup: 0, last_backup_at: null });
   const [backlogDueCount, setBacklogDueCount] = useState(0);
-  const [hash, setHash] = useState(() => location.hash.replace(/^#/, ''));
+  const [hash, setHash] = useState(() => getWorkspaceRoute());
   const [menuFilter, setMenuFilter] = useState('');
   const [openSubmenus, setOpenSubmenus] = useState(() => {
     try {
@@ -116,9 +124,20 @@ export default function CoreShell() {
   }, []);
 
   useEffect(() => {
-    const onHashChange = () => setHash(location.hash.replace(/^#/, ''));
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    if (location.pathname === '/app' && location.hash) {
+      const clean = location.hash.replace(/^#/, '');
+      if (clean) {
+        history.replaceState(null, '', `/app/${clean}`);
+        setHash(clean);
+      }
+    }
+    const onRouteChange = () => setHash(getWorkspaceRoute());
+    window.addEventListener('popstate', onRouteChange);
+    window.addEventListener('hashchange', onRouteChange);
+    return () => {
+      window.removeEventListener('popstate', onRouteChange);
+      window.removeEventListener('hashchange', onRouteChange);
+    };
   }, []);
 
   const reloadModules = useCallback(async () => {
@@ -168,9 +187,11 @@ export default function CoreShell() {
   }, [pwOpen]);
 
   const navigate = useCallback((targetHash) => {
-    const clean = targetHash.startsWith('#') ? targetHash : `#${targetHash}`;
-    if (location.hash !== clean) history.pushState(null, '', clean);
-    setHash(clean.replace(/^#/, ''));
+    const clean = String(targetHash || '').replace(/^\/app\/?/, '').replace(/^#/, '');
+    const nextUrl = clean ? `/app/${clean}` : '/app';
+    const curUrl = `${location.pathname}${location.search}`;
+    if (curUrl !== nextUrl) history.pushState(null, '', nextUrl);
+    setHash(clean);
   }, []);
 
   const canManageSettings = hasPermission(me, 'settings.manage') || hasPermission(me, 'agendas.manage');
@@ -179,19 +200,20 @@ export default function CoreShell() {
 
   // Auto-open submenu when active route belongs to it
   useEffect(() => {
-    if (hash.startsWith('agendas') || hash === 'backlog' || hash === 'preferences-agenda' || hash === 'preferences') {
+    const routePath = hash.split('?')[0];
+    if (routePath.startsWith('agendas') || routePath === 'backlog' || routePath === 'preferences-agenda' || routePath === 'preferences') {
       setOpenSubmenus(prev => (prev['agenda-management'] ? prev : { ...prev, 'agenda-management': true }));
     }
-    if (hash.startsWith('permits-review') || hash === 'preferences-permits' || hash === 'permits-catalog-admin') {
+    if (routePath.startsWith('permits-review') || routePath === 'preferences-permits' || routePath === 'permits-catalog-admin') {
       setOpenSubmenus(prev => (prev['permits-staff'] ? prev : { ...prev, 'permits-staff': true }));
     }
-    if (hash.startsWith('complaints-manage') || hash === 'preferences-complaints') {
+    if (routePath.startsWith('complaints-manage') || routePath === 'preferences-complaints') {
       setOpenSubmenus(prev => (prev['complaints-staff'] ? prev : { ...prev, 'complaints-staff': true }));
     }
-    if (hash === 'calendar-manage' || hash === 'preferences-calendar') {
+    if (routePath === 'calendar-manage' || routePath === 'preferences-calendar') {
       setOpenSubmenus(prev => (prev['calendar-staff'] ? prev : { ...prev, 'calendar-staff': true }));
     }
-    if (['users', 'modules', 'preferences-general', 'blog-admin', 'integrations', 'audit', 'preferences-backup', 'billing', 'sla-rules'].includes(hash)) {
+    if (['users', 'modules', 'preferences-general', 'blog-admin', 'integrations', 'audit', 'preferences-backup', 'billing', 'sla-rules'].includes(routePath)) {
       setOpenSubmenus(prev => (prev['admin-section'] ? prev : { ...prev, 'admin-section': true }));
     }
   }, [hash]);
@@ -199,40 +221,41 @@ export default function CoreShell() {
   // Resolve active route
   const resolved = useMemo(() => {
     if (!me) return null;
-    if (hash === 'users' && isAdmin) {
+    const routePath = hash.split('?')[0];
+    if (routePath === 'users' && isAdmin) {
       return { component: UsersPage, props: { me, permissionsCatalog }, activeSection: 'users' };
     }
-    if (hash === 'modules' && isAdmin) {
+    if (routePath === 'modules' && isAdmin) {
       return { component: ModulesPage, props: { onModulesChanged: reloadModules }, activeSection: 'modules' };
     }
-    if (hash === 'integrations' && isAdmin) {
+    if (routePath === 'integrations' && isAdmin) {
       return { component: IntegrationsPage, props: {}, activeSection: 'integrations' };
     }
-    if (hash === 'audit' && isAdmin) {
+    if (routePath === 'audit' && isAdmin) {
       return { component: AuditLogPage, props: {}, activeSection: 'audit' };
     }
-    if (hash === 'preferences-general' && canManageSettings) {
+    if (routePath === 'preferences-general' && canManageSettings) {
       return {
         component: GeneralPrefsPage,
         props: { onBrandingChange: applyBranding },
         activeSection: 'preferences-general',
       };
     }
-    if (hash === 'blog-admin' && canManageBlog) {
+    if (routePath === 'blog-admin' && canManageBlog) {
       return {
         component: BlogManagePage,
         props: { initialTab: 'settings' },
         activeSection: 'blog-admin',
       };
     }
-    if (hash === 'sla-rules' && canManageSettings) {
+    if (routePath === 'sla-rules' && canManageSettings) {
       return {
         component: SlaEscalationPage,
         props: { onNavigate: navigate },
         activeSection: 'sla-rules',
       };
     }
-    if (hash === 'preferences-backup' && canManageSettings) {
+    if (routePath === 'preferences-backup' && canManageSettings) {
       return {
         component: BackupRestorePage,
         props: {
@@ -247,21 +270,21 @@ export default function CoreShell() {
         activeSection: 'preferences-backup',
       };
     }
-    if (hash === 'help' || hash === 'docs') {
+    if (routePath === 'help' || routePath === 'docs') {
       return {
         component: HelpDocsPage,
         props: { me },
         activeSection: 'help',
       };
     }
-    if (hash === 'my-account') {
+    if (routePath === 'my-account') {
       return {
         component: MyAccountPage,
         props: { me, onNavigate: navigate },
         activeSection: 'my-account',
       };
     }
-    if (hash === 'billing' && canManageSettings) {
+    if (routePath === 'billing' && canManageSettings) {
       return {
         component: BillingManagePage,
         props: {},
@@ -273,15 +296,17 @@ export default function CoreShell() {
         if (r.permission && !hasPermission(me, r.permission)) continue;
         const params = r.match(hash);
         if (params) {
-          const activeSection = hash.startsWith('agendas/')
+          const activeSection = routePath.startsWith('agendas/')
             ? 'agendas'
-            : (hash.startsWith('complaints-manage/')
+            : (routePath.startsWith('complaints-manage/')
                 ? 'complaints-manage'
-                : (hash.startsWith('permits-review/')
+                : (routePath.startsWith('permits-review/')
                     ? 'permits-review'
-                    : (hash === 'preferences'
-                        ? 'preferences-agenda'
-                        : (hash === 'permits-catalog-admin' ? 'preferences-permits' : hash))));
+                    : (routePath.startsWith('my-permits/')
+                        ? 'my-permits'
+                        : (routePath === 'preferences'
+                            ? 'preferences-agenda'
+                            : (routePath === 'permits-catalog-admin' ? 'preferences-permits' : routePath)))));
           return {
             component: r.component,
             props: {
@@ -314,7 +339,7 @@ export default function CoreShell() {
       if (!fallback) fallback = 'my-account';
     }
     if (fallback && hash !== fallback) {
-      history.replaceState(null, '', `#${fallback}`);
+      history.replaceState(null, '', `/app/${fallback}`);
       setHash(fallback);
     }
   }, [me, resolved, frontendMods, isAdmin, modulesMeta, hash]);

@@ -131,7 +131,7 @@ export default function FormsManagePage() {
     <section id="section-forms-manage">
       <div className="between" style={{ marginBottom: '1rem' }}>
         <h1 style={{ margin: 0 }}>Forms &amp; Opinion Polls</h1>
-        <a href="/#forms" target="_blank" rel="noreferrer" className="btn sm">View Public Forms &amp; Polls</a>
+        <a href="/forms" target="_blank" rel="noreferrer" className="btn sm">View Public Forms &amp; Polls</a>
       </div>
 
       <div className="tabs">

@@ -38,11 +38,20 @@ export function permitExpiryInfo(expiresAt) {
   return { label: `Expires ${expiresAt}`, cls: 'muted' };
 }
 
-export default function MyPermitsPage({ onNavigate }) {
+export default function MyPermitsPage({ onNavigate, initialId = null }) {
   const [permits, setPermits] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(initialId || null);
   const [paymentInfo, setPaymentInfo] = useState({ instructions: '', url: '' });
   const showToast = useToast();
+
+  useEffect(() => {
+    setSelectedId(initialId || null);
+  }, [initialId]);
+
+  const openPermit = useCallback((id) => {
+    setSelectedId(id || null);
+    onNavigate?.(id ? `my-permits/${id}` : 'my-permits');
+  }, [onNavigate]);
 
   const loadPermits = useCallback(async () => {
     const [list, cat] = await Promise.all([
@@ -72,7 +81,7 @@ export default function MyPermitsPage({ onNavigate }) {
           permit={selectedPermit}
           isManager={false}
           onUpdated={(updated) => setPermits(prev => prev.map(x => (x.id === updated.id ? updated : x)))}
-          onBack={() => setSelectedId(null)}
+          onBack={() => openPermit(null)}
         />
       </section>
     );
@@ -127,7 +136,7 @@ export default function MyPermitsPage({ onNavigate }) {
               {permits.map(p => (
                 <tr key={p.id}>
                   <td>
-                    <button type="button" className="link-btn" onClick={() => setSelectedId(p.id)}>
+                    <button type="button" className="link-btn" onClick={() => openPermit(p.id)}>
                       {p.permit_number}
                     </button>
                   </td>
@@ -147,7 +156,7 @@ export default function MyPermitsPage({ onNavigate }) {
                   </td>
                   <td>
                     <div className="actions">
-                      <button type="button" className="btn sm primary" onClick={() => setSelectedId(p.id)}>Open</button>
+                      <button type="button" className="btn sm primary" onClick={() => openPermit(p.id)}>Open</button>
                       <a className="btn sm" href={`/api/permits/${p.id}/pdf`} target="_blank" rel="noreferrer">PDF</a>
                       {(p.permit_kind === 'annual_license' || p.expires_at) && (p.status === 'issued' || p.status === 'closed') && (
                         <button
@@ -157,7 +166,7 @@ export default function MyPermitsPage({ onNavigate }) {
                             const renewed = await api(`/api/permits/${p.id}/renew`, { method: 'POST' });
                             showToast(`Renewal ${renewed.permit_number} submitted`, 'ok');
                             await loadPermits();
-                            setSelectedId(renewed.id);
+                            openPermit(renewed.id);
                           }}
                         >
                           Renew

@@ -67,7 +67,7 @@ function PublicPermitsPortal() {
   const s = catalog.settings || {};
 
   const applyHref = (typeId, useId) => {
-    const target = `/app#permits-apply?type=${typeId}&use=${useId}`;
+    const target = `/app/permits-apply?type=${typeId}&use=${useId}`;
     return me ? target : `/?register=1&next=${encodeURIComponent(target)}`;
   };
 
@@ -79,7 +79,7 @@ function PublicPermitsPortal() {
         {me ? (
           <>
             <span>Signed in as <strong>{me.username}</strong></span>
-            <a className="btn sm primary" href="/app#my-permits">My Permits</a>
+            <a className="btn sm primary" href="/app/my-permits">My Permits</a>
           </>
         ) : (
           <>

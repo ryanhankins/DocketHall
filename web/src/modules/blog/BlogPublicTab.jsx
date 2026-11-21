@@ -339,7 +339,7 @@ export default function BlogPublicTab({ me, initialPostSlug = '', onSlugChange }
                   + New Blog Post
                 </button>
               )}
-              <a href="/app#blog-manage" className="btn sm">Blog Workspace →</a>
+              <a href="/app/blog-manage" className="btn sm">Blog Workspace →</a>
             </div>
           </div>
         </div>

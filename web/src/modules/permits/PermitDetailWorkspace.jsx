@@ -214,7 +214,8 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                   prerequisite_permit_id: permit.id,
                 }));
               } catch {}
-              window.location.hash = '#permits-apply';
+              window.history.pushState(null, '', '/app/permits-apply');
+              window.dispatchEvent(new PopStateEvent('popstate'));
             }}
           >
             + Create Follow-Up Permit

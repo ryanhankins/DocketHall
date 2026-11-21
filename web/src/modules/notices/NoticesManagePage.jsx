@@ -148,7 +148,7 @@ export default function NoticesManagePage() {
     <section id="section-notices-manage">
       <div className="between" style={{ marginBottom: '1rem' }}>
         <h1 style={{ margin: 0 }}>News, Public Notices, Bids &amp; Jobs</h1>
-        <a href="/#notices" target="_blank" rel="noreferrer" className="btn sm">View Public Notices</a>
+        <a href="/notices" target="_blank" rel="noreferrer" className="btn sm">View Public Notices</a>
       </div>
 
       <div className="tabs">

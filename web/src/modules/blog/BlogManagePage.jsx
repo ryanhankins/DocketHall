@@ -393,7 +393,7 @@ export default function BlogManagePage({ initialTab = 'posts' }) {
         <h1 style={{ margin: 0 }}>Blog &amp; Community Articles</h1>
         <div className="actions">
           <a href="/api/blog/rss.xml" target="_blank" rel="noreferrer" className="btn sm">RSS Feed XML</a>
-          <a href="/#blog" target="_blank" rel="noreferrer" className="btn sm">View Public Blog</a>
+          <a href="/blog" target="_blank" rel="noreferrer" className="btn sm">View Public Blog</a>
         </div>
       </div>
 

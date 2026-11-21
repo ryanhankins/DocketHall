@@ -353,10 +353,10 @@ export default function MyAccountPage({ me, onNavigate }) {
               </button>
             )}
             {enabled.has('complaints') && (
-              <a className="btn sm" href="/#complaints">+ File 311 Request</a>
+              <a className="btn sm" href="/complaints">+ File 311 Request</a>
             )}
             {enabled.has('calendar') && (
-              <a className="btn sm" href="/#calendar">Reserve Facility</a>
+              <a className="btn sm" href="/calendar">Reserve Facility</a>
             )}
           </div>
         </div>
@@ -482,7 +482,7 @@ export default function MyAccountPage({ me, onNavigate }) {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '.5rem' }}>
             <h2 style={{ marginTop: 0 }}>My Facility Reservations ({reservations.length})</h2>
-            <a className="btn sm" href="/#calendar">Browse City Calendar →</a>
+            <a className="btn sm" href="/calendar">Browse City Calendar →</a>
           </div>
           {reservations.length === 0 ? (
             <p className="muted">
@@ -531,7 +531,7 @@ export default function MyAccountPage({ me, onNavigate }) {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '.5rem' }}>
             <h2 style={{ marginTop: 0 }}>My FOIA / Public Records Requests ({recordsRequests.length})</h2>
-            <a className="btn sm" href="/#records">Submit New Request →</a>
+            <a className="btn sm" href="/records">Submit New Request →</a>
           </div>
           {recordsRequests.length === 0 ? (
             <p className="muted">
@@ -587,7 +587,7 @@ export default function MyAccountPage({ me, onNavigate }) {
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '.5rem' }}>
             <h2 style={{ marginTop: 0 }}>My Utility Bills, Citations &amp; Fees ({bills.length})</h2>
-            <a className="btn sm" href="/#pay">Look Up by Account / Citation # →</a>
+            <a className="btn sm" href="/pay">Look Up by Account / Citation # →</a>
           </div>
           {bills.length === 0 ? (
             <p className="muted">
@@ -672,7 +672,7 @@ export default function MyAccountPage({ me, onNavigate }) {
             {subscriptions.length === 0 ? (
               <p className="muted">
                 No active email subscriptions{user.email ? ` for ${user.email}` : ''}.{' '}
-                <a href="/#notices">Subscribe to city alerts →</a>
+                <a href="/notices">Subscribe to city alerts →</a>
               </p>
             ) : (
               <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>

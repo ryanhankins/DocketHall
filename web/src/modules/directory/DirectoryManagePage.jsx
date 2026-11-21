@@ -217,7 +217,7 @@ export default function DirectoryManagePage() {
     <section id="section-directory-manage">
       <div className="between" style={{ marginBottom: '1rem' }}>
         <h1 style={{ margin: 0 }}>Directory, Local Resources &amp; FAQs</h1>
-        <a href="/#directory" target="_blank" rel="noreferrer" className="btn sm">View Public Directory</a>
+        <a href="/directory" target="_blank" rel="noreferrer" className="btn sm">View Public Directory</a>
       </div>
 
       <div className="tabs">

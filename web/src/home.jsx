@@ -226,7 +226,7 @@ function GlobalSearchBar({ onSelectTab }) {
   );
 }
 
-function PagesPublicTab() {
+function PagesPublicTab({ initialItemId = '', onItemChange }) {
   const [data, setData] = useState({ pages: [], quick_links: [] });
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
@@ -242,6 +242,19 @@ function PagesPublicTab() {
   }, [q]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    setExpandedId(initialItemId ? (Number(initialItemId) || null) : null);
+  }, [initialItemId]);
+
+  useEffect(() => {
+    if (!initialItemId) {
+      setOpenId(null);
+      return;
+    }
+    const match = data.pages.find((p) => p.slug === initialItemId || String(p.id) === String(initialItemId));
+    if (match) setOpenId(match.id);
+  }, [initialItemId, data.pages]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -305,7 +318,15 @@ function PagesPublicTab() {
                       <span className="badge draft" style={{ marginRight: '.45rem' }}>{p.category}</span>
                       <strong style={{ fontSize: '1.04rem' }}>{p.title}</strong>
                     </div>
-                    <button type="button" className="btn sm" onClick={() => setOpenId(isOpen ? null : p.id)}>
+                    <button
+                      type="button"
+                      className="btn sm"
+                      onClick={() => {
+                        const nextOpen = isOpen ? null : p.id;
+                        setOpenId(nextOpen);
+                        onItemChange?.(nextOpen ? (p.slug || String(p.id)) : '');
+                      }}
+                    >
                       {isOpen ? 'Collapse' : 'Read Page'}
                     </button>
                   </div>
@@ -325,10 +346,10 @@ function PagesPublicTab() {
   );
 }
 
-function FormsPublicTab() {
+function FormsPublicTab({ initialItemId = '', onItemChange }) {
   const [forms, setForms] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeFormId, setActiveFormId] = useState(null);
+  const [activeFormId, setActiveFormId] = useState(() => (initialItemId ? Number(initialItemId) || null : null));
   const [subName, setSubName] = useState('');
   const [subEmail, setSubEmail] = useState('');
   const [responses, setResponses] = useState({});
@@ -344,6 +365,10 @@ function FormsPublicTab() {
   }, []);
 
   useEffect(() => { loadForms(); }, [loadForms]);
+
+  useEffect(() => {
+    setActiveFormId(initialItemId ? (Number(initialItemId) || null) : null);
+  }, [initialItemId]);
 
   const activeForm = forms.find((f) => f.id === activeFormId) || null;
 
@@ -423,6 +448,7 @@ function FormsPublicTab() {
                       setActiveFormId(frm.id);
                       setResponses({});
                       setMsg({ text: '', isError: false });
+                      onItemChange?.(String(frm.id));
                     }}
                   >
                     {frm.form_kind === 'poll' ? 'Vote / View Poll' : 'Open Form'}
@@ -438,7 +464,7 @@ function FormsPublicTab() {
         <div className="card">
           <div className="between" style={{ marginBottom: '.65rem' }}>
             <h2 style={{ margin: 0 }}>{activeForm.title}</h2>
-            <button type="button" className="btn sm" onClick={() => setActiveFormId(null)}>Close</button>
+            <button type="button" className="btn sm" onClick={() => { setActiveFormId(null); onItemChange?.(''); }}>Close</button>
           </div>
           {activeForm.description && <p className="muted" style={{ marginTop: 0 }}>{activeForm.description}</p>}
 
@@ -524,6 +550,10 @@ function DirectoryPublicTab({ features = {} }) {
   }, [q, resourceCat]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    setExpandedId(initialItemId ? (Number(initialItemId) || null) : null);
+  }, [initialItemId]);
 
   const elected = data.contacts.filter((c) => c.is_elected);
   const staff = data.contacts.filter((c) => !c.is_elected);
@@ -735,12 +765,12 @@ function DirectoryPublicTab({ features = {} }) {
   );
 }
 
-function NoticesPublicTab({ features = {} }) {
+function NoticesPublicTab({ features = {}, initialItemId = '', onItemChange }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [cat, setCat] = useState('');
   const [q, setQ] = useState('');
-  const [expandedId, setExpandedId] = useState(null);
+  const [expandedId, setExpandedId] = useState(() => (initialItemId ? Number(initialItemId) || null : null));
   const [respondId, setRespondId] = useState(null);
   const [respForm, setRespForm] = useState({ applicant_name: '', applicant_email: '', applicant_phone: '', organization: '', cover_note: '' });
   const [respMsg, setRespMsg] = useState('');
@@ -758,6 +788,10 @@ function NoticesPublicTab({ features = {} }) {
   }, [cat, q]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    setExpandedId(initialItemId ? (Number(initialItemId) || null) : null);
+  }, [initialItemId]);
 
   const catLabels = {
     news: 'City News',
@@ -828,7 +862,11 @@ function NoticesPublicTab({ features = {} }) {
                       <button
                         type="button"
                         className="btn sm"
-                        onClick={() => setExpandedId(isOpen ? null : n.id)}
+                        onClick={() => {
+                          const nextId = isOpen ? null : n.id;
+                          setExpandedId(nextId);
+                          onItemChange?.(nextId ? String(nextId) : '');
+                        }}
                       >
                         {isOpen ? 'Hide Details' : 'Read Full Details'}
                       </button>
@@ -1203,7 +1241,7 @@ function toEmbedUrl(raw, startSeconds = 0) {
   return null;
 }
 
-function AgendasPublicTab({ me, onRequireAuth }) {
+function AgendasPublicTab({ me, onRequireAuth, initialItemId = '', onItemChange }) {
   const [activeMedia, setActiveMedia] = useState(null);
   const [mediaStartSec, setMediaStartSec] = useState(0);
   const [agendas, setAgendas] = useState([]);
@@ -1220,7 +1258,7 @@ function AgendasPublicTab({ me, onRequireAuth }) {
   const [commentMsg, setCommentMsg] = useState('');
   const [commentErr, setCommentErr] = useState('');
 
-  async function openAgendaDetail(agendaId) {
+  const openAgendaDetail = useCallback(async (agendaId) => {
     setSelectedAgendaId(agendaId);
     setDetailLoading(true);
     setCommentErr('');
@@ -1234,7 +1272,16 @@ function AgendasPublicTab({ me, onRequireAuth }) {
     } finally {
       setDetailLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    const idNum = initialItemId ? Number(initialItemId) : null;
+    if (idNum && idNum !== selectedAgendaId) {
+      openAgendaDetail(idNum);
+    } else if (!idNum && selectedAgendaId) {
+      setSelectedAgendaId(null);
+    }
+  }, [initialItemId, openAgendaDetail, selectedAgendaId]);
 
   function jumpToTimestamp(agendaObj, tsRaw) {
     setMediaStartSec(parseTimestampSeconds(tsRaw));
@@ -1380,7 +1427,15 @@ function AgendasPublicTab({ me, onRequireAuth }) {
                     <button
                       type="button"
                       className="btn sm"
-                      onClick={() => (selectedAgendaId === a.id ? setSelectedAgendaId(null) : openAgendaDetail(a.id))}
+                      onClick={() => {
+                        if (selectedAgendaId === a.id) {
+                          setSelectedAgendaId(null);
+                          onItemChange?.('');
+                        } else {
+                          openAgendaDetail(a.id);
+                          onItemChange?.(String(a.id));
+                        }
+                      }}
                     >
                       {selectedAgendaId === a.id ? 'Hide Items' : 'Items & Comments'}
                     </button>
@@ -1429,7 +1484,7 @@ function AgendasPublicTab({ me, onRequireAuth }) {
         <div style={{ marginTop: '1rem', padding: '1rem', border: '1px solid #cbd5e1', borderRadius: 8, background: '#fff' }}>
           <div className="between" style={{ marginBottom: '.75rem', flexWrap: 'wrap', gap: '.5rem' }}>
             <strong>{agendaDetail ? `${agendaDetail.title} — Agenda Items & Public Comment` : 'Agenda Details'}</strong>
-            <button type="button" className="btn sm" onClick={() => setSelectedAgendaId(null)}>Close</button>
+            <button type="button" className="btn sm" onClick={() => { setSelectedAgendaId(null); onItemChange?.(''); }}>Close</button>
           </div>
           {detailLoading ? (
             <p className="muted">Loading agenda items…</p>
@@ -1838,7 +1893,7 @@ function RecordsPublicTab({ features = {} }) {
   );
 }
 
-function ComplaintsPublicTab({ me, onRequireAuth, features = {} }) {
+function ComplaintsPublicTab({ me, onRequireAuth, features = {}, initialItemId = '', onItemChange }) {
   const [subView, setSubView] = useState('log'); // 'log' | 'file' | '311'
   const [woForm, setWoForm] = useState({ category: 'Pothole / Street', location: '', description: '', reporter_name: '', reporter_email: '' });
   const [woDone, setWoDone] = useState(null);
@@ -1883,6 +1938,15 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {} }) {
   useEffect(() => {
     loadLog();
   }, [loadLog]);
+
+  useEffect(() => {
+    if (!initialItemId) {
+      setSelected(null);
+      return;
+    }
+    const match = items.find((c) => c.complaint_number === initialItemId || String(c.id) === String(initialItemId));
+    if (match) setSelected(match);
+  }, [initialItemId, items]);
 
   async function handleFileComplaint(e) {
     e.preventDefault();
@@ -2161,9 +2225,24 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {} }) {
                   </thead>
                   <tbody>
                     {items.map((c) => (
-                      <tr key={c.id} onClick={() => setSelected(c)} style={{ cursor: 'pointer', background: selected?.id === c.id ? '#eff6ff' : 'transparent' }}>
+                      <tr
+                        key={c.id}
+                        onClick={() => {
+                          setSelected(c);
+                          onItemChange?.(c.complaint_number || String(c.id));
+                        }}
+                        style={{ cursor: 'pointer', background: selected?.id === c.id ? '#eff6ff' : 'transparent' }}
+                      >
                         <td style={{ whiteSpace: 'nowrap', fontWeight: 500 }}>
-                          <button type="button" className="link-btn" onClick={(e) => { e.stopPropagation(); setSelected(c); }}>
+                          <button
+                            type="button"
+                            className="link-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelected(c);
+                              onItemChange?.(c.complaint_number || String(c.id));
+                            }}
+                          >
                             {c.complaint_number}
                           </button>
                         </td>
@@ -2182,7 +2261,7 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {} }) {
               <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: 12, display: 'grid', gap: 8 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h3 style={{ margin: 0 }}>{selected.complaint_number}</h3>
-                  <button type="button" className="btn sm" onClick={() => setSelected(null)}>Close</button>
+                  <button type="button" className="btn sm" onClick={() => { setSelected(null); onItemChange?.(''); }}>Close</button>
                 </div>
                 <div><StatusBadge status={selected.status} /></div>
                 <div><strong>Property:</strong> {selected.subject_property_address || '—'}</div>
@@ -3296,7 +3375,7 @@ function LatestBlogPreviewCard({ enabled, limit = 3, styleMode = 'cards', headin
               </div>
               <h3 style={{ margin: '0 0 .45rem', fontSize: '1.22rem' }}>
                 <a
-                  href={`#blog/${encodeURIComponent(p.slug)}`}
+                  href={`/blog/${encodeURIComponent(p.slug)}`}
                   onClick={(e) => {
                     e.preventDefault();
                     onOpenPost(p.slug);
@@ -3399,14 +3478,25 @@ function isPublicTabAllowed(tabId, enabledList, publicFeatures = {}) {
 }
 
 
-function parsePublicHash(rawHash) {
+function parsePublicLocation(pathname, rawHash) {
+  const pathClean = (pathname || '/').replace(/^\/+|\/+$/g, '');
+  if (pathClean && pathClean !== 'index.html') {
+    const slashIdx = pathClean.indexOf('/');
+    if (slashIdx === -1) return { tab: pathClean, slug: '', fromHash: false };
+    return {
+      tab: pathClean.slice(0, slashIdx),
+      slug: decodeURIComponent(pathClean.slice(slashIdx + 1)),
+      fromHash: false,
+    };
+  }
   const clean = (rawHash || '').replace(/^#/, '');
-  if (!clean) return { tab: 'overview', slug: '' };
+  if (!clean) return { tab: 'overview', slug: '', fromHash: false };
   const slashIdx = clean.indexOf('/');
-  if (slashIdx === -1) return { tab: clean, slug: '' };
+  if (slashIdx === -1) return { tab: clean, slug: '', fromHash: true };
   return {
     tab: clean.slice(0, slashIdx),
     slug: decodeURIComponent(clean.slice(slashIdx + 1)),
+    fromHash: true,
   };
 }
 
@@ -3425,7 +3515,7 @@ function PublicHomePage() {
   });
   const [me, setMe] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
-  const [blogPostSlug, setBlogPostSlug] = useState('');
+  const [activeItemSlug, setActiveItemSlug] = useState('');
   const [homeEditOpen, setHomeEditOpen] = useState(false);
   const [homeHeadingDraft, setHomeHeadingDraft] = useState('');
   const [homeIntroDraft, setHomeIntroDraft] = useState('');
@@ -3474,31 +3564,41 @@ function PublicHomePage() {
         const feats = d && typeof d.features === 'object' && d.features ? d.features : {};
         setEnabledModules(list);
         setPublicFeatures(feats);
-        const parsed = parsePublicHash(location.hash);
+        const parsed = parsePublicLocation(location.pathname, location.hash);
         if (isPublicTabAllowed(parsed.tab, list, feats)) {
           setActiveTab(parsed.tab);
-          setBlogPostSlug(parsed.tab === 'blog' ? parsed.slug : '');
+          setActiveItemSlug(parsed.slug || '');
+          if (parsed.fromHash) {
+            const cleanUrl = parsed.tab === 'overview'
+              ? '/'
+              : (parsed.slug ? `/${parsed.tab}/${encodeURIComponent(parsed.slug)}` : `/${parsed.tab}`);
+            history.replaceState(null, '', cleanUrl);
+          }
         } else {
           setActiveTab('overview');
-          setBlogPostSlug('');
+          setActiveItemSlug('');
         }
       })
       .catch(() => { setEnabledModules([]); setPublicFeatures({}); });
   }, [params]);
 
   useEffect(() => {
-    const onHash = () => {
-      const parsed = parsePublicHash(location.hash);
+    const onRoute = () => {
+      const parsed = parsePublicLocation(location.pathname, location.hash);
       if (!parsed.tab || parsed.tab === 'overview') {
         setActiveTab('overview');
-        setBlogPostSlug('');
+        setActiveItemSlug('');
       } else if (isPublicTabAllowed(parsed.tab, enabledModules, publicFeatures)) {
         setActiveTab(parsed.tab);
-        setBlogPostSlug(parsed.tab === 'blog' ? parsed.slug : '');
+        setActiveItemSlug(parsed.slug || '');
       }
     };
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
+    window.addEventListener('popstate', onRoute);
+    window.addEventListener('hashchange', onRoute);
+    return () => {
+      window.removeEventListener('popstate', onRoute);
+      window.removeEventListener('hashchange', onRoute);
+    };
   }, [enabledModules, publicFeatures]);
 
   const visibleTabs = useMemo(() => {
@@ -3545,12 +3645,12 @@ function PublicHomePage() {
 
   function selectTab(tabId, slug = '') {
     setActiveTab(tabId);
-    setBlogPostSlug(tabId === 'blog' ? (slug || '') : '');
-    const targetHash = tabId === 'overview'
-      ? '#overview'
-      : (tabId === 'blog' && slug ? `#blog/${encodeURIComponent(slug)}` : `#${tabId}`);
-    if (location.hash !== targetHash) {
-      history.pushState(null, '', targetHash);
+    setActiveItemSlug(slug || '');
+    const targetPath = tabId === 'overview'
+      ? '/'
+      : (slug ? `/${tabId}/${encodeURIComponent(slug)}` : `/${tabId}`);
+    if (location.pathname !== targetPath || location.hash) {
+      history.pushState(null, '', targetPath);
     }
   }
 
@@ -3781,7 +3881,7 @@ function PublicHomePage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             <div>
               <a
-                href="#overview"
+                href="/"
                 onClick={(e) => {
                   e.preventDefault();
                   selectTab('overview');
@@ -3791,23 +3891,54 @@ function PublicHomePage() {
                 ← All Public Services
               </a>
             </div>
-            {activeTab === 'agendas' && <AgendasPublicTab me={me} onRequireAuth={openAuth} />}
+            {activeTab === 'agendas' && (
+              <AgendasPublicTab
+                me={me}
+                onRequireAuth={openAuth}
+                initialItemId={activeItemSlug}
+                onItemChange={(id) => selectTab('agendas', id)}
+              />
+            )}
             {activeTab === 'permits' && <PermitsPublicTab me={me} onRequireAuth={openAuth} />}
             {activeTab === 'codification' && <CodePublicTab branding={branding} />}
             {activeTab === 'records' && <RecordsPublicTab features={publicFeatures.records || {}} />}
-            {activeTab === 'complaints' && <ComplaintsPublicTab me={me} onRequireAuth={openAuth} features={publicFeatures.complaints || {}} />}
+            {activeTab === 'complaints' && (
+              <ComplaintsPublicTab
+                me={me}
+                onRequireAuth={openAuth}
+                features={publicFeatures.complaints || {}}
+                initialItemId={activeItemSlug}
+                onItemChange={(id) => selectTab('complaints', id)}
+              />
+            )}
             {activeTab === 'calendar' && <CalendarPublicTab features={publicFeatures.calendar || {}} />}
-            {activeTab === 'notices' && <NoticesPublicTab features={publicFeatures.notices || {}} />}
+            {activeTab === 'notices' && (
+              <NoticesPublicTab
+                features={publicFeatures.notices || {}}
+                initialItemId={activeItemSlug}
+                onItemChange={(id) => selectTab('notices', id)}
+              />
+            )}
             {activeTab === 'blog' && (
               <BlogPublicTab
                 me={me}
-                initialPostSlug={blogPostSlug}
+                initialPostSlug={activeItemSlug}
                 onSlugChange={(slug) => selectTab('blog', slug)}
               />
             )}
             {activeTab === 'directory' && <DirectoryPublicTab features={publicFeatures.directory || {}} />}
-            {activeTab === 'forms' && <FormsPublicTab />}
-            {activeTab === 'pages' && <PagesPublicTab />}
+            {activeTab === 'forms' && (
+              <FormsPublicTab
+                initialItemId={activeItemSlug}
+                onItemChange={(id) => selectTab('forms', id)}
+              />
+            )}
+            {activeTab === 'pages' && (
+              <PagesPublicTab
+                initialItemId={activeItemSlug}
+                onItemChange={(id) => selectTab('pages', id)}
+              />
+            )}
             {activeTab === 'pay' && <PayBillsPublicTab />}
             {activeTab === 'utilities' && <PayBillsPublicTab billType="utility" />}
             {activeTab === 'citations' && <PayBillsPublicTab billType="citation" />}

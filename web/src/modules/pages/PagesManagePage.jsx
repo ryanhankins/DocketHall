@@ -128,7 +128,7 @@ export default function PagesManagePage() {
     <section id="section-pages-manage">
       <div className="between" style={{ marginBottom: '1rem' }}>
         <h1 style={{ margin: 0 }}>City Info Pages &amp; Quick Links</h1>
-        <a href="/#pages" target="_blank" rel="noreferrer" className="btn sm">View Public Pages &amp; Links</a>
+        <a href="/pages" target="_blank" rel="noreferrer" className="btn sm">View Public Pages &amp; Links</a>
       </div>
 
       <div className="tabs">
