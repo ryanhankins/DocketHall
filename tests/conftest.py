@@ -39,7 +39,7 @@ def test_storage_dir():
     """Isolated temporary storage directory for local object storage tests."""
     with tempfile.TemporaryDirectory(prefix="dockethall_test_storage_") as tmpdir:
         os.environ["STORAGE_BACKEND"] = "local"
-        os.environ["STORAGE_LOCAL_DIR"] = tmpdir
+        os.environ["LOCAL_RECORDS_DIR"] = tmpdir
         yield Path(tmpdir)
 
 
