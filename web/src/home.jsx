@@ -2708,6 +2708,176 @@ function CalendarPublicTab({ features = {} }) {
 }
 
 
+function TransparencyPublicTab() {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    fetch('/api/public/performance')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setData(d))
+      .catch(() => setData(null))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return <div className="card"><p className="muted">Loading public performance dashboard…</p></div>;
+  }
+  if (!data) {
+    return <div className="card"><p className="muted">Performance metrics are currently unavailable.</p></div>;
+  }
+
+  const s = data.summary || {};
+  const foia = s.foia || {};
+  const compList = data.complaints_by_category || [];
+  const permList = data.permits_by_type || [];
+  const foiaList = data.foia_by_department || [];
+  const maxCompDays = Math.max(1, ...compList.map((c) => Number(c.avg_resolution_days || 0)));
+  const maxPermDays = Math.max(1, ...permList.map((p) => Number(p.avg_turnaround_days || 0)));
+
+  return (
+    <div style={{ display: 'grid', gap: '1rem' }}>
+      <div className="card" style={{ marginBottom: 0 }}>
+        <div className="between" style={{ flexWrap: 'wrap', gap: '.65rem', marginBottom: '1rem' }}>
+          <div>
+            <h2 style={{ margin: 0 }}>Public Transparency &amp; Performance Dashboard</h2>
+            <p className="muted" style={{ margin: '.2rem 0 0' }}>
+              Anonymized municipal response times, permitting turnaround, and FOIA fulfillment compliance.
+            </p>
+          </div>
+          <div className="actions">
+            <a className="btn sm" href="/api/public/performance?download=1" download="dockethall-performance-metrics.json">
+              Export Open Data (JSON)
+            </a>
+            <a className="btn sm primary" href="/api/public/performance.csv" download="dockethall-performance-metrics.csv">
+              Export Open Data (CSV)
+            </a>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '.75rem' }}>
+          <div style={{ padding: '.8rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#f8fafc' }}>
+            <div className="muted" style={{ fontSize: '.8rem' }}>311 / Code Avg Resolution</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--cd-primary)' }}>
+              {s.complaints_avg_resolution_days != null ? `${s.complaints_avg_resolution_days} days` : '—'}
+            </div>
+          </div>
+          <div style={{ padding: '.8rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#f8fafc' }}>
+            <div className="muted" style={{ fontSize: '.8rem' }}>Permit Avg Turnaround</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--cd-primary)' }}>
+              {s.permits_avg_turnaround_days != null ? `${s.permits_avg_turnaround_days} days` : '—'}
+            </div>
+          </div>
+          <div style={{ padding: '.8rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#f8fafc' }}>
+            <div className="muted" style={{ fontSize: '.8rem' }}>FOIA On-Time Compliance</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--cd-primary)' }}>
+              {foia.compliance_rate_pct != null ? `${foia.compliance_rate_pct}%` : '—'}
+            </div>
+            <div className="muted" style={{ fontSize: '.78rem' }}>
+              {foia.on_time_count || 0} of {foia.fulfilled_count || 0} fulfilled on time
+            </div>
+          </div>
+          <div style={{ padding: '.8rem', border: '1px solid #e2e8f0', borderRadius: 8, background: '#f8fafc' }}>
+            <div className="muted" style={{ fontSize: '.8rem' }}>FOIA Avg Fulfillment</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--cd-primary)' }}>
+              {foia.avg_fulfillment_days != null ? `${foia.avg_fulfillment_days} days` : '—'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 0 }}>
+        <h3 style={{ marginTop: 0 }}>311 &amp; Code Response Time by Category</h3>
+        {!compList.length ? (
+          <p className="muted" style={{ margin: 0 }}>No resolved 311/code cases recorded yet.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr><th>Category</th><th>Total Cases</th><th>Resolved</th><th>Avg Resolution Time</th></tr>
+            </thead>
+            <tbody>
+              {compList.map((c) => (
+                <tr key={c.category}>
+                  <td><strong>{c.category}</strong></td>
+                  <td>{c.total_cases}</td>
+                  <td>{c.resolved_cases}</td>
+                  <td style={{ minWidth: 180 }}>
+                    {c.avg_resolution_days != null ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>
+                        <div style={{ flex: 1, height: 8, background: '#e2e8f0', borderRadius: 4, overflow: 'hidden' }}>
+                          <div style={{ width: `${Math.min(100, (c.avg_resolution_days / maxCompDays) * 100)}%`, height: '100%', background: 'var(--cd-primary)' }} />
+                        </div>
+                        <span style={{ fontSize: '.85rem', fontWeight: 600 }}>{c.avg_resolution_days}d</span>
+                      </div>
+                    ) : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="card" style={{ marginBottom: 0 }}>
+        <h3 style={{ marginTop: 0 }}>Permit Turnaround Times by Type</h3>
+        {!permList.length ? (
+          <p className="muted" style={{ margin: 0 }}>No permit applications recorded yet.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr><th>Permit Type</th><th>Applications</th><th>Approved / Issued</th><th>Avg Turnaround</th></tr>
+            </thead>
+            <tbody>
+              {permList.map((p) => (
+                <tr key={p.permit_type}>
+                  <td><strong>{p.permit_type}</strong></td>
+                  <td>{p.total_applications}</td>
+                  <td>{p.issued_count}</td>
+                  <td style={{ minWidth: 180 }}>
+                    {p.avg_turnaround_days != null ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>
+                        <div style={{ flex: 1, height: 8, background: '#e2e8f0', borderRadius: 4, overflow: 'hidden' }}>
+                          <div style={{ width: `${Math.min(100, (p.avg_turnaround_days / maxPermDays) * 100)}%`, height: '100%', background: 'var(--cd-primary)' }} />
+                        </div>
+                        <span style={{ fontSize: '.85rem', fontWeight: 600 }}>{p.avg_turnaround_days}d</span>
+                      </div>
+                    ) : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="card" style={{ marginBottom: 0 }}>
+        <h3 style={{ marginTop: 0 }}>FOIA Fulfillment Compliance by Department</h3>
+        {!foiaList.length ? (
+          <p className="muted" style={{ margin: 0 }}>No FOIA requests recorded yet.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr><th>Department</th><th>Total Requests</th><th>Fulfilled</th><th>On-Time Rate</th><th>Avg Days</th></tr>
+            </thead>
+            <tbody>
+              {foiaList.map((f) => (
+                <tr key={f.department}>
+                  <td><strong>{f.department}</strong></td>
+                  <td>{f.total_requests}</td>
+                  <td>{f.fulfilled_count}</td>
+                  <td>{f.compliance_rate_pct != null ? <span className="badge final">{f.compliance_rate_pct}%</span> : '—'}</td>
+                  <td>{f.avg_fulfillment_days != null ? `${f.avg_fulfillment_days}d` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TransparencySnapshotBar({ onSelectTab }) {
   const [metrics, setMetrics] = useState([]);
   useEffect(() => {
@@ -2719,9 +2889,14 @@ function TransparencySnapshotBar({ onSelectTab }) {
   if (!metrics.length) return null;
   return (
     <div className="card" style={{ marginBottom: 0 }}>
-      <div className="between" style={{ marginBottom: '.65rem' }}>
-        <strong style={{ fontSize: '.95rem' }}>City Transparency Snapshot</strong>
-        <span className="muted" style={{ fontSize: '.8rem' }}>Live public counts (YTD &amp; upcoming)</span>
+      <div className="between" style={{ marginBottom: '.65rem', flexWrap: 'wrap', gap: '.5rem' }}>
+        <div>
+          <strong style={{ fontSize: '.95rem' }}>City Transparency Snapshot</strong>
+          <span className="muted" style={{ fontSize: '.8rem', marginLeft: '.5rem' }}>Live public counts (YTD &amp; upcoming)</span>
+        </div>
+        <button type="button" className="btn sm" onClick={() => onSelectTab('transparency')}>
+          Full Performance Dashboard →
+        </button>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '.6rem' }}>
         {metrics.map((m) => (
@@ -3298,6 +3473,7 @@ function PublicHomePage() {
             {activeTab === 'forms' && <FormsPublicTab />}
             {activeTab === 'pages' && <PagesPublicTab />}
             {activeTab === 'pay' && <PayBillsPublicTab />}
+            {activeTab === 'transparency' && <TransparencyPublicTab />}
           </div>
         )}
       </main>

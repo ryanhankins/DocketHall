@@ -13,10 +13,13 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Global Public Portal search across all enabled modules."""
-from datetime import date
+"""Global Public Portal search and performance transparency across all enabled modules."""
+import csv
+from datetime import date, datetime, timezone
+import io
 
 from fastapi import APIRouter
+from fastapi.responses import Response
 
 from .db import pool
 from .registry import get_enabled_module_ids
@@ -293,3 +296,184 @@ def public_transparency_snapshot():
             except Exception:
                 pass
     return {"metrics": metrics}
+
+
+def _build_performance_metrics() -> dict:
+    enabled = set(get_enabled_module_ids())
+    complaints_by_cat: list[dict] = []
+    permits_by_type: list[dict] = []
+    foia_by_dept: list[dict] = []
+    foia_summary = {
+        "total_requests": 0,
+        "fulfilled_count": 0,
+        "on_time_count": 0,
+        "compliance_rate_pct": None,
+        "avg_fulfillment_days": None,
+    }
+    overall_311_avg = None
+    overall_permit_avg = None
+
+    with pool.connection() as conn:
+        if "complaints" in enabled:
+            try:
+                rows = conn.execute(
+                    "SELECT COALESCE(NULLIF(TRIM(ordinance_section), ''), 'General 311 / Code') AS cat, "
+                    "       COUNT(*), "
+                    "       COUNT(*) FILTER (WHERE status IN ('resolved', 'dismissed')), "
+                    "       ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(resolved_at, updated_at) - created_at)) / 86400.0) "
+                    "             FILTER (WHERE status IN ('resolved', 'dismissed'))::numeric, 1) "
+                    "FROM complaints "
+                    "GROUP BY 1 ORDER BY 2 DESC, 1 ASC"
+                ).fetchall()
+                for r in rows:
+                    complaints_by_cat.append({
+                        "category": r[0],
+                        "total_cases": int(r[1]),
+                        "resolved_cases": int(r[2]),
+                        "avg_resolution_days": float(r[3]) if r[3] is not None else None,
+                    })
+                ov = conn.execute(
+                    "SELECT ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(resolved_at, updated_at) - created_at)) / 86400.0)::numeric, 1) "
+                    "FROM complaints WHERE status IN ('resolved', 'dismissed')"
+                ).fetchone()
+                if ov and ov[0] is not None:
+                    overall_311_avg = float(ov[0])
+            except Exception:
+                pass
+
+        if "permits" in enabled:
+            try:
+                rows = conn.execute(
+                    "SELECT COALESCE(NULLIF(TRIM(permit_type_name), ''), 'General Permit') AS ptype, "
+                    "       COUNT(*), "
+                    "       COUNT(*) FILTER (WHERE status IN ('approved', 'issued', 'closed')), "
+                    "       ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(issued_at, closed_at, updated_at) - created_at)) / 86400.0) "
+                    "             FILTER (WHERE status IN ('approved', 'issued', 'closed'))::numeric, 1) "
+                    "FROM permits "
+                    "GROUP BY 1 ORDER BY 2 DESC, 1 ASC"
+                ).fetchall()
+                for r in rows:
+                    permits_by_type.append({
+                        "permit_type": r[0],
+                        "total_applications": int(r[1]),
+                        "issued_count": int(r[2]),
+                        "avg_turnaround_days": float(r[3]) if r[3] is not None else None,
+                    })
+                ov = conn.execute(
+                    "SELECT ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(issued_at, closed_at, updated_at) - created_at)) / 86400.0)::numeric, 1) "
+                    "FROM permits WHERE status IN ('approved', 'issued', 'closed')"
+                ).fetchone()
+                if ov and ov[0] is not None:
+                    overall_permit_avg = float(ov[0])
+            except Exception:
+                pass
+
+        if "records" in enabled:
+            try:
+                rows = conn.execute(
+                    "SELECT COALESCE(NULLIF(TRIM(department), ''), 'City Clerk') AS dept, "
+                    "       COUNT(*), "
+                    "       COUNT(*) FILTER (WHERE status IN ('fulfilled', 'closed', 'ready')), "
+                    "       COUNT(*) FILTER (WHERE status IN ('fulfilled', 'closed', 'ready') "
+                    "             AND (due_date = '' OR COALESCE(fulfilled_at, updated_at)::date <= NULLIF(due_date, '')::date)), "
+                    "       ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(fulfilled_at, updated_at) - created_at)) / 86400.0) "
+                    "             FILTER (WHERE status IN ('fulfilled', 'closed', 'ready'))::numeric, 1) "
+                    "FROM public_records_requests "
+                    "GROUP BY 1 ORDER BY 2 DESC, 1 ASC"
+                ).fetchall()
+                tot_req = 0
+                tot_ful = 0
+                tot_on = 0
+                for r in rows:
+                    t_c, f_c, o_c = int(r[1]), int(r[2]), int(r[3])
+                    tot_req += t_c
+                    tot_ful += f_c
+                    tot_on += o_c
+                    foia_by_dept.append({
+                        "department": r[0],
+                        "total_requests": t_c,
+                        "fulfilled_count": f_c,
+                        "on_time_count": o_c,
+                        "compliance_rate_pct": round((o_c / f_c) * 100, 1) if f_c > 0 else None,
+                        "avg_fulfillment_days": float(r[4]) if r[4] is not None else None,
+                    })
+                ov_f = conn.execute(
+                    "SELECT ROUND(AVG(EXTRACT(EPOCH FROM (COALESCE(fulfilled_at, updated_at) - created_at)) / 86400.0)::numeric, 1) "
+                    "FROM public_records_requests WHERE status IN ('fulfilled', 'closed', 'ready')"
+                ).fetchone()
+                foia_summary = {
+                    "total_requests": tot_req,
+                    "fulfilled_count": tot_ful,
+                    "on_time_count": tot_on,
+                    "compliance_rate_pct": round((tot_on / tot_ful) * 100, 1) if tot_ful > 0 else None,
+                    "avg_fulfillment_days": float(ov_f[0]) if ov_f and ov_f[0] is not None else None,
+                }
+            except Exception:
+                pass
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "summary": {
+            "complaints_avg_resolution_days": overall_311_avg,
+            "permits_avg_turnaround_days": overall_permit_avg,
+            "foia": foia_summary,
+        },
+        "complaints_by_category": complaints_by_cat,
+        "permits_by_type": permits_by_type,
+        "foia_by_department": foia_by_dept,
+    }
+
+
+@router.get("/performance")
+def public_performance_dashboard(download: int = 0):
+    """Return anonymized public performance metrics (311 response times, permit turnaround, FOIA compliance)."""
+    data = _build_performance_metrics()
+    if download:
+        return Response(
+            content=io.StringIO(__import__("json").dumps(data, indent=2)).getvalue(),
+            media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="dockethall-performance-metrics.json"'},
+        )
+    return data
+
+
+@router.get("/performance.csv")
+def public_performance_csv():
+    """Export public performance metrics as an open-data CSV file."""
+    data = _build_performance_metrics()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Dataset", "Group / Category", "Total", "Completed / Resolved", "On-Time / Rate", "Avg Days"])
+    for c in data["complaints_by_category"]:
+        w.writerow([
+            "311 & Code Enforcement",
+            c["category"],
+            c["total_cases"],
+            c["resolved_cases"],
+            "",
+            c["avg_resolution_days"] if c["avg_resolution_days"] is not None else "",
+        ])
+    for p in data["permits_by_type"]:
+        w.writerow([
+            "Permit Turnaround",
+            p["permit_type"],
+            p["total_applications"],
+            p["issued_count"],
+            "",
+            p["avg_turnaround_days"] if p["avg_turnaround_days"] is not None else "",
+        ])
+    for f in data["foia_by_department"]:
+        rate = f"{f['compliance_rate_pct']}%" if f["compliance_rate_pct"] is not None else ""
+        w.writerow([
+            "FOIA Compliance",
+            f["department"],
+            f["total_requests"],
+            f["fulfilled_count"],
+            rate,
+            f["avg_fulfillment_days"] if f["avg_fulfillment_days"] is not None else "",
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="dockethall-performance-metrics.csv"'},
+    )
