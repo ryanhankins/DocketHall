@@ -979,16 +979,40 @@ def build_minutes_pdf(
             parts.append("</div>")
 
     if not watermark_draft:
+        import base64
+        from reportlab.graphics import renderSVG
+        from reportlab.graphics.barcode import qr as _rl_qr
+        from reportlab.graphics.shapes import Drawing
+
         aid = agenda.get("id")
         base_url = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
         verify_url = f"{base_url}/agendas/{aid}" if (base_url and aid) else (f"/agendas/{aid}" if aid else "")
         city_label = _esc(prefs.get("city_title") or "Municipality")
+        qr_img_html = ""
+        if verify_url:
+            try:
+                d = Drawing(72, 72)
+                w = _rl_qr.QrCodeWidget(verify_url)
+                b = w.getBounds()
+                bw = max(1.0, b[2] - b[0])
+                bh = max(1.0, b[3] - b[1])
+                d = Drawing(72, 72, transform=[72.0 / bw, 0, 0, 72.0 / bh, 0, 0])
+                d.add(w)
+                svg_bytes = renderSVG.drawToString(d).encode("utf-8")
+                b64 = base64.b64encode(svg_bytes).decode("ascii")
+                qr_img_html = f'<img src="data:image/svg+xml;base64,{b64}" alt="Verification QR" style="width:72px;height:72px;" />'
+            except Exception:
+                qr_img_html = ""
         verify_line = f'<p class="item-meta">Verify online: {_esc(verify_url)}</p>' if verify_url else ""
         parts.append(
-            '<div style="margin-top: 24px; padding: 12px 14px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc;">'
+            '<div style="margin-top: 24px; padding: 12px 14px; border: 1px solid #cbd5e1; border-radius: 6px; background: #f8fafc; display: flex; justify-content: space-between; align-items: center; gap: 16px;">'
+            '<div>'
             '<p style="margin: 0 0 4px;"><strong>Official Clerk Attestation</strong></p>'
             f'<p class="item-meta">Approved public minutes for {city_label} (Meeting ID #{_esc(str(aid or ""))}).</p>'
+            '<p class="item-meta" style="margin-top: 8px;">Attested by Municipal Clerk: ________________________________</p>'
             f'{verify_line}'
+            '</div>'
+            f'{qr_img_html}'
             '</div>'
         )
 

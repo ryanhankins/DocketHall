@@ -84,8 +84,10 @@ CREATE TABLE IF NOT EXISTS permit_uses (
     requires_survey BOOLEAN NOT NULL DEFAULT FALSE,
     sort_order      INTEGER NOT NULL DEFAULT 0,
     is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    gl_account_code TEXT NOT NULL DEFAULT '',
     UNIQUE (permit_type_id, name)
 );
+ALTER TABLE permit_uses ADD COLUMN IF NOT EXISTS gl_account_code TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS permit_uses_type_idx ON permit_uses(permit_type_id, sort_order, id);
 CREATE TABLE IF NOT EXISTS permits (
     id                  BIGSERIAL PRIMARY KEY,
@@ -803,6 +805,7 @@ class PermitUseIn(BaseModel):
     requires_survey: bool = False
     sort_order: int = 0
     is_active: bool = True
+    gl_account_code: str = ""
 
 
 class PermitUsePatch(BaseModel):
@@ -815,6 +818,7 @@ class PermitUsePatch(BaseModel):
     requires_survey: bool | None = None
     sort_order: int | None = None
     is_active: bool | None = None
+    gl_account_code: str | None = None
 
 
 class PermitCreateIn(BaseModel):
@@ -1115,7 +1119,7 @@ def _load_catalog(conn, active_only: bool) -> dict:
     ).fetchall()
     u_rows = conn.execute(
         f"SELECT id, permit_type_id, name, description, fee_amount, "
-        f"       requires_plans, requires_coi, requires_survey, sort_order, is_active "
+        f"       requires_plans, requires_coi, requires_survey, sort_order, is_active, gl_account_code "
         f"FROM permit_uses {where} ORDER BY sort_order ASC, name ASC"
     ).fetchall()
     types = [
@@ -1144,6 +1148,7 @@ def _load_catalog(conn, active_only: bool) -> dict:
             "requires_survey": bool(r[7]),
             "sort_order": r[8],
             "is_active": bool(r[9]),
+            "gl_account_code": r[10] or "",
         }
         for r in u_rows
     ]
@@ -2157,6 +2162,36 @@ def record_compliance_inspection(
     return _row_to_comp_program(row)
 
 
+def _qr_verification_block(label: str, verify_url: str, styles) -> list:
+    from reportlab.graphics.barcode import qr as _rl_qr
+    from reportlab.graphics.shapes import Drawing
+    w = _rl_qr.QrCodeWidget(verify_url)
+    b = w.getBounds()
+    bw = max(1.0, b[2] - b[0])
+    bh = max(1.0, b[3] - b[1])
+    d = Drawing(64, 64, transform=[64.0 / bw, 0, 0, 64.0 / bh, 0, 0])
+    d.add(w)
+    tbl = Table(
+        [[
+            Paragraph(
+                f"<b>Official Verification</b><br/>{_xml_escape(label)}<br/>"
+                f"Authorized Official: ___________________________<br/>"
+                f"Verify: {_xml_escape(verify_url)}",
+                styles["Normal"],
+            ),
+            d,
+        ]],
+        colWidths=[420, 80],
+    )
+    tbl.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, colors.grey),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("PADDING", (0, 0), (-1, -1), 8),
+    ]))
+    return [Spacer(1, 16), tbl]
+
+
 @router.get("/compliance-programs/{prog_id}/certificate")
 def get_compliance_certificate_pdf(
     prog_id: int,
@@ -2194,7 +2229,10 @@ def get_compliance_certificate_pdf(
         ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
         ("PADDING", (0, 0), (-1, -1), 6),
     ]))
-    story.extend([tbl, Spacer(1, 18), Paragraph("Authorized Municipal Inspector: _______________________________", styles["Normal"])])
+    story.append(tbl)
+    base_url = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
+    verify_url = f"{base_url}/app/compliance-programs" if base_url else "/app/compliance-programs"
+    story.extend(_qr_verification_block(f"Compliance Certificate {cert_num} — {p['property_address']}", verify_url, styles))
     doc.build(story)
     return Response(
         content=buf.getvalue(),
@@ -2992,6 +3030,9 @@ def get_permit_pdf(
                 f"• {_xml_escape(str(ins['inspection_type'] or ''))} ({_xml_escape(str(ins['scheduled_date'] or 'unscheduled'))}): {_xml_escape(str(ins['result'] or ''))}{notes_part}",
                 styles["Normal"],
             ))
+    base_url = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
+    verify_url = f"{base_url}/app/my-permits/{permit['id']}" if base_url else f"/app/my-permits/{permit['id']}"
+    story.extend(_qr_verification_block(f"Permit {permit['permit_number']} ({permit['status'].replace('_', ' ').title()})", verify_url, styles))
     doc.build(story)
     return Response(
         content=buf.getvalue(),
@@ -3819,9 +3860,9 @@ def create_permit_use(body: PermitUseIn, _: dict = Depends(require_permission("p
     with pool.connection() as conn:
         row = conn.execute(
             "INSERT INTO permit_uses "
-            "(permit_type_id, name, description, fee_amount, requires_plans, requires_coi, requires_survey, sort_order, is_active) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
-            "RETURNING id, permit_type_id, name, description, fee_amount, requires_plans, requires_coi, requires_survey, sort_order, is_active",
+            "(permit_type_id, name, description, fee_amount, requires_plans, requires_coi, requires_survey, sort_order, is_active, gl_account_code) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            "RETURNING id, permit_type_id, name, description, fee_amount, requires_plans, requires_coi, requires_survey, sort_order, is_active, gl_account_code",
             (
                 body.permit_type_id,
                 name,
@@ -3832,12 +3873,14 @@ def create_permit_use(body: PermitUseIn, _: dict = Depends(require_permission("p
                 body.requires_survey,
                 body.sort_order,
                 body.is_active,
+                body.gl_account_code.strip(),
             ),
         ).fetchone()
     return {
         "id": row[0], "permit_type_id": row[1], "name": row[2], "description": row[3],
         "fee_amount": row[4], "requires_plans": bool(row[5]), "requires_coi": bool(row[6]),
         "requires_survey": bool(row[7]), "sort_order": row[8], "is_active": bool(row[9]),
+        "gl_account_code": row[10],
     }
 
 
@@ -3854,9 +3897,10 @@ def update_permit_use(use_id: int, body: PermitUsePatch, _: dict = Depends(requi
             "requires_coi = COALESCE(%s, requires_coi), "
             "requires_survey = COALESCE(%s, requires_survey), "
             "sort_order = COALESCE(%s, sort_order), "
-            "is_active = COALESCE(%s, is_active) "
+            "is_active = COALESCE(%s, is_active), "
+            "gl_account_code = COALESCE(%s, gl_account_code) "
             "WHERE id = %s "
-            "RETURNING id, permit_type_id, name, description, fee_amount, requires_plans, requires_coi, requires_survey, sort_order, is_active",
+            "RETURNING id, permit_type_id, name, description, fee_amount, requires_plans, requires_coi, requires_survey, sort_order, is_active, gl_account_code",
             (
                 body.permit_type_id,
                 body.name.strip() if body.name is not None else None,
@@ -3867,6 +3911,7 @@ def update_permit_use(use_id: int, body: PermitUsePatch, _: dict = Depends(requi
                 body.requires_survey,
                 body.sort_order,
                 body.is_active,
+                body.gl_account_code.strip() if body.gl_account_code is not None else None,
                 use_id,
             ),
         ).fetchone()
@@ -3876,6 +3921,7 @@ def update_permit_use(use_id: int, body: PermitUsePatch, _: dict = Depends(requi
         "id": row[0], "permit_type_id": row[1], "name": row[2], "description": row[3],
         "fee_amount": row[4], "requires_plans": bool(row[5]), "requires_coi": bool(row[6]),
         "requires_survey": bool(row[7]), "sort_order": row[8], "is_active": bool(row[9]),
+        "gl_account_code": row[10],
     }
 
 

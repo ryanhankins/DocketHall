@@ -126,10 +126,8 @@ def notify_topic_subscribers(
     try:
         with pool.connection() as conn:
             smtp = _get_smtp_config(conn)
-            if not smtp:
-                return
             rows = conn.execute(
-                "SELECT email, token FROM public_subscriptions "
+                "SELECT email, token, phone, sms_enabled FROM public_subscriptions "
                 "WHERE topic = %s AND is_active = TRUE",
                 (topic,),
             ).fetchall()
@@ -138,14 +136,42 @@ def notify_topic_subscribers(
 
     if not rows:
         return
-    smtp_host, smtp_port, sender, app_pw = smtp
+
+    import json as _json
+    import os as _os
+    import urllib.request as _urlreq
+
+    sms_webhook = (_os.environ.get("SMS_WEBHOOK_URL") or "").strip()
+    sms_phones = [r[2] for r in rows if r[3] and (r[2] or "").strip()]
+    if not smtp and not (sms_webhook and sms_phones):
+        return
 
     def _worker():
-        for email, token in rows:
-            unsub_url = f"{base}/api/subscriptions/unsubscribe?token={token}"
-            full_body = f"{body}{view_line}\n\nUnsubscribe from {_TOPIC_LABELS.get(topic, topic)}: {unsub_url}"
+        if smtp:
+            smtp_host, smtp_port, sender, app_pw = smtp
+            for email, token, _, _ in rows:
+                unsub_url = f"{base}/api/subscriptions/unsubscribe?token={token}"
+                full_body = f"{body}{view_line}\n\nUnsubscribe from {_TOPIC_LABELS.get(topic, topic)}: {unsub_url}"
+                try:
+                    _send_smtp_mail(smtp_host, smtp_port, sender, app_pw, [email], subject, full_body)
+                except Exception:
+                    pass
+        if sms_webhook and sms_phones:
             try:
-                _send_smtp_mail(smtp_host, smtp_port, sender, app_pw, [email], subject, full_body)
+                payload = _json.dumps({
+                    "phones": sms_phones,
+                    "topic": topic,
+                    "subject": subject,
+                    "message": f"{subject}: {body[:160]}",
+                }).encode("utf-8")
+                req = _urlreq.Request(
+                    sms_webhook,
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with _urlreq.urlopen(req, timeout=8):
+                    pass
             except Exception:
                 pass
 

@@ -242,6 +242,7 @@ function PermitCategoryCard({ permitType, uses, onReload, showToast, expandSigna
 
   const [newItemName, setNewItemName] = useState('');
   const [newItemFee, setNewItemFee] = useState('');
+  const [newItemGl, setNewItemGl] = useState('');
   const [newItemCoi, setNewItemCoi] = useState(true);
   const [newItemPlans, setNewItemPlans] = useState(false);
   const [newItemSurvey, setNewItemSurvey] = useState(false);
@@ -407,11 +408,11 @@ function PermitCategoryCard({ permitType, uses, onReload, showToast, expandSigna
         <>
           <table>
         <thead>
-          <tr><th>Permit Item / Use</th><th>Fee</th><th>Required Attachments</th><th style={{ width: 150 }}>Actions</th></tr>
+          <tr><th>Permit Item / Use</th><th>Fee</th><th>GL Code</th><th>Required Attachments</th><th style={{ width: 150 }}>Actions</th></tr>
         </thead>
         <tbody>
           {uses.length === 0 ? (
-            <tr><td colSpan={4} className="muted">No permit items in this category yet. Add one below.</td></tr>
+            <tr><td colSpan={5} className="muted">No permit items in this category yet. Add one below.</td></tr>
           ) : uses.map((u) => {
             const isEditingUse = editingUseId === u.id && useDraft;
             if (isEditingUse) {
@@ -432,6 +433,15 @@ function PermitCategoryCard({ permitType, uses, onReload, showToast, expandSigna
                       value={useDraft.fee_amount}
                       onChange={(e) => setUseDraft(d => ({ ...d, fee_amount: e.target.value }))}
                       style={{ fontSize: '.85rem', padding: '3px 6px', width: 95 }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      aria-label="GL Code"
+                      placeholder="100-32100"
+                      value={useDraft.gl_account_code || ''}
+                      onChange={(e) => setUseDraft(d => ({ ...d, gl_account_code: e.target.value }))}
+                      style={{ fontSize: '.85rem', padding: '3px 6px', width: 100 }}
                     />
                   </td>
                   <td>
@@ -466,6 +476,7 @@ function PermitCategoryCard({ permitType, uses, onReload, showToast, expandSigna
                               body: JSON.stringify({
                                 name: useDraft.name.trim(),
                                 fee_amount: useDraft.fee_amount.trim(),
+                                gl_account_code: (useDraft.gl_account_code || '').trim(),
                                 requires_coi: Boolean(useDraft.requires_coi),
                                 requires_plans: Boolean(useDraft.requires_plans),
                                 requires_survey: Boolean(useDraft.requires_survey),
@@ -494,6 +505,7 @@ function PermitCategoryCard({ permitType, uses, onReload, showToast, expandSigna
               <tr key={`u-${u.id}`}>
                 <td>{u.name}</td>
                 <td>{u.fee_amount || '—'}</td>
+                <td>{u.gl_account_code ? <code>{u.gl_account_code}</code> : '—'}</td>
                 <td className="muted">
                   {[u.requires_coi && 'COI', u.requires_plans && 'Plans', u.requires_survey && 'Survey'].filter(Boolean).join(', ') || 'None'}
                 </td>
@@ -507,6 +519,7 @@ function PermitCategoryCard({ permitType, uses, onReload, showToast, expandSigna
                         setUseDraft({
                           name: u.name || '',
                           fee_amount: u.fee_amount || '',
+                          gl_account_code: u.gl_account_code || '',
                           requires_coi: Boolean(u.requires_coi),
                           requires_plans: Boolean(u.requires_plans),
                           requires_survey: Boolean(u.requires_survey),
@@ -546,6 +559,7 @@ function PermitCategoryCard({ permitType, uses, onReload, showToast, expandSigna
                 permit_type_id: permitType.id,
                 name: newItemName.trim(),
                 fee_amount: newItemFee.trim(),
+                gl_account_code: newItemGl.trim(),
                 requires_coi: newItemCoi,
                 requires_plans: newItemPlans,
                 requires_survey: newItemSurvey,
@@ -554,6 +568,7 @@ function PermitCategoryCard({ permitType, uses, onReload, showToast, expandSigna
             });
             setNewItemName('');
             setNewItemFee('');
+            setNewItemGl('');
             await onReload();
           } catch (err) {
             showToast(err.message, 'error');
@@ -571,6 +586,12 @@ function PermitCategoryCard({ permitType, uses, onReload, showToast, expandSigna
           value={newItemFee}
           onChange={(e) => setNewItemFee(e.target.value)}
           style={{ width: 105, fontSize: '.84rem', padding: '4px 8px' }}
+        />
+        <input
+          placeholder="GL Code (optional)"
+          value={newItemGl}
+          onChange={(e) => setNewItemGl(e.target.value)}
+          style={{ width: 120, fontSize: '.84rem', padding: '4px 8px' }}
         />
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.25rem', fontSize: '.8rem', cursor: 'pointer' }}>
           <input type="checkbox" style={{ width: 'auto' }} checked={newItemCoi} onChange={(e) => setNewItemCoi(e.target.checked)} />

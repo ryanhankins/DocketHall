@@ -121,13 +121,17 @@ CREATE TABLE IF NOT EXISTS complaints (
     citation_issued_at          TIMESTAMPTZ,
 
     created_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    latitude                    DOUBLE PRECISION,
+    longitude                   DOUBLE PRECISION
 );
 ALTER TABLE complaints ADD COLUMN IF NOT EXISTS code_section_id BIGINT;
 ALTER TABLE complaints ADD COLUMN IF NOT EXISTS enforcement_stage TEXT NOT NULL DEFAULT 'intake';
 ALTER TABLE complaints ADD COLUMN IF NOT EXISTS reinspection_date TEXT NOT NULL DEFAULT '';
 ALTER TABLE complaints ADD COLUMN IF NOT EXISTS citation_amount TEXT NOT NULL DEFAULT '';
 ALTER TABLE complaints ADD COLUMN IF NOT EXISTS citation_issued_at TIMESTAMPTZ;
+ALTER TABLE complaints ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;
+ALTER TABLE complaints ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;
 CREATE INDEX IF NOT EXISTS complaints_status_idx ON complaints(status);
 CREATE INDEX IF NOT EXISTS complaints_user_idx ON complaints(complainant_user_id);
 
@@ -499,6 +503,8 @@ class ComplaintCreateIn(BaseModel):
     ordinance_section: str = ""
     conduct_description: str
     date_observed: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
 
 
 class ComplaintPatchIn(BaseModel):
@@ -587,9 +593,9 @@ def _create_complaint_row(
                     complainant_user_id, complainant_username,
                     complainant_name, complainant_email, complainant_phone, complainant_address,
                     subject_property_address, subject_person_name, ordinance_section,
-                    conduct_description, date_observed
+                    conduct_description, date_observed, latitude, longitude
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -608,6 +614,8 @@ def _create_complaint_row(
                     body.ordinance_section.strip(),
                     conduct,
                     body.date_observed.strip(),
+                    body.latitude,
+                    body.longitude,
                 ),
             ).fetchone()
             cid = inserted[0]

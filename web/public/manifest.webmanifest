@@ -1,0 +1,16 @@
+{
+  "name": "DocketHall Municipal Workspace",
+  "short_name": "DocketHall",
+  "start_url": "/app/field-inspector",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#1e3a8a",
+  "icons": [
+    {
+      "src": "/api/branding/logo",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}

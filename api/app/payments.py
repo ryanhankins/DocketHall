@@ -1052,26 +1052,71 @@ def _query_reconciliation_rows(
     bill_type: str = "",
     payment_status: str = "",
 ) -> list[dict]:
-    clauses = ["TRUE"]
-    params: list = []
-    if bill_type.strip():
-        clauses.append("bill_type = %s")
-        params.append(bill_type.strip())
-    if payment_status.strip():
-        clauses.append("payment_status = %s")
-        params.append(payment_status.strip())
-    if date_from.strip():
-        clauses.append("COALESCE(paid_at, created_at) >= %s::date")
-        params.append(date_from.strip())
-    if date_to.strip():
-        clauses.append("COALESCE(paid_at, created_at) < (%s::date + INTERVAL '1 day')")
-        params.append(date_to.strip())
-    with pool.connection() as conn:
-        rows = conn.execute(
-            f"SELECT {_BILL_COLS} FROM municipal_bills WHERE {' AND '.join(clauses)} ORDER BY id DESC LIMIT 2000",
-            tuple(params),
-        ).fetchall()
-    return [_row_to_bill(r, include_private=True) for r in rows]
+    items: list[dict] = []
+    if bill_type.strip() != "permit":
+        clauses = ["TRUE"]
+        params: list = []
+        if bill_type.strip():
+            clauses.append("bill_type = %s")
+            params.append(bill_type.strip())
+        if payment_status.strip():
+            clauses.append("payment_status = %s")
+            params.append(payment_status.strip())
+        if date_from.strip():
+            clauses.append("COALESCE(paid_at, created_at) >= %s::date")
+            params.append(date_from.strip())
+        if date_to.strip():
+            clauses.append("COALESCE(paid_at, created_at) < (%s::date + INTERVAL '1 day')")
+            params.append(date_to.strip())
+        with pool.connection() as conn:
+            rows = conn.execute(
+                f"SELECT {_BILL_COLS} FROM municipal_bills WHERE {' AND '.join(clauses)} ORDER BY id DESC LIMIT 2000",
+                tuple(params),
+            ).fetchall()
+        items.extend(_row_to_bill(r, include_private=True) for r in rows)
+
+    if not bill_type.strip() or bill_type.strip() == "permit":
+        p_clauses = ["p.fee_amount != ''"]
+        p_params: list = []
+        if payment_status.strip():
+            p_clauses.append("p.payment_status = %s")
+            p_params.append(payment_status.strip())
+        if date_from.strip():
+            p_clauses.append("COALESCE(p.paid_at, p.created_at) >= %s::date")
+            p_params.append(date_from.strip())
+        if date_to.strip():
+            p_clauses.append("COALESCE(p.paid_at, p.created_at) < (%s::date + INTERVAL '1 day')")
+            p_params.append(date_to.strip())
+        try:
+            with pool.connection() as conn:
+                prows = conn.execute(
+                    "SELECT p.permit_number, COALESCE(u.gl_account_code, ''), p.parcel_id, "
+                    "p.applicant_name, p.property_address, p.permit_type_name || ' - ' || p.permit_use_name, "
+                    "p.fee_amount, p.payment_status, p.paid_at "
+                    "FROM permits p LEFT JOIN permit_uses u ON u.id = p.permit_use_id "
+                    f"WHERE {' AND '.join(p_clauses)} ORDER BY p.id DESC LIMIT 1000",
+                    tuple(p_params),
+                ).fetchall()
+            for r in prows:
+                paid_val = r[6] if r[7] == "paid" else ""
+                items.append({
+                    "reference_number": r[0],
+                    "bill_type": "permit",
+                    "gl_account_code": r[1] or "",
+                    "account_number": r[2] or "",
+                    "payer_name": r[3] or "",
+                    "service_address": r[4] or "",
+                    "description": r[5] or "Permit Fee",
+                    "amount_due": r[6] or "",
+                    "amount_paid": paid_val,
+                    "payment_status": r[7] or "unpaid",
+                    "paid_at": r[8].isoformat() if r[8] else None,
+                    "payment_method": "permit",
+                    "payment_ref": r[0],
+                })
+        except Exception:
+            pass
+    return items
 
 
 @router.get("/reconciliation")

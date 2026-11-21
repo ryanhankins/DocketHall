@@ -21,6 +21,12 @@ import '../app.css';
 import { ToastProvider } from './core/toast.jsx';
 import CoreShell from './core/CoreShell.jsx';
 
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
 createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ToastProvider>

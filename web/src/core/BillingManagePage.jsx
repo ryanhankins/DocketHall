@@ -23,6 +23,7 @@ const BILL_TYPE_LABELS = {
   utility: 'Utility Bill',
   citation: 'Municipal Citation',
   license: 'License Renewal',
+  permit: 'Permit Fee',
   misc: 'Misc. Fee',
 };
 

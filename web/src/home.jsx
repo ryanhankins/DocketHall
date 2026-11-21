@@ -1910,6 +1910,8 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {}, initialItemId =
   const [ordinance, setOrdinance] = useState('');
   const [dateObserved, setDateObserved] = useState('');
   const [conduct, setConduct] = useState('');
+  const [compLat, setCompLat] = useState('');
+  const [compLng, setCompLng] = useState('');
   const [files, setFiles] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [formMsg, setFormMsg] = useState({ text: '', isError: false });
@@ -1966,6 +1968,8 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {}, initialItemId =
           ordinance_section: ordinance,
           date_observed: dateObserved,
           conduct_description: conduct,
+          latitude: compLat !== '' ? Number(compLat) : null,
+          longitude: compLng !== '' ? Number(compLng) : null,
         }),
       });
       if (!r.ok) {
@@ -2175,6 +2179,23 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {}, initialItemId =
               <div className="muted" style={{ fontSize: 12 }}>Date Observed</div>
               <input type="date" value={dateObserved} onChange={(e) => setDateObserved(e.target.value)} />
             </label>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => {
+                if (!navigator.geolocation) return;
+                navigator.geolocation.getCurrentPosition((pos) => {
+                  setCompLat(pos.coords.latitude.toFixed(6));
+                  setCompLng(pos.coords.longitude.toFixed(6));
+                });
+              }}
+            >
+              Pin My GPS Location
+            </button>
+            <input placeholder="Latitude (optional)" value={compLat} onChange={(e) => setCompLat(e.target.value)} style={{ maxWidth: 145 }} />
+            <input placeholder="Longitude (optional)" value={compLng} onChange={(e) => setCompLng(e.target.value)} style={{ maxWidth: 145 }} />
           </div>
           <label style={{ display: 'block', width: '100%' }}>
             <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Specific Conduct Complained About *</div>
@@ -3568,6 +3589,34 @@ const PUBLIC_I18N = {
     'Subscribing…': 'Abonnement…',
     'Subscribe': 'S’abonner',
   },
+  so: {
+    'Sign In': 'Soo Gal',
+    'Create Account': 'Samee Koonto',
+    'Go to Workspace': 'Tag Goobta Shaqada',
+    'Sign out': 'Ka Bax',
+    '← All Public Services': '← Dhammaan Adeegyada Dadweynaha',
+    'Public Email & SMS Alerts': 'Ogeysiisyada Iimaylka & SMS-ka',
+    'Subscribe to receive automatic email or text alerts whenever new city agendas, code updates, notices, or public records are published.': 'Isdiiwaangeli si aad u hesho ogeysiisyo iimayl ama fariin qoraal ah markii la daabaco ajandayaasha cusub, xeerarka, ogeysiisyada, ama diiwaanada.',
+    'Enter your email address…': 'Geli cinwaanka iimaylkaaga…',
+    'Mobile phone for SMS (optional)': 'Telefoonka gacanta ee SMS (ikhtiyaari)',
+    'SMS Alerts': 'Ogeysiisyada SMS',
+    'Subscribing…': 'Waa la diiwaangelinayaa…',
+    'Subscribe': 'Isdiiwaangeli',
+  },
+  hmn: {
+    'Sign In': 'Nkag Mus',
+    'Create Account': 'Tsim Ib Tug As-khauj',
+    'Go to Workspace': 'Mus Rau Chaw Ua Haujlwm',
+    'Sign out': 'Tawm Mus',
+    '← All Public Services': '← Tag Nrho Cov Kev Pab Pejxeem',
+    'Public Email & SMS Alerts': 'Ceeb Toom Email & SMS Rau Pejxeem',
+    'Subscribe to receive automatic email or text alerts whenever new city agendas, code updates, notices, or public records are published.': 'Sau npe kom tau txais email lossis SMS ceeb toom thaum muaj cov txheej txheem tshiab, txoj cai, lossis ntaub ntawv pejxeem.',
+    'Enter your email address…': 'Sau koj tus email…',
+    'Mobile phone for SMS (optional)': 'Xov tooj ntawm tes rau SMS (yeem xaiv)',
+    'SMS Alerts': 'Ceeb Toom SMS',
+    'Subscribing…': 'Tab tom sau npe…',
+    'Subscribe': 'Sau Npe',
+  },
 };
 
 function PublicHomePage() {
@@ -3784,6 +3833,8 @@ function PublicHomePage() {
           <option value="en">English</option>
           <option value="es">Español</option>
           <option value="fr">Français</option>
+          <option value="so">Soomaali</option>
+          <option value="hmn">Hmoob</option>
         </select>
         {me ? (
           <>

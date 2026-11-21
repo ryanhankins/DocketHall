@@ -38,7 +38,7 @@ COMPLAINTS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
             "council_meeting_date", "final_resolution", "resolved_at",
             "code_section_id", "enforcement_stage", "reinspection_date",
             "citation_amount", "citation_issued_at",
-            "created_at", "updated_at",
+            "created_at", "updated_at", "latitude", "longitude",
         ],
         set(),
         True,

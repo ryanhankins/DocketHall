@@ -38,7 +38,7 @@ PERMITS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         "permit_uses",
         [
             "id", "permit_type_id", "name", "description", "fee_amount",
-            "requires_plans", "requires_coi", "requires_survey", "sort_order", "is_active",
+            "requires_plans", "requires_coi", "requires_survey", "sort_order", "is_active", "gl_account_code",
         ],
         set(),
         True,
