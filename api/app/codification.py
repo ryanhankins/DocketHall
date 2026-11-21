@@ -13,16 +13,18 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Municipal Codification module: recursive City Code tree, revisions, OCR/PDF import, & reader."""
+"""Municipal Codification module: recursive City Code tree, revisions, OCR/PDF/URL/ZIP bulk import, & reader."""
+from html.parser import HTMLParser
 import io
 import ipaddress
 import json
 import os
 import re
 import socket
-from urllib.parse import urlparse
+from urllib.parse import unquote, urljoin, urlparse
 import uuid
 from xml.sax.saxutils import escape as _xml_escape
+import zipfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -41,6 +43,7 @@ from .codification_parser import (
     count_subsections,
     extract_ordinance_metadata,
     extract_pdf_document,
+    infer_section_info_from_filename,
     parse_code_pdf,
     split_section_body_into_children,
 )
@@ -49,6 +52,9 @@ from .subscriptions import notify_topic_subscribers
 from .tenancy import tenant_object_key
 
 MAX_CODE_PDF_BYTES = int(os.environ.get("MAX_CODE_PDF_BYTES", str(50 * 1024 * 1024)))
+MAX_ZIP_FILES = int(os.environ.get("MAX_CODIFICATION_ZIP_FILES", "250"))
+MAX_ZIP_UNCOMPRESSED_BYTES = int(os.environ.get("MAX_CODIFICATION_ZIP_BYTES", str(250 * 1024 * 1024)))
+MAX_HTML_BYTES = 5 * 1024 * 1024
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
 _ALLOWED_NODE_TYPES = {"article", "division", "series", "section"}
 
@@ -864,19 +870,155 @@ def _is_safe_public_http_url(url: str) -> bool:
     return True
 
 
-def _fetch_public_pdf_bytes(url: str) -> bytes:
+class _PdfLinkHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_title = False
+        self.page_title_parts: list[str] = []
+        self.in_anchor = False
+        self.cur_href = ""
+        self.cur_type = ""
+        self.cur_text_parts: list[str] = []
+        self.links: list[tuple[str, str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        t = tag.lower()
+        if t == "title":
+            self.in_title = True
+        elif t == "a":
+            attr_map = {k.lower(): (v or "") for k, v in attrs}
+            if "href" in attr_map:
+                self.in_anchor = True
+                self.cur_href = attr_map["href"]
+                self.cur_type = attr_map.get("type", "")
+                self.cur_text_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self.in_title:
+            self.page_title_parts.append(data)
+        if self.in_anchor:
+            self.cur_text_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        t = tag.lower()
+        if t == "title":
+            self.in_title = False
+        elif t == "a" and self.in_anchor:
+            self.in_anchor = False
+            label = re.sub(r"\s+", " ", "".join(self.cur_text_parts)).strip()
+            self.links.append((self.cur_href.strip(), self.cur_type.strip(), label))
+
+
+def extract_pdf_links_from_html(html: str, base_url: str) -> tuple[str, list[dict]]:
+    """Extract deduplicated PDF links & inferred metadata from municipal webpage HTML."""
+    parser = _PdfLinkHTMLParser()
+    parser.feed(html or "")
+    parser.close()
+    page_title = re.sub(r"\s+", " ", "".join(parser.page_title_parts)).strip()
+
+    items: list[dict] = []
+    seen_urls: set[str] = set()
+    for href, type_attr, label in parser.links:
+        if not href or href.startswith(("#", "mailto:", "javascript:", "tel:")):
+            continue
+        abs_url = urljoin(base_url, href)
+        parsed = urlparse(abs_url)
+        if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+            continue
+        # Strip fragment while keeping query params if any
+        clean_url = parsed._replace(fragment="").geturl()
+        is_pdf_path = parsed.path.lower().endswith(".pdf") or "pdf" in type_attr.lower()
+        if not is_pdf_path or clean_url in seen_urls:
+            continue
+        seen_urls.add(clean_url)
+        fname = unquote(os.path.basename(parsed.path)) or "document.pdf"
+        info = infer_section_info_from_filename(fname)
+        title = info["title"] or label or fname.rsplit(".", 1)[0]
+        if label and (not info["title"] or info["title"].lower() == fname.rsplit(".", 1)[0].lower()):
+            title = label
+        items.append({
+            "url": clean_url,
+            "filename": fname,
+            "link_text": label,
+            "chapter_prefix": info["chapter_prefix"] or "General",
+            "section_number": info["section_number"] or "",
+            "title": title,
+        })
+    return (page_title, items)
+
+
+def _open_public_url(url: str, max_bytes: int, timeout: int = 25) -> tuple[str, bytes]:
     import urllib.request
+
+    class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            if not _is_safe_public_http_url(newurl):
+                raise ValueError("Redirect target must resolve to a public HTTP/HTTPS address")
+            return super().redirect_request(req, fp, code, msg, headers, newurl)
 
     if not _is_safe_public_http_url(url):
         raise ValueError("URL must resolve to a public HTTP/HTTPS address")
+    opener = urllib.request.build_opener(_SafeRedirectHandler())
     req = urllib.request.Request(url, headers={"User-Agent": "DocketHall-Codification/1.0"})
-    with urllib.request.urlopen(req, timeout=25) as resp:
-        raw = resp.read(MAX_CODE_PDF_BYTES + 1)
-    if len(raw) > MAX_CODE_PDF_BYTES:
-        raise ValueError("Remote PDF exceeds size limit")
+    with opener.open(req, timeout=timeout) as resp:
+        final_url = resp.geturl() or url
+        if not _is_safe_public_http_url(final_url):
+            raise ValueError("Final URL must resolve to a public HTTP/HTTPS address")
+        raw = resp.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise ValueError("Downloaded resource exceeds size limit")
+    return (final_url, raw)
+
+
+def _fetch_public_pdf_bytes(url: str) -> bytes:
+    _, raw = _open_public_url(url, MAX_CODE_PDF_BYTES, timeout=25)
     if not raw.startswith(b"%PDF-"):
         raise ValueError("Downloaded resource is not a valid PDF")
     return raw
+
+
+def _fetch_public_html(url: str) -> tuple[str, str]:
+    final_url, raw = _open_public_url(url, MAX_HTML_BYTES, timeout=15)
+    return (final_url, raw.decode("utf-8", errors="replace"))
+
+
+def _unpack_pdf_zip(raw: bytes, zip_name: str, warnings: list[str]) -> list[tuple[str, bytes]]:
+    """Safely extract valid PDF entries from an uploaded .zip archive."""
+    out: list[tuple[str, bytes]] = []
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile:
+        warnings.append(f"{zip_name}: skipped (not a valid .zip archive)")
+        return out
+
+    total_bytes = 0
+    with zf:
+        for info in sorted(zf.infolist(), key=lambda i: i.filename.lower()):
+            if info.is_dir():
+                continue
+            parts = [p for p in info.filename.replace("\\", "/").split("/") if p]
+            if not parts or any(p == "__MACOSX" or p.startswith(".") for p in parts):
+                continue
+            base = parts[-1]
+            if not base.lower().endswith(".pdf"):
+                continue
+            if len(out) >= MAX_ZIP_FILES:
+                warnings.append(f"{zip_name}: capped at {MAX_ZIP_FILES} PDFs per archive")
+                break
+            if info.file_size > MAX_CODE_PDF_BYTES or total_bytes + info.file_size > MAX_ZIP_UNCOMPRESSED_BYTES:
+                warnings.append(f"{zip_name}/{base}: skipped (exceeds zip extraction size limit)")
+                continue
+            with zf.open(info, "r") as fh:
+                data = fh.read(MAX_CODE_PDF_BYTES + 1)
+            if len(data) > MAX_CODE_PDF_BYTES or total_bytes + len(data) > MAX_ZIP_UNCOMPRESSED_BYTES:
+                warnings.append(f"{zip_name}/{base}: skipped (exceeds size limit)")
+                continue
+            if not data.startswith(b"%PDF-"):
+                warnings.append(f"{zip_name}/{base}: skipped (not a valid PDF)")
+                continue
+            total_bytes += len(data)
+            out.append((base, data))
+    return out
 
 
 def _upsert_section_tree(
@@ -889,6 +1031,7 @@ def _upsert_section_tree(
     stats: dict,
     raw_by_key: dict[tuple[str, str], tuple[str, bytes]],
     ch_key: str,
+    is_published: bool = True,
 ) -> None:
     next_sort = (
         conn.execute(
@@ -909,10 +1052,11 @@ def _upsert_section_tree(
         ord_ref = str(sec.get("ordinance_ref") or "").strip()
         eff_date = str(sec.get("effective_date") or "").strip()
         summary = str(sec.get("summary") or "").strip()
+        src_url = str(sec.get("source_pdf_url") or "").strip()
         child_nodes = sec.get("children") if isinstance(sec.get("children"), list) else []
 
         existing_sec = conn.execute(
-            "SELECT id, parent_id, node_type, title, article, body, ordinance_ref, effective_date, object_key "
+            "SELECT id, parent_id, node_type, title, article, body, ordinance_ref, effective_date, object_key, source_pdf_url "
             "FROM code_sections WHERE chapter_id = %s AND LOWER(section_number) = LOWER(%s)",
             (chap_id, sec_num),
         ).fetchone()
@@ -920,7 +1064,7 @@ def _upsert_section_tree(
         if existing_sec and existing_sec[0] == parent_id:
             sec_num = f"{sec_num}-sub"
             existing_sec = conn.execute(
-                "SELECT id, parent_id, node_type, title, article, body, ordinance_ref, effective_date, object_key "
+                "SELECT id, parent_id, node_type, title, article, body, ordinance_ref, effective_date, object_key, source_pdf_url "
                 "FROM code_sections WHERE chapter_id = %s AND LOWER(section_number) = LOWER(%s)",
                 (chap_id, sec_num),
             ).fetchone()
@@ -932,14 +1076,14 @@ def _upsert_section_tree(
             sec_id = existing_sec[0]
             next_title = existing_sec[3] if (existing_sec[3] and title.startswith("Section ")) else (title or existing_sec[3])
             next_art = art or existing_sec[4] or ""
-            # Allow parent preamble update (even clearing old monolith text when split into children)
             next_body = body if (child_nodes or body) else (existing_sec[5] or "")
             next_ord = ord_ref or existing_sec[6] or ""
             next_eff = eff_date or existing_sec[7] or ""
+            next_src = src_url or existing_sec[9] or ""
             conn.execute(
                 "UPDATE code_sections SET parent_id = %s, node_type = %s, title = %s, article = %s, body = %s, "
-                "ordinance_ref = %s, effective_date = %s, updated_at = now() WHERE id = %s",
-                (parent_id, ntype, next_title, next_art, next_body, next_ord, next_eff, sec_id),
+                "ordinance_ref = %s, effective_date = %s, source_pdf_url = %s, updated_at = now() WHERE id = %s",
+                (parent_id, ntype, next_title, next_art, next_body, next_ord, next_eff, next_src, sec_id),
             )
             if next_body != (existing_sec[5] or "") or next_title != existing_sec[3]:
                 conn.execute(
@@ -954,9 +1098,9 @@ def _upsert_section_tree(
         else:
             next_sort += 1
             srow = conn.execute(
-                "INSERT INTO code_sections (chapter_id, parent_id, node_type, section_number, article, title, summary, body, ordinance_ref, effective_date, sort_order, is_published) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE) RETURNING id",
-                (chap_id, parent_id, ntype, sec_num, art, title, summary, body, ord_ref, eff_date, next_sort),
+                "INSERT INTO code_sections (chapter_id, parent_id, node_type, section_number, article, title, summary, body, ordinance_ref, effective_date, source_pdf_url, sort_order, is_published) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (chap_id, parent_id, ntype, sec_num, art, title, summary, body, ord_ref, eff_date, src_url, next_sort, is_published),
             ).fetchone()
             sec_id = srow[0]
             conn.execute(
@@ -984,7 +1128,91 @@ def _upsert_section_tree(
                     stats["warnings"].append(f"Section {sec_num}: stored text but PDF upload failed ({exc})")
 
         if child_nodes:
-            _upsert_section_tree(conn, chap_id, child_nodes, sec_id, overwrite_existing, user, stats, raw_by_key, ch_key)
+            _upsert_section_tree(
+                conn, chap_id, child_nodes, sec_id, overwrite_existing, user, stats, raw_by_key, ch_key, is_published=is_published
+            )
+
+
+def _append_parsed_to_chapters(
+    parsed: dict,
+    source_label: str,
+    merged_chapters: list[dict],
+    chap_by_key: dict[str, dict],
+    target_chap_info: dict | None,
+    raw_by_key: dict[tuple[str, str], tuple[str, bytes]] | None = None,
+    raw_bytes: bytes | None = None,
+    safe_fname: str = "",
+    source_pdf_url: str = "",
+    fallback_title: str = "",
+) -> None:
+    is_single = parsed.get("kind") == "section"
+    for ch in parsed.get("chapters", []):
+        ch_prefix = target_chap_info["code_prefix"] if target_chap_info else ch["code_prefix"]
+        ch_title = target_chap_info["title"] if target_chap_info else ch["title"]
+        ch_key = ch_prefix.lower()
+        bucket_chap = chap_by_key.get(ch_key)
+        if not bucket_chap:
+            bucket_chap = {"code_prefix": ch_prefix, "title": ch_title, "sections": []}
+            chap_by_key[ch_key] = bucket_chap
+            merged_chapters.append(bucket_chap)
+        for sec in ch.get("sections", []):
+            sec_title = sec.get("title") or ""
+            if fallback_title and (not sec_title or sec_title.startswith(("Section ", "Untitled"))):
+                sec_title = fallback_title
+            sec_copy = {**sec, "title": sec_title, "source_filename": source_label}
+            if source_pdf_url:
+                sec_copy["source_pdf_url"] = source_pdf_url
+            bucket_chap["sections"].append(sec_copy)
+            if is_single and raw_by_key is not None and raw_bytes is not None and safe_fname:
+                raw_by_key[(ch_key, sec_copy["section_number"].lower())] = (safe_fname, raw_bytes)
+
+
+def _commit_chapters_tree(
+    conn,
+    merged_chapters: list[dict],
+    target_chap_info: dict | None,
+    overwrite_existing: bool,
+    publish_immediately: bool,
+    user: dict,
+    stats: dict,
+    raw_by_key: dict[tuple[str, str], tuple[str, bytes]],
+) -> None:
+    existing_chaps = {
+        r[1].strip().lower(): (r[0], r[1], r[2])
+        for r in conn.execute("SELECT id, code_prefix, title FROM code_chapters").fetchall()
+    }
+    next_chap_sort = (conn.execute("SELECT COALESCE(MAX(sort_order), 0) FROM code_chapters").fetchone() or [0])[0]
+
+    for ch in merged_chapters:
+        ch_key = str(ch.get("code_prefix") or "General").strip().lower()
+        if target_chap_info is not None:
+            chap_id = target_chap_info["id"]
+            ch_key = target_chap_info["code_prefix"].strip().lower()
+        elif ch_key in existing_chaps:
+            chap_id = existing_chaps[ch_key][0]
+        else:
+            next_chap_sort += 1
+            crow = conn.execute(
+                "INSERT INTO code_chapters (code_prefix, title, sort_order, is_published) "
+                "VALUES (%s, %s, %s, %s) RETURNING id",
+                (ch.get("code_prefix") or "General", ch.get("title") or "City Code", next_chap_sort, publish_immediately),
+            ).fetchone()
+            chap_id = crow[0]
+            existing_chaps[ch_key] = (chap_id, ch.get("code_prefix"), ch.get("title"))
+            stats["chapters_created"] += 1
+
+        _upsert_section_tree(
+            conn,
+            chap_id,
+            ch.get("sections") or [],
+            None,
+            overwrite_existing,
+            user,
+            stats,
+            raw_by_key,
+            ch_key,
+            is_published=publish_immediately,
+        )
 
 
 @router.post("/sections/{section_id}/pdf")
@@ -1258,7 +1486,7 @@ def _preview_nodes(nodes: list[dict]) -> tuple[list[dict], int]:
     for s in nodes:
         kids, k_cnt = _preview_nodes(s.get("children") or [])
         count += 1 + k_cnt
-        out.append({
+        item = {
             "section_number": s.get("section_number", ""),
             "node_type": s.get("node_type", "section"),
             "article": s.get("article", ""),
@@ -1272,8 +1500,57 @@ def _preview_nodes(nodes: list[dict]) -> tuple[list[dict], int]:
             "body_preview": (s.get("body") or "")[:360],
             "source_filename": s.get("source_filename", ""),
             "children": kids,
-        })
+        }
+        if s.get("source_pdf_url"):
+            item["source_pdf_url"] = s["source_pdf_url"]
+        out.append(item)
     return (out, count)
+
+
+def _build_preview_payload(
+    merged_chapters: list[dict],
+    files_processed: int,
+    ocr_files: int,
+    ocr_pages_total: int,
+    warnings: list[str],
+    failed: list[dict] | None = None,
+) -> dict:
+    preview_chapters = []
+    total_nodes = 0
+    for ch in merged_chapters:
+        p_secs, n_cnt = _preview_nodes(ch.get("sections") or [])
+        total_nodes += n_cnt
+        preview_chapters.append({
+            "code_prefix": ch["code_prefix"],
+            "title": ch["title"],
+            "sections": p_secs,
+        })
+    payload = {
+        "mode": "preview",
+        "files_processed": files_processed,
+        "total_sections": len([s for ch in preview_chapters for s in ch["sections"]]),
+        "total_nodes": total_nodes,
+        "ocr_files": ocr_files,
+        "ocr_pages": ocr_pages_total,
+        "chapters": preview_chapters,
+        "warnings": warnings,
+    }
+    if failed is not None:
+        payload["failed"] = failed
+    return payload
+
+
+def _resolve_target_chapter(target_chapter_id: int | None) -> dict | None:
+    if target_chapter_id is None:
+        return None
+    with pool.connection() as conn:
+        crow = conn.execute(
+            "SELECT id, code_prefix, title FROM code_chapters WHERE id = %s",
+            (target_chapter_id,),
+        ).fetchone()
+    if not crow:
+        raise HTTPException(status_code=404, detail="Target chapter not found")
+    return {"id": crow[0], "code_prefix": crow[1], "title": crow[2]}
 
 
 @router.post("/import-pdfs")
@@ -1284,11 +1561,12 @@ async def import_code_pdfs(
     overwrite_existing: bool = Form(True),
     split_children: bool = Form(True),
     enable_ocr: bool = Form(True),
+    publish_immediately: bool = Form(True),
     override_tree_json: str | None = Form(None),
     user: dict = Depends(require_permission("codification.manage")),
 ):
     if not files:
-        raise HTTPException(status_code=400, detail="Please upload at least one PDF file")
+        raise HTTPException(status_code=400, detail="Please upload at least one PDF or .zip file")
 
     merged_chapters: list[dict] = []
     chap_by_key: dict[str, dict] = {}
@@ -1297,49 +1575,43 @@ async def import_code_pdfs(
     ocr_files = 0
     ocr_pages_total = 0
     raw_by_key: dict[tuple[str, str], tuple[str, bytes]] = {}
+    target_chap_info = _resolve_target_chapter(target_chapter_id)
 
-    target_chap_info = None
-    if target_chapter_id is not None:
-        with pool.connection() as conn:
-            crow = conn.execute(
-                "SELECT id, code_prefix, title FROM code_chapters WHERE id = %s",
-                (target_chapter_id,),
-            ).fetchone()
-            if not crow:
-                raise HTTPException(status_code=404, detail="Target chapter not found")
-            target_chap_info = {"id": crow[0], "code_prefix": crow[1], "title": crow[2]}
-
+    pdf_entries: list[tuple[str, str, bytes]] = []
     for up in files:
-        raw = await up.read(MAX_CODE_PDF_BYTES + 1)
-        fname = _SAFE_FILENAME_RE.sub("_", (up.filename or "upload.pdf").strip()) or "upload.pdf"
+        orig_label = (up.filename or "upload.pdf").strip() or "upload.pdf"
+        safe_fname = _SAFE_FILENAME_RE.sub("_", orig_label) or "upload.pdf"
+        raw = await up.read(MAX_ZIP_UNCOMPRESSED_BYTES + 1 if orig_label.lower().endswith(".zip") else MAX_CODE_PDF_BYTES + 1)
+        if orig_label.lower().endswith(".zip") or raw[:4] == b"PK\x03\x04":
+            for inner_name, inner_bytes in _unpack_pdf_zip(raw, orig_label, warnings):
+                safe_inner = _SAFE_FILENAME_RE.sub("_", inner_name) or "section.pdf"
+                pdf_entries.append((inner_name, safe_inner, inner_bytes))
+            continue
         if len(raw) > MAX_CODE_PDF_BYTES:
-            warnings.append(f"{fname}: skipped (exceeds 50 MB limit)")
+            warnings.append(f"{orig_label}: skipped (exceeds 50 MB limit)")
             continue
         if not raw.startswith(b"%PDF-"):
-            warnings.append(f"{fname}: skipped (not a valid PDF)")
+            warnings.append(f"{orig_label}: skipped (not a valid PDF)")
             continue
-        parsed = await run_in_threadpool(parse_code_pdf, raw, up.filename or fname, split_children, enable_ocr)
+        pdf_entries.append((orig_label, safe_fname, raw))
+
+    for orig_label, safe_fname, raw in pdf_entries:
+        parsed = await run_in_threadpool(parse_code_pdf, raw, orig_label, split_children, enable_ocr)
         files_processed += 1
         if parsed.get("used_ocr"):
             ocr_files += 1
             ocr_pages_total += len(parsed.get("ocr_pages") or [])
         warnings.extend(parsed.get("warnings") or [])
-        is_single = parsed.get("kind") == "section"
-
-        for ch in parsed.get("chapters", []):
-            ch_prefix = target_chap_info["code_prefix"] if target_chap_info else ch["code_prefix"]
-            ch_title = target_chap_info["title"] if target_chap_info else ch["title"]
-            ch_key = ch_prefix.lower()
-            bucket_chap = chap_by_key.get(ch_key)
-            if not bucket_chap:
-                bucket_chap = {"code_prefix": ch_prefix, "title": ch_title, "sections": []}
-                chap_by_key[ch_key] = bucket_chap
-                merged_chapters.append(bucket_chap)
-            for sec in ch.get("sections", []):
-                sec_copy = {**sec, "source_filename": up.filename or fname}
-                bucket_chap["sections"].append(sec_copy)
-                if is_single:
-                    raw_by_key[(ch_key, sec_copy["section_number"].lower())] = (fname, raw)
+        _append_parsed_to_chapters(
+            parsed,
+            orig_label,
+            merged_chapters,
+            chap_by_key,
+            target_chap_info,
+            raw_by_key=raw_by_key,
+            raw_bytes=raw,
+            safe_fname=safe_fname,
+        )
 
     if commit and override_tree_json:
         try:
@@ -1351,26 +1623,7 @@ async def import_code_pdfs(
             raise HTTPException(status_code=400, detail=f"Invalid override_tree_json: {exc}")
 
     if not commit:
-        preview_chapters = []
-        total_nodes = 0
-        for ch in merged_chapters:
-            p_secs, n_cnt = _preview_nodes(ch["sections"])
-            total_nodes += n_cnt
-            preview_chapters.append({
-                "code_prefix": ch["code_prefix"],
-                "title": ch["title"],
-                "sections": p_secs,
-            })
-        return {
-            "mode": "preview",
-            "files_processed": files_processed,
-            "total_sections": len([s for ch in preview_chapters for s in ch["sections"]]),
-            "total_nodes": total_nodes,
-            "ocr_files": ocr_files,
-            "ocr_pages": ocr_pages_total,
-            "chapters": preview_chapters,
-            "warnings": warnings,
-        }
+        return _build_preview_payload(merged_chapters, files_processed, ocr_files, ocr_pages_total, warnings)
 
     stats = {
         "chapters_created": 0,
@@ -1381,43 +1634,10 @@ async def import_code_pdfs(
         "children_updated": 0,
         "warnings": warnings,
     }
-
     with pool.connection() as conn:
-        existing_chaps = {
-            r[1].strip().lower(): (r[0], r[1], r[2])
-            for r in conn.execute("SELECT id, code_prefix, title FROM code_chapters").fetchall()
-        }
-        next_chap_sort = (conn.execute("SELECT COALESCE(MAX(sort_order), 0) FROM code_chapters").fetchone() or [0])[0]
-
-        for ch in merged_chapters:
-            ch_key = str(ch.get("code_prefix") or "General").strip().lower()
-            if target_chap_info is not None:
-                chap_id = target_chap_info["id"]
-                ch_key = target_chap_info["code_prefix"].strip().lower()
-            elif ch_key in existing_chaps:
-                chap_id = existing_chaps[ch_key][0]
-            else:
-                next_chap_sort += 1
-                crow = conn.execute(
-                    "INSERT INTO code_chapters (code_prefix, title, sort_order, is_published) "
-                    "VALUES (%s, %s, %s, TRUE) RETURNING id",
-                    (ch.get("code_prefix") or "General", ch.get("title") or "City Code", next_chap_sort),
-                ).fetchone()
-                chap_id = crow[0]
-                existing_chaps[ch_key] = (chap_id, ch.get("code_prefix"), ch.get("title"))
-                stats["chapters_created"] += 1
-
-            _upsert_section_tree(
-                conn,
-                chap_id,
-                ch.get("sections") or [],
-                None,
-                overwrite_existing,
-                user,
-                stats,
-                raw_by_key,
-                ch_key,
-            )
+        _commit_chapters_tree(
+            conn, merged_chapters, target_chap_info, overwrite_existing, publish_immediately, user, stats, raw_by_key
+        )
 
     return {
         "mode": "committed",
@@ -1426,6 +1646,315 @@ async def import_code_pdfs(
         "ocr_pages": ocr_pages_total,
         **stats,
     }
+
+
+class ImportTreeIn(BaseModel):
+    chapters: list[dict]
+    target_chapter_id: int | None = None
+    overwrite_existing: bool = True
+    publish_immediately: bool = True
+
+
+@router.post("/import-tree")
+def import_code_tree(
+    body: ImportTreeIn,
+    user: dict = Depends(require_permission("codification.manage")),
+):
+    if not body.chapters:
+        raise HTTPException(status_code=400, detail="No chapters supplied for import")
+    target_chap_info = _resolve_target_chapter(body.target_chapter_id)
+    cleaned_chaps = [ch for ch in body.chapters if isinstance(ch, dict) and isinstance(ch.get("sections"), list)]
+    stats = {
+        "chapters_created": 0,
+        "sections_created": 0,
+        "sections_updated": 0,
+        "sections_skipped": 0,
+        "children_created": 0,
+        "children_updated": 0,
+        "warnings": [],
+    }
+    with pool.connection() as conn:
+        _commit_chapters_tree(
+            conn, cleaned_chaps, target_chap_info, body.overwrite_existing, body.publish_immediately, user, stats, {}
+        )
+    return {"mode": "committed", **stats}
+
+
+class DiscoverUrlsIn(BaseModel):
+    page_url: str = ""
+    urls_text: str = ""
+
+
+def _discover_urls_worker(body: DiscoverUrlsIn) -> dict:
+    page_title = ""
+    items: list[dict] = []
+    warnings: list[str] = []
+    seen: set[str] = set()
+
+    page_u = (body.page_url or "").strip()
+    if page_u:
+        if not _is_safe_public_http_url(page_u):
+            raise ValueError("Webpage URL must resolve to a public HTTP/HTTPS address")
+        final_url, html = _fetch_public_html(page_u)
+        page_title, discovered = extract_pdf_links_from_html(html, final_url)
+        for it in discovered:
+            if it["url"] not in seen:
+                seen.add(it["url"])
+                items.append(it)
+
+    for raw_ln in (body.urls_text or "").splitlines():
+        u = raw_ln.strip()
+        if not u:
+            continue
+        if not _is_safe_public_http_url(u):
+            warnings.append(f"Skipped disallowed or invalid URL: {u}")
+            continue
+        if u in seen:
+            continue
+        seen.add(u)
+        parsed = urlparse(u)
+        fname = unquote(os.path.basename(parsed.path)) or "document.pdf"
+        info = infer_section_info_from_filename(fname)
+        items.append({
+            "url": u,
+            "filename": fname,
+            "link_text": "",
+            "chapter_prefix": info["chapter_prefix"] or "General",
+            "section_number": info["section_number"] or "",
+            "title": info["title"] or fname.rsplit(".", 1)[0],
+        })
+
+    return {"page_title": page_title, "items": items, "warnings": warnings}
+
+
+@router.post("/discover-urls")
+async def discover_code_pdf_urls(
+    body: DiscoverUrlsIn,
+    _: dict = Depends(require_permission("codification.manage")),
+):
+    if not (body.page_url or "").strip() and not (body.urls_text or "").strip():
+        raise HTTPException(status_code=400, detail="Enter a webpage URL or paste PDF URLs")
+    try:
+        return await run_in_threadpool(_discover_urls_worker, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not scan URL: {exc}")
+
+
+class ImportUrlItem(BaseModel):
+    url: str
+    title: str = ""
+    link_text: str = ""
+
+
+class ImportUrlsIn(BaseModel):
+    items: list[ImportUrlItem]
+    commit: bool = False
+    target_chapter_id: int | None = None
+    overwrite_existing: bool = True
+    split_children: bool = True
+    enable_ocr: bool = True
+    publish_immediately: bool = True
+
+
+def _import_urls_worker(body: ImportUrlsIn, user: dict) -> dict:
+    target_chap_info = _resolve_target_chapter(body.target_chapter_id)
+    merged_chapters: list[dict] = []
+    chap_by_key: dict[str, dict] = {}
+    warnings: list[str] = []
+    failed: list[dict] = []
+    files_processed = 0
+    ocr_files = 0
+    ocr_pages_total = 0
+
+    for item in body.items:
+        url = (item.url or "").strip()
+        if not url:
+            continue
+        parsed_u = urlparse(url)
+        fname = unquote(os.path.basename(parsed_u.path)) or "document.pdf"
+        try:
+            raw = _fetch_public_pdf_bytes(url)
+            parsed = parse_code_pdf(raw, fname, split_children=body.split_children, enable_ocr=body.enable_ocr)
+            files_processed += 1
+            if parsed.get("used_ocr"):
+                ocr_files += 1
+                ocr_pages_total += len(parsed.get("ocr_pages") or [])
+            warnings.extend(parsed.get("warnings") or [])
+            fallback_title = (item.title or item.link_text or "").strip()
+            _append_parsed_to_chapters(
+                parsed,
+                fname,
+                merged_chapters,
+                chap_by_key,
+                target_chap_info,
+                source_pdf_url=url,
+                fallback_title=fallback_title,
+            )
+        except Exception as exc:
+            failed.append({"url": url, "filename": fname, "error": str(exc)})
+
+    if not body.commit:
+        return _build_preview_payload(merged_chapters, files_processed, ocr_files, ocr_pages_total, warnings, failed=failed)
+
+    stats = {
+        "chapters_created": 0,
+        "sections_created": 0,
+        "sections_updated": 0,
+        "sections_skipped": 0,
+        "children_created": 0,
+        "children_updated": 0,
+        "warnings": warnings,
+    }
+    with pool.connection() as conn:
+        _commit_chapters_tree(
+            conn, merged_chapters, target_chap_info, body.overwrite_existing, body.publish_immediately, user, stats, {}
+        )
+    return {
+        "mode": "committed",
+        "files_processed": files_processed,
+        "ocr_files": ocr_files,
+        "ocr_pages": ocr_pages_total,
+        "failed": failed,
+        **stats,
+    }
+
+
+@router.post("/import-urls")
+async def import_code_urls(
+    body: ImportUrlsIn,
+    user: dict = Depends(require_permission("codification.manage")),
+):
+    if not body.items:
+        raise HTTPException(status_code=400, detail="Select at least one PDF URL")
+    return await run_in_threadpool(_import_urls_worker, body, user)
+
+
+def _reextract_single_section(
+    row_tuple: tuple,
+    split_children: bool,
+    enable_ocr: bool,
+    user: dict,
+    tree_stats: dict,
+) -> tuple[bool, bool]:
+    """Download/read linked or uploaded PDF for a single section row and update tree. Returns (updated, used_ocr)."""
+    sec_id, chap_id, sec_num, cur_art, cur_body, cur_ord, cur_eff, src_url, obj_key = row_tuple[:9]
+    src = (src_url or "").strip()
+    if obj_key:
+        obj = _minio().get_object(_bucket(), obj_key)
+        try:
+            raw_bytes = obj.read()
+        finally:
+            obj.close()
+            obj.release_conn()
+        fname = obj_key.rsplit("/", 1)[-1]
+    elif src.startswith(("http://", "https://")):
+        raw_bytes = _fetch_public_pdf_bytes(src)
+        fname = src.rsplit("/", 1)[-1]
+    else:
+        return (False, False)
+
+    parsed = parse_code_pdf(raw_bytes, fname, split_children=split_children, enable_ocr=enable_ocr)
+    used_ocr = bool(parsed.get("used_ocr"))
+    all_secs = [s for ch in parsed.get("chapters", []) for s in ch.get("sections", [])]
+    if not all_secs:
+        return (False, used_ocr)
+
+    if len(all_secs) == 1:
+        sec_data = all_secs[0]
+        next_body = (sec_data.get("body") or "").strip()
+        next_kids = list(sec_data.get("children") or [])
+        if not next_body and not next_kids:
+            return (False, used_ocr)
+        next_art = cur_art or sec_data.get("article") or ""
+        next_ord = cur_ord or sec_data.get("ordinance_ref") or ""
+        next_eff = cur_eff or sec_data.get("effective_date") or ""
+        next_ntype = "series" if next_kids else "section"
+    else:
+        next_body = ""
+        next_kids = all_secs
+        next_art = cur_art or ""
+        next_ord = cur_ord or ""
+        next_eff = cur_eff or ""
+        next_ntype = "series"
+
+    with pool.connection() as conn:
+        conn.execute(
+            "UPDATE code_sections SET node_type = %s, article = %s, body = %s, ordinance_ref = %s, effective_date = %s, updated_at = now() WHERE id = %s",
+            (next_ntype, next_art, next_body, next_ord, next_eff, sec_id),
+        )
+        conn.execute(
+            "INSERT INTO code_revisions (section_id, ordinance_number, effective_date, change_summary, previous_body, new_body, edited_by) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (
+                sec_id,
+                next_ord,
+                next_eff,
+                f"Auto-imported from linked PDF ({'OCR, ' if used_ocr else ''}{len(next_kids)} child sections)",
+                cur_body or "",
+                next_body,
+                user["username"],
+            ),
+        )
+        if next_kids:
+            _upsert_section_tree(conn, chap_id, next_kids, sec_id, True, user, tree_stats, {}, "")
+    return (True, used_ocr)
+
+
+def _split_or_reformat_row(
+    sec_id: int,
+    chap_id: int,
+    sec_num: str,
+    cur_body: str,
+    cur_ord: str,
+    cur_eff: str,
+    src_url: str,
+    has_children: bool,
+    allow_split: bool,
+    allow_reformat: bool,
+    user: dict,
+    tree_stats: dict,
+) -> str:
+    """Split monolith body into children and/or clean existing text. Returns 'split' | 'reformatted' | 'skipped'."""
+    if not (cur_body or "").strip():
+        return "skipped"
+    cleaned = clean_pdf_pages([cur_body])
+    if allow_split and not has_children:
+        preamble, split_kids, scheme = split_section_body_into_children(cleaned, parent_number=sec_num)
+        if len(split_kids) >= 2:
+            meta = extract_ordinance_metadata(cleaned, src_url)
+            next_ord = cur_ord or meta["ordinance_ref"]
+            next_eff = cur_eff or meta["effective_date"]
+            with pool.connection() as conn:
+                conn.execute(
+                    "UPDATE code_sections SET node_type = 'series', body = %s, ordinance_ref = %s, effective_date = %s, updated_at = now() WHERE id = %s",
+                    (preamble, next_ord, next_eff, sec_id),
+                )
+                conn.execute(
+                    "INSERT INTO code_revisions (section_id, ordinance_number, effective_date, change_summary, previous_body, new_body, edited_by) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                    (sec_id, next_ord, next_eff, f"Split monolith into {len(split_kids)} child sections ({scheme})", cur_body, preamble, user["username"]),
+                )
+                _upsert_section_tree(conn, chap_id, split_kids, sec_id, True, user, tree_stats, {}, "")
+            return "split"
+    if allow_reformat:
+        meta = extract_ordinance_metadata(cleaned, src_url)
+        next_ord = cur_ord or meta["ordinance_ref"]
+        next_eff = cur_eff or meta["effective_date"]
+        if cleaned != cur_body or next_ord != cur_ord or next_eff != cur_eff:
+            with pool.connection() as conn:
+                conn.execute(
+                    "UPDATE code_sections SET body = %s, ordinance_ref = %s, effective_date = %s, updated_at = now() WHERE id = %s",
+                    (cleaned, next_ord, next_eff, sec_id),
+                )
+                conn.execute(
+                    "INSERT INTO code_revisions (section_id, ordinance_number, effective_date, change_summary, previous_body, new_body, edited_by) "
+                    "VALUES (%s, %s, %s, 'Batch reformatted code text', %s, %s, %s)",
+                    (sec_id, next_ord, next_eff, cur_body, cleaned, user["username"]),
+                )
+            return "reformatted"
+    return "skipped"
 
 
 class BulkImportLinkedIn(BaseModel):
@@ -1455,143 +1984,42 @@ def _run_bulk_linked_worker(body: BulkImportLinkedIn, user: dict) -> dict:
     failed: list[dict] = []
     tree_stats = {"sections_created": 0, "sections_updated": 0, "sections_skipped": 0, "children_created": 0, "children_updated": 0, "warnings": []}
 
-    for sec_id, chap_id, sec_num, cur_art, cur_body, cur_ord, cur_eff, src_url, obj_key, child_count in rows:
+    for row in rows:
+        sec_id, chap_id, sec_num, cur_art, cur_body, cur_ord, cur_eff, src_url, obj_key, child_count = row
         has_body = bool((cur_body or "").strip())
         has_children = int(child_count or 0) > 0
         src = (src_url or "").strip()
 
         if (obj_key or src.startswith(("http://", "https://"))) and (not body.only_empty or (not has_body and not has_children)):
             try:
-                if obj_key:
-                    obj = _minio().get_object(_bucket(), obj_key)
-                    try:
-                        raw_bytes = obj.read()
-                    finally:
-                        obj.close()
-                        obj.release_conn()
-                    fname = obj_key.rsplit("/", 1)[-1]
-                else:
-                    raw_bytes = _fetch_public_pdf_bytes(src)
-                    fname = src.rsplit("/", 1)[-1]
-
-                parsed = parse_code_pdf(
-                    raw_bytes,
-                    fname,
-                    split_children=body.split_children,
-                    enable_ocr=body.enable_ocr,
-                )
-                if parsed.get("used_ocr"):
+                did_imp, used_ocr = _reextract_single_section(row, body.split_children, body.enable_ocr, user, tree_stats)
+                if used_ocr:
                     ocr_used_count += 1
-                all_secs = [s for ch in parsed.get("chapters", []) for s in ch.get("sections", [])]
-                if not all_secs:
-                    skipped += 1
-                    continue
-
-                if len(all_secs) == 1:
-                    sec_data = all_secs[0]
-                    next_body = (sec_data.get("body") or "").strip()
-                    next_kids = list(sec_data.get("children") or [])
-                    if not next_body and not next_kids:
-                        skipped += 1
-                        continue
-                    next_art = cur_art or sec_data.get("article") or ""
-                    next_ord = cur_ord or sec_data.get("ordinance_ref") or ""
-                    next_eff = cur_eff or sec_data.get("effective_date") or ""
-                    next_ntype = "series" if next_kids else "section"
+                if did_imp:
+                    imported += 1
                 else:
-                    # A linked PDF contained an entire multi-section chapter/book under a single stub section
-                    next_body = ""
-                    next_kids = all_secs
-                    next_art = cur_art or ""
-                    next_ord = cur_ord or ""
-                    next_eff = cur_eff or ""
-                    next_ntype = "series"
-
-                with pool.connection() as conn:
-                    conn.execute(
-                        "UPDATE code_sections SET node_type = %s, article = %s, body = %s, ordinance_ref = %s, effective_date = %s, updated_at = now() WHERE id = %s",
-                        (next_ntype, next_art, next_body, next_ord, next_eff, sec_id),
-                    )
-                    conn.execute(
-                        "INSERT INTO code_revisions (section_id, ordinance_number, effective_date, change_summary, previous_body, new_body, edited_by) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                        (
-                            sec_id,
-                            next_ord,
-                            next_eff,
-                            f"Auto-imported from linked PDF ({'OCR, ' if parsed.get('used_ocr') else ''}{len(next_kids)} child sections)",
-                            cur_body or "",
-                            next_body,
-                            user["username"],
-                        ),
-                    )
-                    if next_kids:
-                        _upsert_section_tree(conn, chap_id, next_kids, sec_id, True, user, tree_stats, {}, "")
-                imported += 1
+                    skipped += 1
             except Exception as exc:
                 failed.append({"id": sec_id, "section_number": sec_num, "error": str(exc)})
-
-        elif body.split_children and body.split_existing_monoliths and has_body and not has_children:
-            cleaned = clean_pdf_pages([cur_body])
-            preamble, split_kids, scheme = split_section_body_into_children(cleaned, parent_number=sec_num)
-            if len(split_kids) >= 2:
-                meta = extract_ordinance_metadata(cleaned, src)
-                next_ord = cur_ord or meta["ordinance_ref"]
-                next_eff = cur_eff or meta["effective_date"]
-                with pool.connection() as conn:
-                    conn.execute(
-                        "UPDATE code_sections SET node_type = 'series', body = %s, ordinance_ref = %s, effective_date = %s, updated_at = now() WHERE id = %s",
-                        (preamble, next_ord, next_eff, sec_id),
-                    )
-                    conn.execute(
-                        "INSERT INTO code_revisions (section_id, ordinance_number, effective_date, change_summary, previous_body, new_body, edited_by) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-                        (sec_id, next_ord, next_eff, f"Split monolith into {len(split_kids)} child sections ({scheme})", cur_body, preamble, user["username"]),
-                    )
-                    _upsert_section_tree(conn, chap_id, split_kids, sec_id, True, user, tree_stats, {}, "")
-                reformatted += 1
-            elif body.reformat_existing:
-                cleaned = clean_pdf_pages([cur_body])
-                meta = extract_ordinance_metadata(cleaned, src)
-                next_ord = cur_ord or meta["ordinance_ref"]
-                next_eff = cur_eff or meta["effective_date"]
-                if cleaned != cur_body or next_ord != cur_ord or next_eff != cur_eff:
-                    with pool.connection() as conn:
-                        conn.execute(
-                            "UPDATE code_sections SET body = %s, ordinance_ref = %s, effective_date = %s, updated_at = now() WHERE id = %s",
-                            (cleaned, next_ord, next_eff, sec_id),
-                        )
-                        conn.execute(
-                            "INSERT INTO code_revisions (section_id, ordinance_number, effective_date, change_summary, previous_body, new_body, edited_by) "
-                            "VALUES (%s, %s, %s, 'Batch reformatted code text', %s, %s, %s)",
-                            (sec_id, next_ord, next_eff, cur_body, cleaned, user["username"]),
-                        )
-                    reformatted += 1
-                else:
-                    skipped += 1
-            else:
-                skipped += 1
-        elif body.reformat_existing and has_body:
-            cleaned = clean_pdf_pages([cur_body])
-            meta = extract_ordinance_metadata(cleaned, src)
-            next_ord = cur_ord or meta["ordinance_ref"]
-            next_eff = cur_eff or meta["effective_date"]
-            if cleaned != cur_body or next_ord != cur_ord or next_eff != cur_eff:
-                with pool.connection() as conn:
-                    conn.execute(
-                        "UPDATE code_sections SET body = %s, ordinance_ref = %s, effective_date = %s, updated_at = now() WHERE id = %s",
-                        (cleaned, next_ord, next_eff, sec_id),
-                    )
-                    conn.execute(
-                        "INSERT INTO code_revisions (section_id, ordinance_number, effective_date, change_summary, previous_body, new_body, edited_by) "
-                        "VALUES (%s, %s, %s, 'Batch reformatted code text', %s, %s, %s)",
-                        (sec_id, next_ord, next_eff, cur_body, cleaned, user["username"]),
-                    )
-                reformatted += 1
-            else:
-                skipped += 1
         else:
-            skipped += 1
+            outcome = _split_or_reformat_row(
+                sec_id,
+                chap_id,
+                sec_num,
+                cur_body or "",
+                cur_ord or "",
+                cur_eff or "",
+                src,
+                has_children,
+                allow_split=(body.split_children and body.split_existing_monoliths),
+                allow_reformat=body.reformat_existing,
+                user=user,
+                tree_stats=tree_stats,
+            )
+            if outcome in ("split", "reformatted"):
+                reformatted += 1
+            else:
+                skipped += 1
 
     return {
         "imported": imported,
@@ -1610,3 +2038,186 @@ async def bulk_import_linked_pdfs(
     user: dict = Depends(require_permission("codification.manage")),
 ):
     return await run_in_threadpool(_run_bulk_linked_worker, body, user)
+
+
+class BulkSectionActionIn(BaseModel):
+    section_ids: list[int]
+    action: str
+    include_descendants: bool = True
+    target_chapter_id: int | None = None
+    enable_ocr: bool = True
+    split_children: bool = True
+
+
+_ALLOWED_BULK_ACTIONS = {"publish", "unpublish", "reformat", "split", "reextract", "move_chapter", "delete"}
+
+
+def _bulk_section_action_worker(body: BulkSectionActionIn, user: dict) -> dict:
+    action = (body.action or "").strip().lower()
+    raw_ids = sorted({int(x) for x in body.section_ids if int(x) > 0})
+    if not raw_ids:
+        return {"action": action, "affected": 0, "skipped": 0, "children_created": 0, "children_updated": 0, "ocr_used_count": 0, "failed": []}
+
+    with pool.connection() as conn:
+        if body.include_descendants:
+            target_ids = [
+                r[0]
+                for r in conn.execute(
+                    "WITH RECURSIVE sub AS ("
+                    "  SELECT id FROM code_sections WHERE id = ANY(%s) "
+                    "  UNION "
+                    "  SELECT cs.id FROM code_sections cs JOIN sub ON cs.parent_id = sub.id"
+                    ") SELECT id FROM sub",
+                    (raw_ids,),
+                ).fetchall()
+            ]
+        else:
+            target_ids = raw_ids
+
+        if not target_ids:
+            return {"action": action, "affected": 0, "skipped": 0, "children_created": 0, "children_updated": 0, "ocr_used_count": 0, "failed": []}
+
+        if action in ("publish", "unpublish"):
+            pub_val = action == "publish"
+            res = conn.execute(
+                "UPDATE code_sections SET is_published = %s, updated_at = now() WHERE id = ANY(%s)",
+                (pub_val, target_ids),
+            )
+            return {"action": action, "affected": res.rowcount or 0, "skipped": 0, "children_created": 0, "children_updated": 0, "ocr_used_count": 0, "failed": []}
+
+        if action == "delete":
+            obj_keys = [
+                r[0]
+                for r in conn.execute(
+                    "WITH RECURSIVE sub AS ("
+                    "  SELECT id, object_key FROM code_sections WHERE id = ANY(%s) "
+                    "  UNION "
+                    "  SELECT cs.id, cs.object_key FROM code_sections cs JOIN sub ON cs.parent_id = sub.id"
+                    ") SELECT object_key FROM sub WHERE object_key <> ''",
+                    (raw_ids,),
+                ).fetchall()
+            ]
+            # Deleting selected top/chosen IDs cascades to their descendants
+            res = conn.execute("DELETE FROM code_sections WHERE id = ANY(%s)", (raw_ids,))
+            if obj_keys:
+                _remove_minio_objects(obj_keys)
+            return {"action": action, "affected": res.rowcount or 0, "skipped": 0, "children_created": 0, "children_updated": 0, "ocr_used_count": 0, "failed": []}
+
+        if action == "move_chapter":
+            if body.target_chapter_id is None:
+                raise ValueError("target_chapter_id is required for move_chapter")
+            crow = conn.execute("SELECT id FROM code_chapters WHERE id = %s", (body.target_chapter_id,)).fetchone()
+            if not crow:
+                raise ValueError("Target chapter not found")
+            sel_set = set(raw_ids)
+            sel_rows = conn.execute(
+                "SELECT id, chapter_id, parent_id, section_number FROM code_sections WHERE id = ANY(%s) ORDER BY sort_order ASC, id ASC",
+                (raw_ids,),
+            ).fetchall()
+            # Process roots of the selected subset (nodes whose parent isn't also selected)
+            roots = [(sid, cid, pid, snum) for sid, cid, pid, snum in sel_rows if pid not in sel_set]
+            affected = 0
+            skipped = 0
+            failed: list[dict] = []
+            for sid, old_cid, old_pid, snum in roots:
+                if old_cid == body.target_chapter_id:
+                    skipped += 1
+                    continue
+                subtree_ids = [
+                    r[0]
+                    for r in conn.execute(
+                        "WITH RECURSIVE sub AS ("
+                        "  SELECT id FROM code_sections WHERE id = %s "
+                        "  UNION "
+                        "  SELECT cs.id FROM code_sections cs JOIN sub ON cs.parent_id = sub.id"
+                        ") SELECT id FROM sub",
+                        (sid,),
+                    ).fetchall()
+                ]
+                try:
+                    with conn.transaction():
+                        if old_pid is not None:
+                            conn.execute("UPDATE code_sections SET parent_id = NULL WHERE id = %s", (sid,))
+                        res = conn.execute(
+                            "UPDATE code_sections SET chapter_id = %s, updated_at = now() WHERE id = ANY(%s)",
+                            (body.target_chapter_id, subtree_ids),
+                        )
+                        affected += res.rowcount or 0
+                except Exception as exc:
+                    failed.append({"id": sid, "section_number": snum, "error": f"Conflict moving {snum}: {exc}"})
+            return {"action": action, "affected": affected, "skipped": skipped, "children_created": 0, "children_updated": 0, "ocr_used_count": 0, "failed": failed}
+
+        rows = conn.execute(
+            "SELECT id, chapter_id, section_number, article, body, ordinance_ref, effective_date, source_pdf_url, object_key, "
+            "       (SELECT COUNT(*) FROM code_sections c WHERE c.parent_id = code_sections.id) AS child_count "
+            "FROM code_sections WHERE id = ANY(%s) ORDER BY sort_order ASC, id ASC",
+            (target_ids,),
+        ).fetchall()
+
+    affected = 0
+    skipped = 0
+    ocr_used_count = 0
+    failed = []
+    tree_stats = {"sections_created": 0, "sections_updated": 0, "sections_skipped": 0, "children_created": 0, "children_updated": 0, "warnings": []}
+
+    for row in rows:
+        sec_id, chap_id, sec_num, cur_art, cur_body, cur_ord, cur_eff, src_url, obj_key, child_count = row
+        has_children = int(child_count or 0) > 0
+        src = (src_url or "").strip()
+        if action == "reextract":
+            if not (obj_key or src.startswith(("http://", "https://"))):
+                skipped += 1
+                continue
+            try:
+                did_imp, used_ocr = _reextract_single_section(row, body.split_children, body.enable_ocr, user, tree_stats)
+                if used_ocr:
+                    ocr_used_count += 1
+                if did_imp:
+                    affected += 1
+                else:
+                    skipped += 1
+            except Exception as exc:
+                failed.append({"id": sec_id, "section_number": sec_num, "error": str(exc)})
+        else:
+            outcome = _split_or_reformat_row(
+                sec_id,
+                chap_id,
+                sec_num,
+                cur_body or "",
+                cur_ord or "",
+                cur_eff or "",
+                src,
+                has_children,
+                allow_split=(action == "split"),
+                allow_reformat=(action == "reformat"),
+                user=user,
+                tree_stats=tree_stats,
+            )
+            if outcome == action or (action == "split" and outcome == "split") or (action == "reformat" and outcome == "reformatted"):
+                affected += 1
+            else:
+                skipped += 1
+
+    return {
+        "action": action,
+        "affected": affected,
+        "skipped": skipped,
+        "children_created": tree_stats["children_created"],
+        "children_updated": tree_stats["children_updated"],
+        "ocr_used_count": ocr_used_count,
+        "failed": failed,
+    }
+
+
+@router.post("/sections/bulk-action")
+async def bulk_section_action(
+    body: BulkSectionActionIn,
+    user: dict = Depends(require_permission("codification.manage")),
+):
+    action = (body.action or "").strip().lower()
+    if action not in _ALLOWED_BULK_ACTIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported bulk action: {body.action}")
+    try:
+        return await run_in_threadpool(_bulk_section_action_worker, body, user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
