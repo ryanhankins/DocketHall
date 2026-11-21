@@ -20,7 +20,7 @@ import { createRoot } from 'react-dom/client';
 import '../app.css';
 import { PublicFooter, PublicHeader, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
-import MunicodeCodeViewer from './modules/codification/MunicodeCodeViewer.jsx';
+import CodeLibraryViewer from './modules/codification/CodeLibraryViewer.jsx';
 
 function PublicCityCode() {
   const [branding, setBranding] = useState({ city_title: '', has_city_logo: false });
@@ -44,7 +44,7 @@ function PublicCityCode() {
       </PublicHeader>
 
       <main style={{ margin: '0 auto', width: '100%', maxWidth: '1440px', padding: '1rem 1.25rem', boxSizing: 'border-box' }}>
-        <MunicodeCodeViewer branding={branding} standalone />
+        <CodeLibraryViewer branding={branding} standalone />
       </main>
       <PublicFooter branding={branding} />
     </div>

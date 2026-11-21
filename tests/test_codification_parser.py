@@ -94,7 +94,7 @@ class CodificationParserTest(unittest.TestCase):
         self.assertEqual([k["section_number"] for k in kids], ["902.010", "902.020"])
         self.assertEqual(kids[0]["title"], "Grant of Franchise")
 
-        # 3-part dotted (WA/OR/CA Sterling / Code Publishing style)
+        # Three-part dotted style (e.g. title.chapter.section)
         three_part = (
             "1.04.010 Purpose. This chapter establishes administrative citations.\n\n"
             "1.04.020 Definitions. For purposes of this chapter, words mean as follows."
@@ -103,13 +103,13 @@ class CodificationParserTest(unittest.TestCase):
         self.assertEqual(scheme3, "dotted_3part")
         self.assertEqual([k["section_number"] for k in kids3], ["1.04.010", "1.04.020"])
 
-        # American Legal section symbol style
+        # Section symbol (§) style
         amlegal = (
             "§ 30.01 ESTABLISHMENT. There is hereby established a Planning Commission.\n\n"
             "§ 30.02 MEMBERSHIP. The Commission shall consist of five members."
         )
         _, kids_am, scheme_am = split_section_body_into_children(amlegal, parent_number="30")
-        self.assertEqual(scheme_am, "muni_sec")
+        self.assertEqual(scheme_am, "prefixed_sec")
         self.assertEqual([k["section_number"] for k in kids_am], ["30.01", "30.02"])
 
     def test_page_needs_ocr_classifier(self):
@@ -157,7 +157,7 @@ class CodificationParserTest(unittest.TestCase):
         self.assertEqual(a["section_number"], "208A")
         self.assertEqual(a["chapter_prefix"], "2XX")
 
-    def test_multi_chapter_municode_book_hierarchy(self):
+    def test_multi_chapter_code_book_hierarchy(self):
         try:
             from pypdf import PdfReader  # noqa: F401
             from reportlab.pdfgen import canvas
@@ -167,7 +167,7 @@ class CodificationParserTest(unittest.TestCase):
         buf = io.BytesIO()
         c = canvas.Canvas(buf)
         lines = [
-            "CODE OF ORDINANCES - CHATFIELD, MINNESOTA",
+            "CODE OF ORDINANCES - EXAMPLE CITY, MINNESOTA",
             "TABLE OF CONTENTS",
             "Chapter 1 General Provisions ........ 1",
             "Chapter 2 Administration ............ 2",
@@ -190,7 +190,7 @@ class CodificationParserTest(unittest.TestCase):
         c.showPage()
         c.save()
 
-        parsed = parse_code_pdf(buf.getvalue(), "Chatfield_Code.pdf")
+        parsed = parse_code_pdf(buf.getvalue(), "ExampleCity_Code.pdf")
         self.assertEqual(parsed["kind"], "book")
         self.assertEqual(len(parsed["chapters"]), 2)
         ch1 = parsed["chapters"][0]

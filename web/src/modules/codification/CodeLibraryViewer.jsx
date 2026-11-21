@@ -58,12 +58,12 @@ function TocNode({
   };
 
   return (
-    <div className="muni-toc-sec-wrap">
-      <div className="muni-toc-row">
+    <div className="code-lib-toc-sec-wrap">
+      <div className="code-lib-toc-row">
         {isExpandable ? (
           <button
             type="button"
-            className="muni-toc-caret sm"
+            className="code-lib-toc-caret sm"
             aria-label={isOpen ? `Collapse ${sec.section_number}` : `Expand ${sec.section_number}`}
             aria-expanded={isOpen}
             onClick={() => onToggleExpand(sec.id, !isOpen)}
@@ -71,11 +71,11 @@ function TocNode({
             {isOpen ? '▾' : '▸'}
           </button>
         ) : (
-          <span className="muni-toc-spacer" />
+          <span className="code-lib-toc-spacer" />
         )}
         <button
           type="button"
-          className={`muni-toc-sec-btn${isSecActive ? ' active' : ''}`}
+          className={`code-lib-toc-sec-btn${isSecActive ? ' active' : ''}`}
           onClick={() => {
             if (hasChildren) {
               setExpandedSections((prev) => ({ ...prev, [sec.id]: true }));
@@ -84,12 +84,12 @@ function TocNode({
           }}
         >
           <strong>{formatNodePrefix(sec)}</strong> {sec.title}
-          {hasChildren && <span className="muni-node-count">({children.length})</span>}
+          {hasChildren && <span className="code-lib-node-count">({children.length})</span>}
         </button>
       </div>
 
       {isOpen && hasChildren && (
-        <div className="muni-toc-children muni-toc-nested">
+        <div className="code-lib-toc-children code-lib-toc-nested">
           {children.map((child) => (
             <TocNode
               key={child.id}
@@ -109,12 +109,12 @@ function TocNode({
       )}
 
       {isOpen && !hasChildren && subs.length > 0 && (
-        <div className="muni-toc-subs">
+        <div className="code-lib-toc-subs">
           {subs.map((sub) => (
             <button
               key={sub.id}
               type="button"
-              className="muni-toc-sub-btn"
+              className="code-lib-toc-sub-btn"
               onClick={() => onSelectSection(enriched, sub.id)}
             >
               <span>{sub.number}</span> {sub.label}
@@ -131,8 +131,8 @@ function renderContinuousSection(sec, chapter, allSectionsMap, q, copiedKey, cop
   const children = sec.children || [];
   const hasChildren = children.length > 0;
   return (
-    <article key={sec.id} className={`muni-section-article${depth > 0 ? ' muni-section-nested' : ''}`}>
-      {sec.article && depth === 0 && <div className="muni-section-kicker">{sec.article}</div>}
+    <article key={sec.id} className={`code-lib-section-article${depth > 0 ? ' code-lib-section-nested' : ''}`}>
+      {sec.article && depth === 0 && <div className="code-lib-section-kicker">{sec.article}</div>}
       <div className="between" style={{ alignItems: 'flex-start', gap: 8 }}>
         <h2 style={{ margin: 0, fontSize: depth === 0 ? '1.18rem' : '1.04rem' }}>
           <button
@@ -146,7 +146,7 @@ function renderContinuousSection(sec, chapter, allSectionsMap, q, copiedKey, cop
               : `Sec. ${sec.section_number}. — ${sec.title}`}
           </button>
         </h2>
-        <div className="actions muni-no-print" style={{ flexShrink: 0 }}>
+        <div className="actions code-lib-no-print" style={{ flexShrink: 0 }}>
           <button type="button" className="btn sm" onClick={() => copySectionLink(sec.section_number)}>
             {copiedKey === token ? 'Copied!' : 'Share'}
           </button>
@@ -163,7 +163,7 @@ function renderContinuousSection(sec, chapter, allSectionsMap, q, copiedKey, cop
         </div>
       )}
       {sec.summary && (
-        <p className="muni-summary"><strong>Summary:</strong> {sec.summary}</p>
+        <p className="code-lib-summary"><strong>Summary:</strong> {sec.summary}</p>
       )}
       {sec.body ? (
         <StructuredCodeBody
@@ -184,7 +184,7 @@ function renderContinuousSection(sec, chapter, allSectionsMap, q, copiedKey, cop
       ) : null}
 
       {hasChildren && (
-        <div className="muni-nested-children">
+        <div className="code-lib-nested-children">
           {children.map((chNode) =>
             renderContinuousSection(chNode, chapter, allSectionsMap, q, copiedKey, copySectionLink, openSection, depth + 1),
           )}
@@ -194,7 +194,7 @@ function renderContinuousSection(sec, chapter, allSectionsMap, q, copiedKey, cop
   );
 }
 
-export default function MunicodeCodeViewer({ branding = {}, standalone = false }) {
+export default function CodeLibraryViewer({ branding = {}, standalone = false }) {
   const [fullChapters, setFullChapters] = useState([]);
   const [searchResults, setSearchResults] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -262,8 +262,8 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
       const el = document.getElementById(anchorId);
       if (el) {
         el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        el.classList.add('muni-flash');
-        setTimeout(() => el.classList.remove('muni-flash'), 1800);
+        el.classList.add('code-lib-flash');
+        setTimeout(() => el.classList.remove('code-lib-flash'), 1800);
       }
     }, 60);
   }, []);
@@ -393,7 +393,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
     if (anchorId) {
       scrollToAnchor(anchorId);
     } else if (typeof window !== 'undefined') {
-      const readerEl = document.getElementById('muni-reader-top');
+      const readerEl = document.getElementById('code-lib-reader-top');
       readerEl?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [sectionById, updateUrl, scrollToAnchor]);
@@ -446,15 +446,15 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
   const tocChapters = searchResults && q.trim() ? searchResults : fullChapters;
 
   return (
-    <div className="muni-shell">
+    <div className="code-lib-shell">
       {/* Top Toolbar */}
-      <div className="muni-topbar card">
-        <div className="muni-topbar-left">
+      <div className="code-lib-topbar card">
+        <div className="code-lib-topbar-left">
           <button
             type="button"
             className="btn sm"
             aria-expanded={sidebarOpen}
-            aria-controls="muni-toc-sidebar"
+            aria-controls="code-lib-toc-sidebar"
             onClick={() => setSidebarOpen((v) => !v)}
           >
             {sidebarOpen ? 'Hide Contents' : 'Contents'}
@@ -472,8 +472,8 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
           </div>
         </div>
 
-        <div className="muni-topbar-right">
-          <div className="muni-search-wrap">
+        <div className="code-lib-topbar-right">
+          <div className="code-lib-search-wrap">
             <input
               type="search"
               aria-label="Search City Code"
@@ -502,10 +502,10 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
       </div>
 
       {/* Main Split Workspace */}
-      <div className={`muni-layout${sidebarOpen ? '' : ' toc-collapsed'}`}>
+      <div className={`code-lib-layout${sidebarOpen ? '' : ' toc-collapsed'}`}>
         {sidebarOpen && (
-          <aside id="muni-toc-sidebar" className="muni-toc card" aria-label="Code Table of Contents">
-            <div className="muni-toc-header">
+          <aside id="code-lib-toc-sidebar" className="code-lib-toc card" aria-label="Code Table of Contents">
+            <div className="code-lib-toc-header">
               <span>Table of Contents</span>
               {fullChapters.length > 0 && (
                 <button
@@ -521,7 +521,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
 
             <button
               type="button"
-              className={`muni-toc-root${viewMode === 'overview' ? ' active' : ''}`}
+              className={`code-lib-toc-root${viewMode === 'overview' ? ' active' : ''}`}
               onClick={openOverview}
             >
               Code of Ordinances
@@ -532,16 +532,16 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
             ) : !tocChapters.length ? (
               <p className="muted" style={{ fontSize: '.85rem', padding: '.5rem' }}>No matching sections.</p>
             ) : (
-              <div className="muni-toc-tree">
+              <div className="code-lib-toc-tree">
                 {tocChapters.map((ch) => {
                   const isOpen = Boolean(q.trim()) || !!expandedChapters[ch.id];
                   const isChActive = viewMode === 'chapter' && activeChapterId === ch.id;
                   return (
-                    <div key={ch.id} className="muni-toc-chapter">
-                      <div className="muni-toc-row">
+                    <div key={ch.id} className="code-lib-toc-chapter">
+                      <div className="code-lib-toc-row">
                         <button
                           type="button"
-                          className="muni-toc-caret"
+                          className="code-lib-toc-caret"
                           aria-label={isOpen ? `Collapse ${ch.code_prefix}` : `Expand ${ch.code_prefix}`}
                           aria-expanded={isOpen}
                           onClick={() => setExpandedChapters((prev) => ({ ...prev, [ch.id]: !isOpen }))}
@@ -550,16 +550,16 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                         </button>
                         <button
                           type="button"
-                          className={`muni-toc-chap-btn${isChActive ? ' active' : ''}`}
+                          className={`code-lib-toc-chap-btn${isChActive ? ' active' : ''}`}
                           onClick={() => openChapter(ch)}
                         >
-                          <span className="muni-chap-code">{ch.code_prefix}</span>{' '}
+                          <span className="code-lib-chap-code">{ch.code_prefix}</span>{' '}
                           <span>{ch.title}</span>
                         </button>
                       </div>
 
                       {isOpen && (
-                        <div className="muni-toc-children">
+                        <div className="code-lib-toc-children">
                           {(ch.sections || []).map((sec) => (
                             <TocNode
                               key={sec.id}
@@ -586,9 +586,9 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
         )}
 
         {/* Reading Pane */}
-        <section id="muni-reader-top" className="muni-reader card" aria-label="City Code Reader">
+        <section id="code-lib-reader-top" className="code-lib-reader card" aria-label="City Code Reader">
           {/* Breadcrumbs */}
-          <nav className="muni-breadcrumbs" aria-label="Code navigation breadcrumbs">
+          <nav className="code-lib-breadcrumbs" aria-label="Code navigation breadcrumbs">
             <button type="button" className="link-btn" onClick={openOverview}>
               Code of Ordinances
             </button>
@@ -648,8 +648,8 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
               ) : (
                 <div style={{ display: 'grid', gap: '1rem' }}>
                   {flatSearchHitsByChapter.map(({ chapter: ch, hits }) => (
-                    <div key={ch.id} className="muni-search-group">
-                      <div className="muni-search-chap">
+                    <div key={ch.id} className="code-lib-search-group">
+                      <div className="code-lib-search-chap">
                         <button type="button" className="link-btn" onClick={() => openChapter(chapterById.get(ch.id) || ch)}>
                           {ch.code_prefix} — {ch.title}
                         </button>
@@ -662,7 +662,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                             <button
                               key={sec.id}
                               type="button"
-                              className="muni-search-hit"
+                              className="code-lib-search-hit"
                               onClick={() => openSection(sec)}
                             >
                               {pathPrefix && (
@@ -690,7 +690,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
           {/* MODE 2: OVERVIEW / CODE COVER */}
           {viewMode === 'overview' && (
             <div>
-              <div className="muni-cover">
+              <div className="code-lib-cover">
                 <h1 style={{ margin: '0 0 .35rem' }}>
                   {cityTitle ? `Code of Ordinances — ${cityTitle}` : 'Municipal Code of Ordinances'}
                 </h1>
@@ -704,9 +704,9 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
               ) : !fullChapters.length ? (
                 <p className="muted">No published code chapters are currently available.</p>
               ) : (
-                <div className="muni-chapter-grid">
+                <div className="code-lib-chapter-grid">
                   {fullChapters.map((ch) => (
-                    <div key={ch.id} className="muni-chapter-card">
+                    <div key={ch.id} className="code-lib-chapter-card">
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
                         <button type="button" className="link-btn" style={{ fontSize: '1.02rem' }} onClick={() => openChapter(ch)}>
                           <span className="badge active" style={{ marginRight: 6 }}>{ch.code_prefix}</span>
@@ -717,7 +717,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                         </span>
                       </div>
                       {ch.description && <p className="muted" style={{ fontSize: '.86rem', margin: '.35rem 0' }}>{ch.description}</p>}
-                      <div className="muni-chap-quick-secs">
+                      <div className="code-lib-chap-quick-secs">
                         {(ch.sections || []).slice(0, 6).map((sec) => (
                           <button
                             key={sec.id}
@@ -758,9 +758,9 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
               </div>
 
               {(activeChapter.sections || []).length > 0 && (
-                <div className="muni-chap-index">
+                <div className="code-lib-chap-index">
                   <strong>Sections in this Chapter:</strong>
-                  <div className="muni-chap-index-grid">
+                  <div className="code-lib-chap-index-grid">
                     {(activeChapter.sections || []).map((s) => (
                       <button
                         key={s.id}
@@ -800,7 +800,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                       : `Sec. ${activeSection.section_number}. — ${activeSection.title}`}
                   </h1>
                 </div>
-                <div className="actions muni-no-print" style={{ flexShrink: 0 }}>
+                <div className="actions code-lib-no-print" style={{ flexShrink: 0 }}>
                   <button
                     type="button"
                     className="btn sm"
@@ -833,7 +833,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
               </div>
 
               {(activeSection.ordinance_ref || activeSection.effective_date || activeSection.updated_at) && (
-                <div className="muni-meta-bar">
+                <div className="code-lib-meta-bar">
                   {activeSection.ordinance_ref && <span>Ordinance: <strong>{activeSection.ordinance_ref}</strong></span>}
                   {activeSection.effective_date && <span>Effective: <strong>{activeSection.effective_date}</strong></span>}
                   {activeSection.updated_at && <span>Updated: {formatDate(activeSection.updated_at)}</span>}
@@ -841,7 +841,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
               )}
 
               {activeSection.summary && (
-                <div className="muni-summary">
+                <div className="code-lib-summary">
                   <strong>Summary:</strong> {activeSection.summary}
                 </div>
               )}
@@ -865,7 +865,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                     </h2>
                     <button
                       type="button"
-                      className="btn sm muni-no-print"
+                      className="btn sm code-lib-no-print"
                       onClick={() => setInlineAllChildren((v) => !v)}
                     >
                       {inlineAllChildren ? 'Show Index Only' : `Read All ${activeSection.children.length} Sections Together`}
@@ -873,12 +873,12 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                   </div>
 
                   {!inlineAllChildren ? (
-                    <div className="muni-parent-list">
+                    <div className="code-lib-parent-list">
                       {activeSection.children.map((chNode) => (
                         <button
                           key={chNode.id}
                           type="button"
-                          className="muni-parent-item"
+                          className="code-lib-parent-item"
                           onClick={() =>
                             openSection({
                               ...chNode,
@@ -942,7 +942,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
 
               {/* Previous / Next Navigation Footer */}
               {(prevSection || nextSection) && (
-                <div className="muni-pager muni-no-print">
+                <div className="code-lib-pager code-lib-no-print">
                   <div>
                     {prevSection && (
                       <button type="button" className="btn sm" onClick={() => openSection(prevSection)}>

@@ -233,7 +233,7 @@ function SectionEditor({ section, allSectionsMap, onBack, onSaved }) {
                   className={`btn sm${previewMode ? ' primary' : ''}`}
                   onClick={() => setPreviewMode(true)}
                 >
-                  Municode Preview
+                  Formatted Preview
                 </button>
                 <button
                   type="button"
@@ -1029,7 +1029,7 @@ export default function CodificationAdminPage() {
     <section id="section-codification-admin">
       <div className="between" style={{ marginBottom: '1rem' }}>
         <h1 style={{ margin: 0 }}>City Code &amp; Codification</h1>
-        <a href="/code" target="_blank" rel="noreferrer" className="btn sm">Open Municode Public Reader</a>
+        <a href="/code" target="_blank" rel="noreferrer" className="btn sm">Open Public Code Reader</a>
       </div>
 
       {/* BULK IMPORT & CODIFY STUDIO */}
@@ -1482,7 +1482,7 @@ export default function CodificationAdminPage() {
 
       {/* BULK ACTION BAR WHEN ROWS ARE SELECTED */}
       {selectedIds.size > 0 && (
-        <div className="muni-bulk-bar" role="region" aria-label="Bulk codification actions">
+        <div className="code-lib-bulk-bar" role="region" aria-label="Bulk codification actions">
           <strong>{selectedIds.size} selected</strong>
           <div className="actions" style={{ alignItems: 'center' }}>
             <button type="button" className="btn sm primary" disabled={bulkActionBusy} onClick={() => runBulkTableAction('publish')}>

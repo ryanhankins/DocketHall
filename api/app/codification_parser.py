@@ -43,7 +43,7 @@ _ARTICLE_LINE_RE = re.compile(
     r"^(ARTICLE|DIVISION|PART)\s+([0-9IVXLCM]+)\b(?:\s*[-–—.:]\s*(.+))?$",
     re.IGNORECASE,
 )
-_MUNI_SEC_LINE_RE = re.compile(
+_PREFIXED_SEC_LINE_RE = re.compile(
     r"^(?:Sec(?:tion)?\.?|§+)\s*([0-9]+(?:[-.][0-9A-Za-z]+)*)\.?(?:\s*[-–—.:]\s*|\s+)(.*)$",
     re.IGNORECASE,
 )
@@ -118,7 +118,7 @@ def _is_standalone_heading_text(text: str) -> bool:
         return False
     if _TOP_SEC_TITLE_RE.match(s) or _CHAPTER_LINE_RE.match(s) or _ARTICLE_LINE_RE.match(s):
         return True
-    for rx in (_DOTTED_3PART_LINE_RE, _DOTTED_SERIES_LINE_RE, _MUNI_SEC_LINE_RE):
+    for rx in (_DOTTED_3PART_LINE_RE, _DOTTED_SERIES_LINE_RE, _PREFIXED_SEC_LINE_RE):
         m = rx.match(s)
         if m:
             rest = (m.group(2) or "").strip() if len(m.groups()) >= 2 else ""
@@ -133,7 +133,7 @@ def _is_structural_line(line: str) -> bool:
         _ARTICLE_LINE_RE,
         _DOTTED_3PART_LINE_RE,
         _DOTTED_SERIES_LINE_RE,
-        _MUNI_SEC_LINE_RE,
+        _PREFIXED_SEC_LINE_RE,
         _TOP_SEC_TITLE_RE,
     ):
         if rx.match(line):
@@ -152,7 +152,7 @@ def _is_boundary_line(line: str, prev_line: str = "") -> bool:
     for rx in (
         _CHAPTER_LINE_RE,
         _ARTICLE_LINE_RE,
-        _MUNI_SEC_LINE_RE,
+        _PREFIXED_SEC_LINE_RE,
         _DOTTED_3PART_LINE_RE,
         _DOTTED_SERIES_LINE_RE,
         _HYPHEN_SEC_LINE_RE,
@@ -165,9 +165,9 @@ def _is_boundary_line(line: str, prev_line: str = "") -> bool:
     ):
         m = rx.match(line)
         if m:
-            if rx in (_MUNI_SEC_LINE_RE, _DOTTED_3PART_LINE_RE, _DOTTED_SERIES_LINE_RE, _HYPHEN_SEC_LINE_RE):
+            if rx in (_PREFIXED_SEC_LINE_RE, _DOTTED_3PART_LINE_RE, _DOTTED_SERIES_LINE_RE, _HYPHEN_SEC_LINE_RE):
                 rest = (m.group(2) or "").strip() if len(m.groups()) >= 2 else ""
-                if (rest and rest[0].islower()) or (rx == _MUNI_SEC_LINE_RE and prev_wrap_ref):
+                if (rest and rest[0].islower()) or (rx == _PREFIXED_SEC_LINE_RE and prev_wrap_ref):
                     return False
             return True
     if _DOT_OUTLINE_RE.match(line):
@@ -558,7 +558,7 @@ def count_subsections(body: str) -> int:
             _DOTTED_3PART_LINE_RE.match(b)
             or _DOTTED_SERIES_LINE_RE.match(b)
             or _HYPHEN_SEC_LINE_RE.match(b)
-            or _MUNI_SEC_LINE_RE.match(b)
+            or _PREFIXED_SEC_LINE_RE.match(b)
             or _SUBD_RE.match(b)
         ):
             cnt += 1
@@ -706,8 +706,8 @@ def _match_heading_for_scheme(block: str, scheme: str) -> tuple[str, str, str] |
             return None
         return (num, title, inline)
 
-    if scheme == "muni_sec":
-        m = _MUNI_SEC_LINE_RE.match(b)
+    if scheme == "prefixed_sec":
+        m = _PREFIXED_SEC_LINE_RE.match(b)
         if not m:
             return None
         num, rest = m.group(1).strip(), (m.group(2) or "").strip()
@@ -755,7 +755,7 @@ def _build_children_for_scheme(
         if hit:
             candidates.append((idx, hit[0], hit[1], hit[2]))
 
-    if scheme in ("dotted_series", "muni_sec", "dotted_3part") and candidates:
+    if scheme in ("dotted_series", "prefixed_sec", "dotted_3part") and candidates:
         pref_counts = Counter(re.split(r"[.-]", num, 1)[0].upper() for _, num, _, _ in candidates)
         clean_parent = (parent_number or "").strip().upper()
         dom_pref = ""
@@ -835,7 +835,7 @@ def split_section_body_into_children(
 
     clean_parent = (parent_number or "").strip().upper()
     scored_results: list[tuple[int, int, str, str, list[dict]]] = []
-    schemes = ("dotted_3part", "dotted_series", "muni_sec", "hyphen_sec")
+    schemes = ("dotted_3part", "dotted_series", "prefixed_sec", "hyphen_sec")
     for prio_idx, scheme in enumerate(schemes):
         preamble, children = _build_children_for_scheme(paragraphs, scheme, parent_number=parent_number)
         if len(children) >= 2:
@@ -917,7 +917,7 @@ def _detect_multi_section_book(paragraphs: list[str], filename: str = "") -> lis
     work = _strip_toc_blocks(paragraphs)
     chapter_hits = sum(1 for p in work if _CHAPTER_LINE_RE.match(p))
     article_hits = sum(1 for p in work if _ARTICLE_LINE_RE.match(p))
-    muni_sec_hits = sum(1 for p in work if _MUNI_SEC_LINE_RE.match(p))
+    prefixed_sec_hits = sum(1 for p in work if _PREFIXED_SEC_LINE_RE.match(p))
     dotted3_hits = sum(1 for p in work if _DOTTED_3PART_LINE_RE.match(p))
     fn_info = infer_section_info_from_filename(filename)
 
@@ -926,8 +926,8 @@ def _detect_multi_section_book(paragraphs: list[str], filename: str = "") -> lis
 
     is_book = (
         chapter_hits >= 2
-        or (chapter_hits == 1 and (muni_sec_hits >= 2 or dotted3_hits >= 2 or article_hits >= 1))
-        or (muni_sec_hits >= 3 and sum(1 for p in work if re.match(r"^(?:Sec(?:tion)?\.?|§+)\s*\d+[-.]\d+", p, re.I)) >= 2)
+        or (chapter_hits == 1 and (prefixed_sec_hits >= 2 or dotted3_hits >= 2 or article_hits >= 1))
+        or (prefixed_sec_hits >= 3 and sum(1 for p in work if re.match(r"^(?:Sec(?:tion)?\.?|§+)\s*\d+[-.]\d+", p, re.I)) >= 2)
     )
     if not is_book:
         return None
@@ -1053,7 +1053,7 @@ def _detect_multi_section_book(paragraphs: list[str], filename: str = "") -> lis
                     current_chapter["sections"].append(current_division_node)
             continue
 
-        sm = _MUNI_SEC_LINE_RE.match(p) or (dotted3_hits >= 2 and _DOTTED_3PART_LINE_RE.match(p))
+        sm = _PREFIXED_SEC_LINE_RE.match(p) or (dotted3_hits >= 2 and _DOTTED_3PART_LINE_RE.match(p))
         if sm:
             sec_num = sm.group(1).strip()
             sec_rest = (sm.group(2) or "").strip() if len(sm.groups()) >= 2 else ""
@@ -1181,7 +1181,7 @@ def parse_code_pdf(
                     sec_title = _smart_title(top.group(2))
                 paragraphs = paragraphs[1:]
             else:
-                ms = _MUNI_SEC_LINE_RE.match(paragraphs[0])
+                ms = _PREFIXED_SEC_LINE_RE.match(paragraphs[0])
                 if ms and not sec_num:
                     sec_num = ms.group(1).strip()
                     if not sec_title:

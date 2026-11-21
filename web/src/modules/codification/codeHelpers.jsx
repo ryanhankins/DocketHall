@@ -263,43 +263,43 @@ export function StructuredCodeBody({
   const blocks = parseStructuredCodeBody(text);
   if (!blocks.length) return null;
   return (
-    <div className="muni-body">
+    <div className="code-lib-body">
       {blocks.map((blk, idx) => {
         if (blk.type === 'article') {
           return (
-            <h4 key={idx} className="muni-article-heading">
+            <h4 key={idx} className="code-lib-article-heading">
               <HighlightText text={blk.label} query={query} />
             </h4>
           );
         }
         if (blk.type === 'history') {
           return (
-            <p key={idx} className="muni-history">
+            <p key={idx} className="code-lib-history">
               <HighlightText text={blk.text} query={query} />
             </p>
           );
         }
         if (blk.type === 'ordaining') {
           return (
-            <p key={idx} className="muni-ordaining">
+            <p key={idx} className="code-lib-ordaining">
               <HighlightText text={blk.text} query={query} />
             </p>
           );
         }
         if (blk.type === 'subsection') {
           return (
-            <div key={idx} id={blk.id} className="muni-subsection">
-              <div className="muni-subsection-head">
-                <strong className="muni-sub-num">
+            <div key={idx} id={blk.id} className="code-lib-subsection">
+              <div className="code-lib-subsection-head">
+                <strong className="code-lib-sub-num">
                   <HighlightText text={blk.number} query={query} />
                 </strong>{' '}
-                <strong className="muni-sub-title">
+                <strong className="code-lib-sub-title">
                   <HighlightText text={blk.heading} query={query} />
                 </strong>
                 {onCopyAnchor && (
                   <button
                     type="button"
-                    className="muni-anchor-btn"
+                    className="code-lib-anchor-btn"
                     title={`Copy direct link to ${blk.number}`}
                     aria-label={`Copy link to subsection ${blk.number}`}
                     onClick={() => onCopyAnchor(blk.id)}
@@ -309,7 +309,7 @@ export function StructuredCodeBody({
                 )}
               </div>
               {blk.text && (
-                <p className="muni-subsection-text">
+                <p className="code-lib-subsection-text">
                   <LinkedCodeBody
                     text={blk.text}
                     sectionMap={sectionMap}
@@ -324,9 +324,9 @@ export function StructuredCodeBody({
         }
         if (blk.type === 'clause') {
           return (
-            <div key={idx} className={`muni-clause muni-clause-l${blk.level}`}>
-              <span className="muni-clause-marker">{blk.marker}</span>
-              <div className="muni-clause-body">
+            <div key={idx} className={`code-lib-clause code-lib-clause-l${blk.level}`}>
+              <span className="code-lib-clause-marker">{blk.marker}</span>
+              <div className="code-lib-clause-body">
                 <LinkedCodeBody
                   text={blk.text}
                   sectionMap={sectionMap}
@@ -339,7 +339,7 @@ export function StructuredCodeBody({
           );
         }
         return (
-          <p key={idx} className="muni-para">
+          <p key={idx} className="code-lib-para">
             <LinkedCodeBody
               text={blk.text}
               sectionMap={sectionMap}

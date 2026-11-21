@@ -23,7 +23,7 @@ import ServiceIcon from './core/ServiceIcon.jsx';
 import CustomFieldsRenderer from './core/CustomFieldsRenderer.jsx';
 import { DocketHallLogo, DirectoryHeaderLink, PublicFooter, PublicHeader, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
-import MunicodeCodeViewer from './modules/codification/MunicodeCodeViewer.jsx';
+import CodeLibraryViewer from './modules/codification/CodeLibraryViewer.jsx';
 import { COMPLAINT_STATUSES, ORDINANCE_PRESETS, StatusBadge } from './modules/complaints/constants.jsx';
 
 const TAB_DEFS = [
@@ -1651,7 +1651,7 @@ function PermitsPublicTab({ me, onRequireAuth }) {
 }
 
 function CodePublicTab({ branding = {} }) {
-  return <MunicodeCodeViewer branding={branding} standalone={false} />;
+  return <CodeLibraryViewer branding={branding} standalone={false} />;
 }
 
 function RecordsPublicTab({ features = {} }) {
