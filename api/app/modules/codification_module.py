@@ -27,7 +27,7 @@ CODIFICATION_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
     (
         "code_sections",
         [
-            "id", "chapter_id", "section_number", "article", "title", "summary", "body",
+            "id", "chapter_id", "parent_id", "node_type", "section_number", "article", "title", "summary", "body",
             "ordinance_ref", "effective_date", "source_pdf_url", "object_key",
             "sort_order", "is_published", "updated_at",
         ],

@@ -112,6 +112,30 @@ def _json_val(v):
     return v
 
 
+def _toposort_self_ref_rows(rows: list[dict]) -> list[dict]:
+    """Order rows with a self-referencing parent_id FK so parents insert before children."""
+    ordered: list[dict] = []
+    seen_ids: set = set()
+    remaining = list(rows)
+    while remaining:
+        progressed = False
+        next_rem: list[dict] = []
+        for r in remaining:
+            pid = r.get("parent_id")
+            if pid is None or pid in seen_ids:
+                ordered.append(r)
+                if r.get("id") is not None:
+                    seen_ids.add(r.get("id"))
+                progressed = True
+            else:
+                next_rem.append(r)
+        remaining = next_rem
+        if not progressed:
+            ordered.extend(remaining)
+            break
+    return ordered
+
+
 def _fetch_table(conn, table: str, cols: list[str]) -> list[dict]:
     col_sql = ", ".join(cols)
     order_sql = " ORDER BY id ASC" if "id" in cols else ""
@@ -494,6 +518,8 @@ async def import_archive(
                 rows = table_rows[tname]
                 if not rows:
                     continue
+                if "parent_id" in cols:
+                    rows = _toposort_self_ref_rows(rows)
                 col_sql = ", ".join(cols)
                 placeholders = ", ".join(["%s"] * len(cols))
                 insert_sql = f"INSERT INTO {tname} ({col_sql}) VALUES ({placeholders})"
@@ -512,6 +538,8 @@ async def import_archive(
                             v = tenant_object_key(strip_tenant_prefix(v))
                         if c == "email" and v is None:
                             v = ""
+                        if c == "node_type" and not v:
+                            v = "section"
                         if c in jsonb_cols:
                             if v is None and c == "permissions":
                                 v = []

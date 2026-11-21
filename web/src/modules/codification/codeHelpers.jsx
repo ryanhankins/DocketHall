@@ -84,18 +84,36 @@ export function getSearchSnippet(section, query) {
   return `${prefix}${hay.slice(start, end).replace(/\s+/g, ' ').trim()}${suffix}`;
 }
 
+export function flattenTreeSections(sections, chapter, ancestors = []) {
+  const out = [];
+  for (const sec of sections || []) {
+    const enriched = {
+      ...sec,
+      chapter_id: chapter.id,
+      chapter_prefix: chapter.code_prefix,
+      chapter_title: chapter.title,
+      ancestors,
+    };
+    out.push(enriched);
+    if (Array.isArray(sec.children) && sec.children.length > 0) {
+      out.push(
+        ...flattenTreeSections(sec.children, chapter, [
+          ...ancestors,
+          { id: sec.id, section_number: sec.section_number, title: sec.title, node_type: sec.node_type || 'section' },
+        ]),
+      );
+    }
+  }
+  return out;
+}
+
 export function buildSectionMap(chapters) {
   const map = new Map();
   for (const ch of chapters || []) {
-    for (const sec of ch.sections || []) {
-      const key = String(sec.section_number || '').trim().toLowerCase();
-      if (key) {
-        map.set(key, {
-          ...sec,
-          chapter_id: ch.id,
-          chapter_prefix: ch.code_prefix,
-          chapter_title: ch.title,
-        });
+    for (const enriched of flattenTreeSections(ch.sections || [], ch, [])) {
+      const key = String(enriched.section_number || '').trim().toLowerCase();
+      if (key && !map.has(key)) {
+        map.set(key, enriched);
       }
     }
   }
@@ -103,8 +121,8 @@ export function buildSectionMap(chapters) {
 }
 
 const ARTICLE_BLOCK_RE = /^(ARTICLE|DIVISION|PART)\s+([IVXLCM0-9]+)\.?\s*(?:[-–—.]\s*)?(.*)$/i;
-const SUBSECTION_PUNCT_RE = /^((?:Sec(?:tion)?\.?|§)\s*[0-9]+(?:[-.][0-9A-Za-z]+)*|\d{2,4}\.\d{2,4}[A-Za-z]?|\d{1,3}-\d{1,4}[A-Za-z]?)\.?\s+([A-Z][A-Za-z0-9\s,&/'()-]{1,90}?[.:])\s*(.*)$/;
-const SUBSECTION_CAPS_RE = /^(\d{2,4}\.\d{2,4}[A-Za-z]?|\d{1,3}-\d{1,4}[A-Za-z]?)\.?\s+([A-Z][A-Z0-9\s,&/'()-]{2,80}?)\s+(?=[A-Z][a-z])(.*)$/;
+const SUBSECTION_PUNCT_RE = /^((?:Sec(?:tion)?\.?|§)\s*[0-9]+(?:[-.][0-9A-Za-z]+)*|\d{1,3}\.\d{1,3}\.\d{1,4}[A-Za-z]?|\d{1,4}[A-Za-z]?\.\d{2,4}[A-Za-z]?|\d{1,3}-\d{1,4}[A-Za-z]?)\.?\s+([A-Z][A-Za-z0-9\s,&/'()-]{1,90}?[.:])\s*(.*)$/;
+const SUBSECTION_CAPS_RE = /^(\d{1,3}\.\d{1,3}\.\d{1,4}[A-Za-z]?|\d{1,4}[A-Za-z]?\.\d{2,4}[A-Za-z]?|\d{1,3}-\d{1,4}[A-Za-z]?)\.?\s+([A-Z][A-Z0-9\s,&/'()-]{2,80}?)(?:\s+(?=[A-Z][a-z])(.*)|$)$/;
 const SUBD_HEAD_RE = /^(Subd(?:ivision)?\.?\s*\d+[A-Za-z]?)\.?\s+([A-Z][A-Za-z0-9\s,&/'()-]{1,80}?[.:])\s*(.*)$/i;
 const HISTORY_BLOCK_RE = /^["'(]?(?:AMENDED|ADOPTED|ENACTED|REPEALED|ADDED|UPDATED)\s+BY\s+ORD|^\((?:Ord\.?|Code\s+\d{4}|Prior\s+Code|Res\.?|State\s+Law)/i;
 const ORDAINING_BLOCK_RE = /^The\s+(?:City\s+)?Council\s+of\s+.+does\s+ordain/i;
@@ -155,7 +173,6 @@ export function parseStructuredCodeBody(body) {
     }
 
     if ((m = block.match(CLAUSE_L3_RE))) {
-      // Distinguish Roman numeral or uppercase paren (A) from lowercase (a) when needed
       if (/^\([a-z]\)/.test(m[1]) && !/^\([ivx]+\)$/.test(m[1])) {
         out.push({ type: 'clause', level: 1, marker: m[1], text: m[2] });
       } else {
@@ -190,7 +207,7 @@ export function extractSubsectionsForToc(section) {
     }));
 }
 
-const CROSS_REF_RE = /((?:§+|Sections?|Secs?\.?|Chapters?|Ch\.?)\s*([0-9]+(?:[-.][0-9A-Za-z]+)*))/gi;
+const CROSS_REF_RE = /((?:§+|Sections?|Secs?\.?|Chapters?|Ch\.?)\s*([0-9]+[A-Za-z]?(?:[-.][0-9A-Za-z]+)*))/gi;
 
 export function LinkedCodeBody({ text, sectionMap, currentSectionId, onSelectSection, query }) {
   const str = String(text || '');

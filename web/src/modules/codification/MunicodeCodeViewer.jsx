@@ -23,21 +23,175 @@ import {
   StructuredCodeBody,
   buildSectionMap,
   extractSubsectionsForToc,
+  flattenTreeSections,
   getSearchSnippet,
 } from './codeHelpers.jsx';
 
-function groupChapterByArticle(sections) {
-  const groups = [];
-  let cur = null;
-  for (const sec of sections || []) {
-    const art = (sec.article || '').trim();
-    if (!cur || cur.article !== art) {
-      cur = { article: art, sections: [] };
-      groups.push(cur);
-    }
-    cur.sections.push(sec);
-  }
-  return groups;
+function formatNodePrefix(sec) {
+  if (sec?.node_type === 'article' || sec?.node_type === 'division') return sec.section_number;
+  return `§ ${sec?.section_number || ''}`;
+}
+
+function TocNode({
+  sec,
+  chapter,
+  activeSectionId,
+  viewMode,
+  searchQuery,
+  expandedSections,
+  setExpandedSections,
+  subsectionTocCache,
+  onSelectSection,
+  onToggleExpand,
+}) {
+  const children = Array.isArray(sec.children) ? sec.children : [];
+  const hasChildren = children.length > 0;
+  const subs = !hasChildren ? (subsectionTocCache.get(sec.id) || []) : [];
+  const isExpandable = hasChildren || subs.length > 0;
+  const isOpen = isExpandable && (Boolean(searchQuery.trim()) || !!expandedSections[sec.id]);
+  const isSecActive = viewMode === 'section' && activeSectionId === sec.id;
+  const enriched = {
+    ...sec,
+    chapter_id: chapter.id,
+    chapter_prefix: chapter.code_prefix,
+    chapter_title: chapter.title,
+  };
+
+  return (
+    <div className="muni-toc-sec-wrap">
+      <div className="muni-toc-row">
+        {isExpandable ? (
+          <button
+            type="button"
+            className="muni-toc-caret sm"
+            aria-label={isOpen ? `Collapse ${sec.section_number}` : `Expand ${sec.section_number}`}
+            aria-expanded={isOpen}
+            onClick={() => onToggleExpand(sec.id, !isOpen)}
+          >
+            {isOpen ? '▾' : '▸'}
+          </button>
+        ) : (
+          <span className="muni-toc-spacer" />
+        )}
+        <button
+          type="button"
+          className={`muni-toc-sec-btn${isSecActive ? ' active' : ''}`}
+          onClick={() => {
+            if (hasChildren) {
+              setExpandedSections((prev) => ({ ...prev, [sec.id]: true }));
+            }
+            onSelectSection(enriched);
+          }}
+        >
+          <strong>{formatNodePrefix(sec)}</strong> {sec.title}
+          {hasChildren && <span className="muni-node-count">({children.length})</span>}
+        </button>
+      </div>
+
+      {isOpen && hasChildren && (
+        <div className="muni-toc-children muni-toc-nested">
+          {children.map((child) => (
+            <TocNode
+              key={child.id}
+              sec={child}
+              chapter={chapter}
+              activeSectionId={activeSectionId}
+              viewMode={viewMode}
+              searchQuery={searchQuery}
+              expandedSections={expandedSections}
+              setExpandedSections={setExpandedSections}
+              subsectionTocCache={subsectionTocCache}
+              onSelectSection={onSelectSection}
+              onToggleExpand={onToggleExpand}
+            />
+          ))}
+        </div>
+      )}
+
+      {isOpen && !hasChildren && subs.length > 0 && (
+        <div className="muni-toc-subs">
+          {subs.map((sub) => (
+            <button
+              key={sub.id}
+              type="button"
+              className="muni-toc-sub-btn"
+              onClick={() => onSelectSection(enriched, sub.id)}
+            >
+              <span>{sub.number}</span> {sub.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function renderContinuousSection(sec, chapter, allSectionsMap, q, copiedKey, copySectionLink, openSection, depth = 0) {
+  const token = `${sec.section_number}:`;
+  const children = sec.children || [];
+  const hasChildren = children.length > 0;
+  return (
+    <article key={sec.id} className={`muni-section-article${depth > 0 ? ' muni-section-nested' : ''}`}>
+      {sec.article && depth === 0 && <div className="muni-section-kicker">{sec.article}</div>}
+      <div className="between" style={{ alignItems: 'flex-start', gap: 8 }}>
+        <h2 style={{ margin: 0, fontSize: depth === 0 ? '1.18rem' : '1.04rem' }}>
+          <button
+            type="button"
+            className="link-btn"
+            style={{ color: 'inherit', fontSize: 'inherit' }}
+            onClick={() => openSection({ ...sec, chapter_id: chapter.id, chapter_prefix: chapter.code_prefix, chapter_title: chapter.title })}
+          >
+            {sec.node_type === 'article' || sec.node_type === 'division'
+              ? `${sec.section_number} — ${sec.title}`
+              : `Sec. ${sec.section_number}. — ${sec.title}`}
+          </button>
+        </h2>
+        <div className="actions muni-no-print" style={{ flexShrink: 0 }}>
+          <button type="button" className="btn sm" onClick={() => copySectionLink(sec.section_number)}>
+            {copiedKey === token ? 'Copied!' : 'Share'}
+          </button>
+          <a className="btn sm" href={`/api/codification/sections/${sec.id}/pdf`} target="_blank" rel="noreferrer">
+            PDF
+          </a>
+        </div>
+      </div>
+      {(sec.ordinance_ref || sec.effective_date) && (
+        <div className="muted" style={{ fontSize: '.84rem', margin: '.3rem 0 .6rem' }}>
+          {sec.ordinance_ref && <>Ordinance: <strong>{sec.ordinance_ref}</strong></>}
+          {sec.ordinance_ref && sec.effective_date && ' · '}
+          {sec.effective_date && <>Effective: <strong>{sec.effective_date}</strong></>}
+        </div>
+      )}
+      {sec.summary && (
+        <p className="muni-summary"><strong>Summary:</strong> {sec.summary}</p>
+      )}
+      {sec.body ? (
+        <StructuredCodeBody
+          text={sec.body}
+          sectionMap={allSectionsMap}
+          currentSectionId={sec.id}
+          onSelectSection={openSection}
+          query={q}
+          onCopyAnchor={(aid) => copySectionLink(sec.section_number, aid)}
+        />
+      ) : !hasChildren ? (
+        <p className="muted">
+          Full ordinance text is available in the{' '}
+          <a href={`/api/codification/sections/${sec.id}/pdf`} target="_blank" rel="noreferrer">
+            Official Section PDF
+          </a>.
+        </p>
+      ) : null}
+
+      {hasChildren && (
+        <div className="muni-nested-children">
+          {children.map((chNode) =>
+            renderContinuousSection(chNode, chapter, allSectionsMap, q, copiedKey, copySectionLink, openSection, depth + 1),
+          )}
+        </div>
+      )}
+    </article>
+  );
 }
 
 export default function MunicodeCodeViewer({ branding = {}, standalone = false }) {
@@ -48,6 +202,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
   const [viewMode, setViewMode] = useState('overview'); // 'overview' | 'chapter' | 'section' | 'search'
   const [activeChapterId, setActiveChapterId] = useState(null);
   const [activeSectionId, setActiveSectionId] = useState(null);
+  const [inlineAllChildren, setInlineAllChildren] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => (
     typeof window !== 'undefined' ? window.innerWidth >= 860 : true
   ));
@@ -57,37 +212,49 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
 
   const cityTitle = (branding?.city_title || '').trim();
 
-  // Flatten ordered sections & quick lookup maps from the complete published tree
-  const { allSectionsMap, orderedSections, chapterById, sectionById } = useMemo(() => {
+  // Flatten recursive tree into lookup maps & linear Prev/Next list
+  const {
+    allSectionsMap,
+    orderedReadableSections,
+    chapterById,
+    sectionById,
+    totalNodeCount,
+  } = useMemo(() => {
     const secMap = buildSectionMap(fullChapters);
     const ordered = [];
     const chapMap = new Map();
     const idMap = new Map();
+    let count = 0;
     for (const ch of fullChapters) {
       chapMap.set(ch.id, ch);
-      for (const sec of ch.sections || []) {
-        const enriched = {
-          ...sec,
-          chapter_id: ch.id,
-          chapter_prefix: ch.code_prefix,
-          chapter_title: ch.title,
-        };
-        ordered.push(enriched);
-        idMap.set(sec.id, enriched);
+      const flat = flattenTreeSections(ch.sections || [], ch, []);
+      for (const enriched of flat) {
+        count += 1;
+        idMap.set(enriched.id, enriched);
+        const hasKids = (enriched.children || []).length > 0;
+        if (!hasKids || (enriched.body || '').trim() || (enriched.summary || '').trim()) {
+          ordered.push(enriched);
+        }
       }
     }
-    return { allSectionsMap: secMap, orderedSections: ordered, chapterById: chapMap, sectionById: idMap };
+    return {
+      allSectionsMap: secMap,
+      orderedReadableSections: ordered,
+      chapterById: chapMap,
+      sectionById: idMap,
+      totalNodeCount: count,
+    };
   }, [fullChapters]);
 
   const subsectionTocCache = useMemo(() => {
     const cache = new Map();
-    for (const ch of fullChapters) {
-      for (const sec of ch.sections || []) {
-        cache.set(sec.id, extractSubsectionsForToc(sec));
+    for (const [id, sec] of sectionById.entries()) {
+      if (!(sec.children || []).length) {
+        cache.set(id, extractSubsectionsForToc(sec));
       }
     }
     return cache;
-  }, [fullChapters]);
+  }, [sectionById]);
 
   const scrollToAnchor = useCallback((anchorId) => {
     if (!anchorId) return;
@@ -118,7 +285,8 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
 
           if (secParam) {
             for (const ch of list) {
-              const found = (ch.sections || []).find(
+              const flat = flattenTreeSections(ch.sections || [], ch, []);
+              const found = flat.find(
                 (s) => String(s.section_number || '').trim().toLowerCase() === secParam || String(s.id) === secParam,
               );
               if (found) {
@@ -126,7 +294,9 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                 setActiveChapterId(ch.id);
                 setActiveSectionId(found.id);
                 setExpandedChapters((prev) => ({ ...prev, [ch.id]: true }));
-                setExpandedSections((prev) => ({ ...prev, [found.id]: true }));
+                const expandMap = { [found.id]: true };
+                for (const anc of found.ancestors || []) expandMap[anc.id] = true;
+                setExpandedSections((prev) => ({ ...prev, ...expandMap }));
                 if (hashAnchor) scrollToAnchor(hashAnchor);
                 return;
               }
@@ -192,6 +362,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
     setViewMode('overview');
     setActiveChapterId(null);
     setActiveSectionId(null);
+    setInlineAllChildren(false);
     updateUrl('overview');
   }, [updateUrl]);
 
@@ -200,6 +371,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
     setViewMode('chapter');
     setActiveChapterId(chap.id);
     setActiveSectionId(null);
+    setInlineAllChildren(false);
     setExpandedChapters((prev) => ({ ...prev, [chap.id]: true }));
     updateUrl('chapter', chap.code_prefix);
   }, [updateUrl]);
@@ -210,8 +382,13 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
     setViewMode('section');
     setActiveChapterId(sec.chapter_id);
     setActiveSectionId(sec.id);
+    setInlineAllChildren(false);
     setExpandedChapters((prev) => ({ ...prev, [sec.chapter_id]: true }));
-    setExpandedSections((prev) => ({ ...prev, [sec.id]: true }));
+    setExpandedSections((prev) => {
+      const next = { ...prev, [sec.id]: true };
+      for (const anc of sec.ancestors || []) next[anc.id] = true;
+      return next;
+    });
     updateUrl('section', sec.chapter_prefix, sec.section_number, anchorId);
     if (anchorId) {
       scrollToAnchor(anchorId);
@@ -242,17 +419,29 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
     setExpandedChapters(next);
   };
 
+  const toggleSectionExpand = useCallback((secId, openState) => {
+    setExpandedSections((prev) => ({ ...prev, [secId]: openState }));
+  }, []);
+
   const activeChapter = activeChapterId ? chapterById.get(activeChapterId) : null;
   const activeSection = activeSectionId ? sectionById.get(activeSectionId) : null;
 
-  const activeIdx = activeSection ? orderedSections.findIndex((s) => s.id === activeSection.id) : -1;
-  const prevSection = activeIdx > 0 ? orderedSections[activeIdx - 1] : null;
-  const nextSection = activeIdx >= 0 && activeIdx < orderedSections.length - 1 ? orderedSections[activeIdx + 1] : null;
+  const activeIdx = activeSection ? orderedReadableSections.findIndex((s) => s.id === activeSection.id) : -1;
+  const prevSection = activeIdx > 0 ? orderedReadableSections[activeIdx - 1] : null;
+  const nextSection = activeIdx >= 0 && activeIdx < orderedReadableSections.length - 1 ? orderedReadableSections[activeIdx + 1] : null;
 
-  const searchMatchCount = useMemo(() => {
-    if (!searchResults) return 0;
-    return searchResults.reduce((acc, ch) => acc + (ch.sections?.length || 0), 0);
-  }, [searchResults]);
+  const flatSearchHitsByChapter = useMemo(() => {
+    if (!searchResults) return [];
+    return searchResults.map((ch) => {
+      const hits = flattenTreeSections(ch.sections || [], ch, []).filter((n) => n.matched !== false);
+      return { chapter: ch, hits };
+    }).filter((g) => g.hits.length > 0 || (q.trim() && `${g.chapter.code_prefix} ${g.chapter.title}`.toLowerCase().includes(q.trim().toLowerCase())));
+  }, [searchResults, q]);
+
+  const searchMatchCount = useMemo(
+    () => flatSearchHitsByChapter.reduce((acc, g) => acc + g.hits.length, 0),
+    [flatSearchHitsByChapter],
+  );
 
   const tocChapters = searchResults && q.trim() ? searchResults : fullChapters;
 
@@ -277,7 +466,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                 {cityTitle ? `${cityTitle} Code of Ordinances` : 'Municipal Code of Ordinances'}
               </div>
               <div className="muted" style={{ fontSize: '.78rem' }}>
-                {fullChapters.length} Chapters · {orderedSections.length} Sections
+                {fullChapters.length} Chapters · {totalNodeCount} Sections
               </div>
             </div>
           </div>
@@ -347,7 +536,6 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                 {tocChapters.map((ch) => {
                   const isOpen = Boolean(q.trim()) || !!expandedChapters[ch.id];
                   const isChActive = viewMode === 'chapter' && activeChapterId === ch.id;
-                  const articleGroups = groupChapterByArticle(ch.sections || []);
                   return (
                     <div key={ch.id} className="muni-toc-chapter">
                       <div className="muni-toc-row">
@@ -372,57 +560,20 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
 
                       {isOpen && (
                         <div className="muni-toc-children">
-                          {articleGroups.map((ag, agIdx) => (
-                            <div key={`${ch.id}-ag-${agIdx}`}>
-                              {ag.article && (
-                                <div className="muni-toc-article">{ag.article}</div>
-                              )}
-                              {ag.sections.map((sec) => {
-                                const isSecActive = viewMode === 'section' && activeSectionId === sec.id;
-                                const subs = subsectionTocCache.get(sec.id) || [];
-                                const showSubs = subs.length > 0 && !!expandedSections[sec.id];
-                                return (
-                                  <div key={sec.id} className="muni-toc-sec-wrap">
-                                    <div className="muni-toc-row">
-                                      {subs.length > 0 ? (
-                                        <button
-                                          type="button"
-                                          className="muni-toc-caret sm"
-                                          aria-label={showSubs ? `Hide subsections of ${sec.section_number}` : `Show subsections of ${sec.section_number}`}
-                                          aria-expanded={showSubs}
-                                          onClick={() => setExpandedSections((prev) => ({ ...prev, [sec.id]: !showSubs }))}
-                                        >
-                                          {showSubs ? '▾' : '▸'}
-                                        </button>
-                                      ) : (
-                                        <span className="muni-toc-spacer" />
-                                      )}
-                                      <button
-                                        type="button"
-                                        className={`muni-toc-sec-btn${isSecActive ? ' active' : ''}`}
-                                        onClick={() => openSection({ ...sec, chapter_id: ch.id, chapter_prefix: ch.code_prefix, chapter_title: ch.title })}
-                                      >
-                                        <strong>§ {sec.section_number}</strong> {sec.title}
-                                      </button>
-                                    </div>
-                                    {showSubs && (
-                                      <div className="muni-toc-subs">
-                                        {subs.map((sub) => (
-                                          <button
-                                            key={sub.id}
-                                            type="button"
-                                            className="muni-toc-sub-btn"
-                                            onClick={() => openSection({ ...sec, chapter_id: ch.id, chapter_prefix: ch.code_prefix, chapter_title: ch.title }, sub.id)}
-                                          >
-                                            <span>{sub.number}</span> {sub.label}
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
+                          {(ch.sections || []).map((sec) => (
+                            <TocNode
+                              key={sec.id}
+                              sec={sec}
+                              chapter={ch}
+                              activeSectionId={activeSectionId}
+                              viewMode={viewMode}
+                              searchQuery={q}
+                              expandedSections={expandedSections}
+                              setExpandedSections={setExpandedSections}
+                              subsectionTocCache={subsectionTocCache}
+                              onSelectSection={openSection}
+                              onToggleExpand={toggleSectionExpand}
+                            />
                           ))}
                         </div>
                       )}
@@ -449,12 +600,18 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                 </button>
               </>
             )}
-            {viewMode === 'section' && activeSection?.article && (
-              <>
+            {viewMode === 'section' && activeSection && (activeSection.ancestors || []).map((anc) => (
+              <React.Fragment key={anc.id}>
                 <span aria-hidden="true">›</span>
-                <span>{activeSection.article}</span>
-              </>
-            )}
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => openSection(sectionById.get(anc.id) || { ...anc, chapter_id: activeSection.chapter_id, chapter_prefix: activeSection.chapter_prefix, chapter_title: activeSection.chapter_title })}
+                >
+                  {anc.section_number} — {anc.title}
+                </button>
+              </React.Fragment>
+            ))}
             {viewMode === 'section' && activeSection && (
               <>
                 <span aria-hidden="true">›</span>
@@ -486,11 +643,11 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
               <h2 style={{ marginTop: 0 }}>
                 Search Results ({searchMatchCount} {searchMatchCount === 1 ? 'section' : 'sections'})
               </h2>
-              {!searchResults?.length ? (
+              {!flatSearchHitsByChapter.length ? (
                 <p className="muted">No code sections match “{q.trim()}”.</p>
               ) : (
                 <div style={{ display: 'grid', gap: '1rem' }}>
-                  {searchResults.map((ch) => (
+                  {flatSearchHitsByChapter.map(({ chapter: ch, hits }) => (
                     <div key={ch.id} className="muni-search-group">
                       <div className="muni-search-chap">
                         <button type="button" className="link-btn" onClick={() => openChapter(chapterById.get(ch.id) || ch)}>
@@ -498,15 +655,19 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                         </button>
                       </div>
                       <div style={{ display: 'grid', gap: '.5rem', marginTop: '.45rem' }}>
-                        {(ch.sections || []).map((sec) => {
+                        {hits.map((sec) => {
                           const snippet = getSearchSnippet(sec, q);
+                          const pathPrefix = (sec.ancestors || []).map((a) => `${a.section_number} ${a.title}`).join(' › ');
                           return (
                             <button
                               key={sec.id}
                               type="button"
                               className="muni-search-hit"
-                              onClick={() => openSection({ ...sec, chapter_id: ch.id, chapter_prefix: ch.code_prefix, chapter_title: ch.title })}
+                              onClick={() => openSection(sec)}
                             >
+                              {pathPrefix && (
+                                <div className="muted" style={{ fontSize: '.76rem', marginBottom: 2 }}>{pathPrefix}</div>
+                              )}
                               <div style={{ fontWeight: 600 }}>
                                 Sec. <HighlightText text={sec.section_number} query={q} /> — <HighlightText text={sec.title} query={q} />
                               </div>
@@ -534,7 +695,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                   {cityTitle ? `Code of Ordinances — ${cityTitle}` : 'Municipal Code of Ordinances'}
                 </h1>
                 <p className="muted" style={{ margin: 0 }}>
-                  Browse chapters in the Table of Contents, read sections inline with cross-referenced links, print clean legal copies, or download the complete compiled City Code PDF.
+                  Expand any chapter or section series with the pull-down arrows in the Table of Contents to browse individual provisions, cross-references, print copies, or the compiled City Code PDF.
                 </p>
               </div>
 
@@ -552,7 +713,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                           {ch.title}
                         </button>
                         <span className="muted" style={{ fontSize: '.8rem', whiteSpace: 'nowrap' }}>
-                          {(ch.sections || []).length} sections
+                          {(ch.sections || []).length} series
                         </span>
                       </div>
                       {ch.description && <p className="muted" style={{ fontSize: '.86rem', margin: '.35rem 0' }}>{ch.description}</p>}
@@ -566,6 +727,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                             onClick={() => openSection({ ...sec, chapter_id: ch.id, chapter_prefix: ch.code_prefix, chapter_title: ch.title })}
                           >
                             § {sec.section_number} {sec.title}
+                            {(sec.children || []).length > 0 ? ` (${sec.children.length})` : ''}
                           </button>
                         ))}
                         {(ch.sections || []).length > 6 && (
@@ -608,6 +770,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                         onClick={() => openSection({ ...s, chapter_id: activeChapter.id, chapter_prefix: activeChapter.code_prefix, chapter_title: activeChapter.title })}
                       >
                         Sec. {s.section_number}. {s.title}
+                        {(s.children || []).length > 0 ? ` (${s.children.length})` : ''}
                       </button>
                     ))}
                   </div>
@@ -615,66 +778,14 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
               )}
 
               <div style={{ display: 'grid', gap: '1.75rem', marginTop: '1.25rem' }}>
-                {(activeChapter.sections || []).map((sec) => {
-                  const token = `${sec.section_number}:`;
-                  return (
-                    <article key={sec.id} className="muni-section-article">
-                      {sec.article && <div className="muni-section-kicker">{sec.article}</div>}
-                      <div className="between" style={{ alignItems: 'flex-start', gap: 8 }}>
-                        <h2 style={{ margin: 0, fontSize: '1.18rem' }}>
-                          <button
-                            type="button"
-                            className="link-btn"
-                            style={{ color: 'inherit', fontSize: 'inherit' }}
-                            onClick={() => openSection({ ...sec, chapter_id: activeChapter.id, chapter_prefix: activeChapter.code_prefix, chapter_title: activeChapter.title })}
-                          >
-                            Sec. {sec.section_number}. — {sec.title}
-                          </button>
-                        </h2>
-                        <div className="actions muni-no-print" style={{ flexShrink: 0 }}>
-                          <button type="button" className="btn sm" onClick={() => copySectionLink(sec.section_number)}>
-                            {copiedKey === token ? 'Copied!' : 'Share'}
-                          </button>
-                          <a className="btn sm" href={`/api/codification/sections/${sec.id}/pdf`} target="_blank" rel="noreferrer">
-                            PDF
-                          </a>
-                        </div>
-                      </div>
-                      {(sec.ordinance_ref || sec.effective_date) && (
-                        <div className="muted" style={{ fontSize: '.84rem', margin: '.3rem 0 .6rem' }}>
-                          {sec.ordinance_ref && <>Ordinance: <strong>{sec.ordinance_ref}</strong></>}
-                          {sec.ordinance_ref && sec.effective_date && ' · '}
-                          {sec.effective_date && <>Effective: <strong>{sec.effective_date}</strong></>}
-                        </div>
-                      )}
-                      {sec.summary && (
-                        <p className="muni-summary"><strong>Summary:</strong> {sec.summary}</p>
-                      )}
-                      {sec.body ? (
-                        <StructuredCodeBody
-                          text={sec.body}
-                          sectionMap={allSectionsMap}
-                          currentSectionId={sec.id}
-                          onSelectSection={openSection}
-                          query={q}
-                          onCopyAnchor={(aid) => copySectionLink(sec.section_number, aid)}
-                        />
-                      ) : (
-                        <p className="muted">
-                          Full ordinance text is available in the{' '}
-                          <a href={`/api/codification/sections/${sec.id}/pdf`} target="_blank" rel="noreferrer">
-                            Official Section PDF
-                          </a>.
-                        </p>
-                      )}
-                    </article>
-                  );
-                })}
+                {(activeChapter.sections || []).map((sec) =>
+                  renderContinuousSection(sec, activeChapter, allSectionsMap, q, copiedKey, copySectionLink, openSection, 0),
+                )}
               </div>
             </div>
           )}
 
-          {/* MODE 4: FOCUSED SECTION VIEW */}
+          {/* MODE 4: FOCUSED SECTION / SERIES VIEW */}
           {viewMode === 'section' && activeSection && (
             <div>
               <div className="between" style={{ alignItems: 'flex-start', borderBottom: '2px solid #cbd5e1', paddingBottom: '.75rem', marginBottom: '.85rem', gap: 10 }}>
@@ -684,7 +795,9 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                     {activeSection.article ? ` · ${activeSection.article}` : ''}
                   </div>
                   <h1 style={{ margin: '.2rem 0 0', fontSize: '1.35rem' }}>
-                    Sec. {activeSection.section_number}. — {activeSection.title}
+                    {activeSection.node_type === 'article' || activeSection.node_type === 'division'
+                      ? `${activeSection.section_number} — ${activeSection.title}`
+                      : `Sec. ${activeSection.section_number}. — ${activeSection.title}`}
                   </h1>
                 </div>
                 <div className="actions muni-no-print" style={{ flexShrink: 0 }}>
@@ -704,8 +817,18 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                     target="_blank"
                     rel="noreferrer"
                   >
-                    Official PDF
+                    Section PDF
                   </a>
+                  {activeSection.parent_pdf_section_id && (
+                    <a
+                      className="btn sm"
+                      href={`/api/codification/sections/${activeSection.parent_pdf_section_id}/pdf`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Source PDF
+                    </a>
+                  )}
                 </div>
               </div>
 
@@ -723,7 +846,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                 </div>
               )}
 
-              {activeSection.body ? (
+              {activeSection.body && (
                 <StructuredCodeBody
                   text={activeSection.body}
                   sectionMap={allSectionsMap}
@@ -732,7 +855,76 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                   query={q}
                   onCopyAnchor={(aid) => copySectionLink(activeSection.section_number, aid)}
                 />
-              ) : (
+              )}
+
+              {(activeSection.children || []).length > 0 ? (
+                <div style={{ marginTop: activeSection.body ? '1.15rem' : 0 }}>
+                  <div className="between" style={{ marginBottom: '.65rem' }}>
+                    <h2 style={{ margin: 0, fontSize: '1.05rem' }}>
+                      Subsections in {activeSection.section_number} ({activeSection.children.length})
+                    </h2>
+                    <button
+                      type="button"
+                      className="btn sm muni-no-print"
+                      onClick={() => setInlineAllChildren((v) => !v)}
+                    >
+                      {inlineAllChildren ? 'Show Index Only' : `Read All ${activeSection.children.length} Sections Together`}
+                    </button>
+                  </div>
+
+                  {!inlineAllChildren ? (
+                    <div className="muni-parent-list">
+                      {activeSection.children.map((chNode) => (
+                        <button
+                          key={chNode.id}
+                          type="button"
+                          className="muni-parent-item"
+                          onClick={() =>
+                            openSection({
+                              ...chNode,
+                              chapter_id: activeSection.chapter_id,
+                              chapter_prefix: activeSection.chapter_prefix,
+                              chapter_title: activeSection.chapter_title,
+                            })
+                          }
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                            <strong style={{ color: 'var(--cd-primary)' }}>
+                              {formatNodePrefix(chNode)} — {chNode.title}
+                            </strong>
+                            {(chNode.children || []).length > 0 && (
+                              <span className="muted" style={{ fontSize: '.78rem' }}>
+                                {chNode.children.length} items
+                              </span>
+                            )}
+                          </div>
+                          {(chNode.summary || chNode.body) && (
+                            <div className="muted" style={{ fontSize: '.84rem', marginTop: 3 }}>
+                              {(chNode.summary || chNode.body).replace(/\s+/g, ' ').slice(0, 150)}
+                              {(chNode.summary || chNode.body).length > 150 ? '…' : ''}
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ display: 'grid', gap: '1.35rem', marginTop: '.75rem' }}>
+                      {activeSection.children.map((chNode) =>
+                        renderContinuousSection(
+                          chNode,
+                          activeChapter || { id: activeSection.chapter_id, code_prefix: activeSection.chapter_prefix, title: activeSection.chapter_title },
+                          allSectionsMap,
+                          q,
+                          copiedKey,
+                          copySectionLink,
+                          openSection,
+                          1,
+                        ),
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : !activeSection.body ? (
                 <div style={{ padding: '1rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
                   <p style={{ marginTop: 0 }}>
                     Full codified text has not been extracted into HTML yet for Section {activeSection.section_number}.
@@ -746,7 +938,7 @@ export default function MunicodeCodeViewer({ branding = {}, standalone = false }
                     Open Official Section PDF
                   </a>
                 </div>
-              )}
+              ) : null}
 
               {/* Previous / Next Navigation Footer */}
               {(prevSection || nextSection) && (
