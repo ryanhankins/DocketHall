@@ -139,7 +139,7 @@ MODULE = CivicModule(
         {"key": "permits.submit", "label": "Apply for Permits & Track My Permits"},
     ],
     features=[
-        {"key": "property_360", "label": "Property / Parcel 360° View", "description": "Unified parcel lookup linking permits, complaints, and inspections.", "default": True},
+        {"key": "property_360", "label": "Property & Parcel Profile", "description": "Unified parcel lookup linking permits, complaints, and inspections.", "default": True},
         {"key": "reports", "label": "Reports & Revenue Analytics", "description": "Permit volume, fee revenue, and turnaround reporting.", "default": True},
     ],
     nav_groups=[
@@ -151,7 +151,7 @@ MODULE = CivicModule(
             "items": [
                 {"section": "permits-review", "label": "Permit Review Queue", "permission": "permits.manage"},
                 {"section": "field-inspector", "label": "Field Inspector Mode", "permission": "permits.manage"},
-                {"section": "properties", "label": "Property 360° Lookup", "permission": "permits.manage", "feature": "property_360"},
+                {"section": "properties", "label": "Property & Parcel Profile", "permission": "permits.manage", "feature": "property_360"},
                 {"section": "permits-reports", "label": "Reports & Revenue", "permission": "permits.manage", "feature": "reports"},
                 {"section": "preferences-permits", "label": "Permit Preferences", "permission": "permits.manage"},
             ],

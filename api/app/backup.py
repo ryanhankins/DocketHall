@@ -836,7 +836,6 @@ def trigger_retention_policies(user: dict = Depends(require_permission("settings
 def get_launch_readiness(_: dict = Depends(require_permission("settings.manage", "agendas.manage"))):
     """Return live city launch & onboarding readiness checks."""
     from . import agendas
-    from .auth import DEFAULT_ADMIN_PASSWORD, verify_password
 
     branding = agendas.get_preferences_branding() or {}
     city_title_set = bool((branding.get("city_title") or "").strip())
@@ -844,11 +843,11 @@ def get_launch_readiness(_: dict = Depends(require_permission("settings.manage",
     reminder_days = int(branding.get("backup_reminder_days") or 0)
 
     with pool.connection() as conn:
-        admin_row = conn.execute("SELECT password_hash FROM users WHERE username = 'admin'").fetchone()
-        default_pw = bool(admin_row and verify_password(DEFAULT_ADMIN_PASSWORD, admin_row[0]))
+        admin_row = conn.execute("SELECT is_default_password FROM users WHERE username = 'admin'").fetchone()
+        default_pw = bool(admin_row and admin_row[0])
         smtp_row = conn.execute("SELECT enabled FROM core_integrations WHERE provider = 'gmail_smtp'").fetchone()
         smtp_configured = bool(smtp_row and smtp_row[0])
-        policy = _load_policy_cfg(conn)
+        policy, _ = _load_backup_policy(conn)
         backup_configured = bool(policy.get("enabled") or reminder_days > 0)
 
         def _count(sql: str) -> int:

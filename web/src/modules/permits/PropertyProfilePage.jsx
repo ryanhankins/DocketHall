@@ -67,7 +67,7 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
     <section id="section-properties">
         <div className="between" style={{ marginBottom: '1rem', flexWrap: 'wrap', gap: '.5rem' }}>
           <div>
-            <h1 style={{ margin: 0 }}>Property / Parcel 360° View</h1>
+            <h1 style={{ margin: 0 }}>Property &amp; Parcel Profile</h1>
             <p className="muted" style={{ margin: '.2rem 0 0' }}>
               Unified property history linking Permits, Field Inspections, Recurring Compliance Programs, and Code Enforcement cases.
             </p>
@@ -177,7 +177,7 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
                 })}
               </svg>
               <div className="muted" style={{ fontSize: '.8rem', marginTop: '.4rem' }}>
-                Click any parcel pin or polygon to open its 360° Profile. Colors: Green = clear, Blue = active permits, Red = open code enforcement.
+                Click any parcel pin or polygon to open its Property &amp; Parcel Profile. Colors: Green = clear, Blue = active permits, Red = open code enforcement.
               </div>
             </div>
           );
@@ -201,7 +201,7 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
             <input id="prop-addr" placeholder="e.g. 312 Cedar Lane" value={address} onChange={(e) => setAddress(e.target.value)} />
           </div>
           <button type="submit" className="btn primary" disabled={loading || (!parcelId.trim() && !address.trim())}>
-            {loading ? 'Loading…' : 'Open 360° Profile'}
+            {loading ? 'Loading…' : 'Open Property Profile'}
           </button>
         </form>
 

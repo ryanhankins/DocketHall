@@ -47,16 +47,18 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
   const [runningOffsite, setRunningOffsite] = useState(false);
   const [runningRetention, setRunningRetention] = useState(false);
   const [readiness, setReadiness] = useState(null);
+  const [readinessErr, setReadinessErr] = useState('');
   const [seedingDemo, setSeedingDemo] = useState(false);
   const fileRef = useRef(null);
   const showToast = useToast();
 
   const loadReadiness = useCallback(async () => {
+    setReadinessErr('');
     try {
       const d = await api('/api/backup/readiness');
       setReadiness(d);
-    } catch {
-      // Ignore if insufficient perms
+    } catch (err) {
+      setReadinessErr(err.message || 'Unable to load readiness checks');
     }
   }, []);
 
@@ -196,7 +198,9 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
             <p className="muted" style={{ marginTop: 0 }}>
               Verify core configuration before sharing your public portal with residents.
             </p>
-            {!readiness ? (
+            {readinessErr ? (
+              <p className="error-msg">{readinessErr}</p>
+            ) : !readiness ? (
               <p className="muted">Loading readiness checks…</p>
             ) : (
               <div style={{ display: 'grid', gap: '.5rem' }}>

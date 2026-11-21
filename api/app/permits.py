@@ -2423,7 +2423,7 @@ def get_property_profile(
     address: str = "",
     _: dict = Depends(require_permission("permits.manage")),
 ):
-    """Unified Property / Parcel 360° view linking Permits, Inspections, Compliance Programs, and Code Enforcement."""
+    """Unified Property & Parcel Profile linking Permits, Inspections, Compliance Programs, and Code Enforcement."""
     pid = parcel_id.strip()
     addr = address.strip()
     if not pid and not addr:
