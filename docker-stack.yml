@@ -144,7 +144,7 @@ volumes:
 configs:
   db_init:
     # Swarm configs are immutable: bump the suffix when init.sql changes.
-    name: civicdesk_db_init_v1
+    name: civicdesk_db_init_v2
     file: ./db/init.sql
 
 secrets:

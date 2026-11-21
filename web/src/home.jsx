@@ -244,10 +244,6 @@ function PagesPublicTab({ initialItemId = '', onItemChange }) {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    setExpandedId(initialItemId ? (Number(initialItemId) || null) : null);
-  }, [initialItemId]);
-
-  useEffect(() => {
     if (!initialItemId) {
       setOpenId(null);
       return;
@@ -550,10 +546,6 @@ function DirectoryPublicTab({ features = {} }) {
   }, [q, resourceCat]);
 
   useEffect(() => { load(); }, [load]);
-
-  useEffect(() => {
-    setExpandedId(initialItemId ? (Number(initialItemId) || null) : null);
-  }, [initialItemId]);
 
   const elected = data.contacts.filter((c) => c.is_elected);
   const staff = data.contacts.filter((c) => !c.is_elected);
