@@ -44,6 +44,11 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
   const [directoryLabel, setDirectoryLabel] = useState('');
   const [homeHeading, setHomeHeading] = useState('');
   const [homeIntroBody, setHomeIntroBody] = useState('');
+  const [homeBlogEnabled, setHomeBlogEnabled] = useState(true);
+  const [homeBlogCount, setHomeBlogCount] = useState(3);
+  const [homeBlogStyle, setHomeBlogStyle] = useState('cards');
+  const [homeBlogPosition, setHomeBlogPosition] = useState('below_services');
+  const [homeBlogHeading, setHomeBlogHeading] = useState('');
   const [themeColors, setThemeColors] = useState(() => ({ ...DEFAULT_THEME }));
   const [hasLogo, setHasLogo] = useState(false);
   const [logoVer, setLogoVer] = useState(() => Date.now());
@@ -67,6 +72,11 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
         setDirectoryLabel(b.directory_label || '');
         setHomeHeading(b.home_heading || '');
         setHomeIntroBody(b.home_intro_body || '');
+        setHomeBlogEnabled(b.home_blog_enabled !== false);
+        setHomeBlogCount(Number(b.home_blog_count) || 3);
+        setHomeBlogStyle(b.home_blog_style === 'full' ? 'full' : 'cards');
+        setHomeBlogPosition(b.home_blog_position === 'above_services' ? 'above_services' : 'below_services');
+        setHomeBlogHeading(b.home_blog_heading || '');
         setThemeColors({
           theme_primary: b.theme_primary || DEFAULT_THEME.theme_primary,
           theme_secondary: b.theme_secondary || DEFAULT_THEME.theme_secondary,
@@ -138,6 +148,11 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
           directory_label: directoryLabel.trim(),
           home_heading: homeHeading.trim(),
           home_intro_body: homeIntroBody.trim(),
+          home_blog_enabled: homeBlogEnabled,
+          home_blog_count: Math.max(1, Math.min(20, Number(homeBlogCount) || 3)),
+          home_blog_style: homeBlogStyle,
+          home_blog_position: homeBlogPosition,
+          home_blog_heading: homeBlogHeading.trim(),
           ...themeColors,
         }),
       });
@@ -234,7 +249,7 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
               onChange={(e) => setHomeHeading(e.target.value)}
             />
           </div>
-          <div style={{ marginBottom: '1.1rem' }}>
+          <div style={{ marginBottom: '.85rem' }}>
             <RichTextEditor
               id="pref-home-intro"
               label="Custom Portal Page Text (blank uses default intro)"
@@ -243,6 +258,63 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
               value={homeIntroBody}
               onChange={setHomeIntroBody}
             />
+          </div>
+          <div style={{ padding: '.85rem 1rem', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 8, marginBottom: '1.1rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginBottom: homeBlogEnabled ? '.75rem' : 0, cursor: 'pointer', fontWeight: 600 }}>
+              <input
+                type="checkbox"
+                style={{ width: 'auto' }}
+                checked={homeBlogEnabled}
+                onChange={(e) => setHomeBlogEnabled(e.target.checked)}
+              />
+              <span>Show recent blog entries on the main page</span>
+            </label>
+            {homeBlogEnabled && (
+              <div className="row">
+                <div className="field" style={{ width: 140 }}>
+                  <label htmlFor="pref-home-blog-count">Entries to Show (1–20)</label>
+                  <input
+                    id="pref-home-blog-count"
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={homeBlogCount}
+                    onChange={(e) => setHomeBlogCount(e.target.value)}
+                  />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 170 }}>
+                  <label htmlFor="pref-home-blog-style">Display Style</label>
+                  <select
+                    id="pref-home-blog-style"
+                    value={homeBlogStyle}
+                    onChange={(e) => setHomeBlogStyle(e.target.value)}
+                  >
+                    <option value="cards">Summary Cards</option>
+                    <option value="full">Full Blog Entries</option>
+                  </select>
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                  <label htmlFor="pref-home-blog-pos">Placement</label>
+                  <select
+                    id="pref-home-blog-pos"
+                    value={homeBlogPosition}
+                    onChange={(e) => setHomeBlogPosition(e.target.value)}
+                  >
+                    <option value="below_services">Below City Services</option>
+                    <option value="above_services">Above City Services</option>
+                  </select>
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 190 }}>
+                  <label htmlFor="pref-home-blog-heading">Section Heading (optional)</label>
+                  <input
+                    id="pref-home-blog-heading"
+                    placeholder="Latest from the Blog"
+                    value={homeBlogHeading}
+                    onChange={(e) => setHomeBlogHeading(e.target.value)}
+                  />
+                </div>
+              </div>
+            )}
           </div>
 
           <h2 style={{ margin: '1.25rem 0 .4rem', fontSize: '1.05rem' }}>Urgent Public Alert Banner</h2>

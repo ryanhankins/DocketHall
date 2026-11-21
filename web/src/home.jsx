@@ -3235,73 +3235,150 @@ function PayBillsPublicTab({ billType = '' }) {
 }
 
 
-function LatestBlogPreviewCard({ enabled, onOpenPost, onViewAll }) {
+function LatestBlogPreviewCard({ enabled, limit = 3, styleMode = 'cards', heading = '', onOpenPost, onViewAll }) {
   const [posts, setPosts] = useState([]);
+  const safeLimit = Math.max(1, Math.min(20, Number(limit) || 3));
 
   useEffect(() => {
     if (!enabled) {
       setPosts([]);
       return;
     }
-    fetch('/api/blog/public?home_only=true&limit=3')
+    fetch(`/api/blog/public?home_only=true&limit=${safeLimit}`)
       .then((r) => (r.ok ? r.json() : { posts: [] }))
       .then((d) => setPosts(Array.isArray(d?.posts) ? d.posts : []))
       .catch(() => setPosts([]));
-  }, [enabled]);
+  }, [enabled, safeLimit]);
 
   if (!enabled || posts.length === 0) return null;
+  const sectionTitle = (heading || '').trim() || 'Latest from the Blog';
 
   return (
     <div className="card" style={{ marginBottom: 0 }}>
       <div className="between" style={{ marginBottom: '.65rem' }}>
         <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
           <ServiceIcon id="blog" size={18} badge />
-          <span>Latest from the Blog</span>
+          <span>{sectionTitle}</span>
         </h2>
         <div className="actions">
           <a href="/api/blog/rss.xml" target="_blank" rel="noreferrer" className="btn sm">RSS</a>
           <button type="button" className="btn sm" onClick={onViewAll}>View All Blog Posts →</button>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '.75rem' }}>
-        {posts.map((p) => (
-          <div
-            key={p.id}
-            role="button"
-            tabIndex={0}
-            onClick={() => onOpenPost(p.slug)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                onOpenPost(p.slug);
-              }
-            }}
-            style={{
-              border: '1px solid #e2e8f0',
-              borderRadius: 8,
-              padding: '.75rem .9rem',
-              background: '#f8fafc',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              gap: '.45rem',
-            }}
-          >
-            <div>
-              <div style={{ display: 'flex', gap: '.35rem', flexWrap: 'wrap', marginBottom: '.3rem' }}>
-                <span className="badge draft">{p.category_name}</span>
-                <span className="muted" style={{ fontSize: '.78rem' }}>{formatDate(p.publish_at)}</span>
-              </div>
-              <div style={{ fontWeight: 600, fontSize: '.98rem', color: '#0f172a', marginBottom: '.25rem' }}>{p.title}</div>
-              {p.lead_in && (
-                <div className="muted" style={{ fontSize: '.84rem', lineHeight: 1.4 }}>{p.lead_in}</div>
+      {styleMode === 'full' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {posts.map((p) => (
+            <article
+              key={p.id}
+              style={{
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                padding: '1rem 1.15rem',
+                background: '#f8fafc',
+              }}
+            >
+              {p.has_image && (
+                <img
+                  src={`${p.image_url}?v=${p.updated_at || ''}`}
+                  alt={p.title}
+                  className="blog-cover-img"
+                />
               )}
+              <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '.35rem' }}>
+                <span className="badge draft">{p.category_name}</span>
+                {p.is_featured && (
+                  <span className="badge" style={{ background: '#fef3c7', color: '#92400e' }}>Featured</span>
+                )}
+                <span className="muted" style={{ fontSize: '.82rem' }}>
+                  {formatDate(p.publish_at)}
+                  {p.author_name ? ` · By ${p.author_name}` : ''}
+                </span>
+              </div>
+              <h3 style={{ margin: '0 0 .45rem', fontSize: '1.22rem' }}>
+                <a
+                  href={`#blog/${encodeURIComponent(p.slug)}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onOpenPost(p.slug);
+                  }}
+                  style={{ color: '#0f172a', textDecoration: 'none' }}
+                >
+                  {p.title}
+                </a>
+              </h3>
+              {p.lead_in && (
+                <p className="muted" style={{ margin: '0 0 .65rem', fontSize: '.96rem', lineHeight: 1.5 }}>{p.lead_in}</p>
+              )}
+              <RichTextContent text={p.body} />
+              <div
+                className="between"
+                style={{ marginTop: '.85rem', paddingTop: '.6rem', borderTop: '1px solid #e2e8f0', gap: '.5rem' }}
+              >
+                <div style={{ display: 'flex', gap: '.3rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  {Array.isArray(p.tags) && p.tags.map((t) => (
+                    <span key={t} className="badge draft" style={{ fontSize: '.74rem' }}>#{t}</span>
+                  ))}
+                  {p.effective_comment_policy !== 'disabled' && (
+                    <span className="muted" style={{ fontSize: '.82rem' }}>
+                      {p.approved_comment_count} comment{p.approved_comment_count === 1 ? '' : 's'}
+                    </span>
+                  )}
+                </div>
+                <button type="button" className="btn sm" onClick={() => onOpenPost(p.slug)}>
+                  Open Post &amp; Comments →
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '.75rem' }}>
+          {posts.map((p) => (
+            <div
+              key={p.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => onOpenPost(p.slug)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onOpenPost(p.slug);
+                }
+              }}
+              style={{
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                padding: '.75rem .9rem',
+                background: '#f8fafc',
+                cursor: 'pointer',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                gap: '.45rem',
+              }}
+            >
+              <div>
+                {p.has_image && (
+                  <img
+                    src={`${p.image_url}?v=${p.updated_at || ''}`}
+                    alt={p.title}
+                    style={{ width: '100%', height: 130, objectFit: 'cover', borderRadius: 6, marginBottom: '.55rem' }}
+                  />
+                )}
+                <div style={{ display: 'flex', gap: '.35rem', flexWrap: 'wrap', marginBottom: '.3rem' }}>
+                  <span className="badge draft">{p.category_name}</span>
+                  <span className="muted" style={{ fontSize: '.78rem' }}>{formatDate(p.publish_at)}</span>
+                </div>
+                <div style={{ fontWeight: 600, fontSize: '.98rem', color: '#0f172a', marginBottom: '.25rem' }}>{p.title}</div>
+                {p.lead_in && (
+                  <div className="muted" style={{ fontSize: '.84rem', lineHeight: 1.4 }}>{p.lead_in}</div>
+                )}
+              </div>
+              <div style={{ fontSize: '.84rem', fontWeight: 600, color: 'var(--cd-primary)' }}>Read Article →</div>
             </div>
-            <div style={{ fontSize: '.84rem', fontWeight: 600, color: 'var(--cd-primary)' }}>Read Article →</div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -3352,6 +3429,11 @@ function PublicHomePage() {
   const [homeEditOpen, setHomeEditOpen] = useState(false);
   const [homeHeadingDraft, setHomeHeadingDraft] = useState('');
   const [homeIntroDraft, setHomeIntroDraft] = useState('');
+  const [homeBlogEnabledDraft, setHomeBlogEnabledDraft] = useState(true);
+  const [homeBlogCountDraft, setHomeBlogCountDraft] = useState(3);
+  const [homeBlogStyleDraft, setHomeBlogStyleDraft] = useState('cards');
+  const [homeBlogPositionDraft, setHomeBlogPositionDraft] = useState('below_services');
+  const [homeBlogHeadingDraft, setHomeBlogHeadingDraft] = useState('');
   const [homeEditBusy, setHomeEditBusy] = useState(false);
   const [homeEditErr, setHomeEditErr] = useState('');
 
@@ -3484,6 +3566,11 @@ function PublicHomePage() {
         body: JSON.stringify({
           home_heading: homeHeadingDraft.trim(),
           home_intro_body: homeIntroDraft.trim(),
+          home_blog_enabled: homeBlogEnabledDraft,
+          home_blog_count: Math.max(1, Math.min(20, Number(homeBlogCountDraft) || 3)),
+          home_blog_style: homeBlogStyleDraft,
+          home_blog_position: homeBlogPositionDraft,
+          home_blog_heading: homeBlogHeadingDraft.trim(),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -3572,6 +3659,11 @@ function PublicHomePage() {
                       setHomeEditErr('');
                       setHomeHeadingDraft(branding.home_heading || '');
                       setHomeIntroDraft(branding.home_intro_body || '');
+                      setHomeBlogEnabledDraft(branding.home_blog_enabled !== false);
+                      setHomeBlogCountDraft(Number(branding.home_blog_count) || 3);
+                      setHomeBlogStyleDraft(branding.home_blog_style === 'full' ? 'full' : 'cards');
+                      setHomeBlogPositionDraft(branding.home_blog_position === 'above_services' ? 'above_services' : 'below_services');
+                      setHomeBlogHeadingDraft(branding.home_blog_heading || '');
                       setHomeEditOpen(true);
                     }}
                   >
@@ -3589,6 +3681,21 @@ function PublicHomePage() {
             </div>
 
             <GlobalSearchBar onSelectTab={selectTab} />
+
+            {branding.home_blog_position === 'above_services' && (
+              <LatestBlogPreviewCard
+                enabled={
+                  enabledModules.includes('communications') &&
+                  publicFeatures?.communications?.blog !== false &&
+                  branding.home_blog_enabled !== false
+                }
+                limit={branding.home_blog_count || 3}
+                styleMode={branding.home_blog_style === 'full' ? 'full' : 'cards'}
+                heading={branding.home_blog_heading || ''}
+                onOpenPost={(slug) => selectTab('blog', slug)}
+                onViewAll={() => selectTab('blog')}
+              />
+            )}
 
             <div
               style={{
@@ -3651,11 +3758,20 @@ function PublicHomePage() {
               </div>
             )}
 
-            <LatestBlogPreviewCard
-              enabled={enabledModules.includes('communications') && publicFeatures?.communications?.blog !== false}
-              onOpenPost={(slug) => selectTab('blog', slug)}
-              onViewAll={() => selectTab('blog')}
-            />
+            {branding.home_blog_position !== 'above_services' && (
+              <LatestBlogPreviewCard
+                enabled={
+                  enabledModules.includes('communications') &&
+                  publicFeatures?.communications?.blog !== false &&
+                  branding.home_blog_enabled !== false
+                }
+                limit={branding.home_blog_count || 3}
+                styleMode={branding.home_blog_style === 'full' ? 'full' : 'cards'}
+                heading={branding.home_blog_heading || ''}
+                onOpenPost={(slug) => selectTab('blog', slug)}
+                onViewAll={() => selectTab('blog')}
+              />
+            )}
 
             <TransparencySnapshotBar onSelectTab={selectTab} />
 
@@ -3747,6 +3863,63 @@ function PublicHomePage() {
                   value={homeIntroDraft}
                   onChange={setHomeIntroDraft}
                 />
+              </div>
+              <div style={{ padding: '.75rem .9rem', background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 8, marginBottom: '.75rem' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginBottom: homeBlogEnabledDraft ? '.65rem' : 0, cursor: 'pointer', fontWeight: 600 }}>
+                  <input
+                    type="checkbox"
+                    style={{ width: 'auto' }}
+                    checked={homeBlogEnabledDraft}
+                    onChange={(e) => setHomeBlogEnabledDraft(e.target.checked)}
+                  />
+                  <span>Show recent blog entries on main page</span>
+                </label>
+                {homeBlogEnabledDraft && (
+                  <div className="row">
+                    <div className="field" style={{ width: 130 }}>
+                      <label htmlFor="home-edit-blog-count">Entries (1–20)</label>
+                      <input
+                        id="home-edit-blog-count"
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={homeBlogCountDraft}
+                        onChange={(e) => setHomeBlogCountDraft(e.target.value)}
+                      />
+                    </div>
+                    <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                      <label htmlFor="home-edit-blog-style">Display Style</label>
+                      <select
+                        id="home-edit-blog-style"
+                        value={homeBlogStyleDraft}
+                        onChange={(e) => setHomeBlogStyleDraft(e.target.value)}
+                      >
+                        <option value="cards">Summary Cards</option>
+                        <option value="full">Full Blog Entries</option>
+                      </select>
+                    </div>
+                    <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                      <label htmlFor="home-edit-blog-pos">Placement</label>
+                      <select
+                        id="home-edit-blog-pos"
+                        value={homeBlogPositionDraft}
+                        onChange={(e) => setHomeBlogPositionDraft(e.target.value)}
+                      >
+                        <option value="below_services">Below Services</option>
+                        <option value="above_services">Above Services</option>
+                      </select>
+                    </div>
+                    <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                      <label htmlFor="home-edit-blog-heading">Section Heading</label>
+                      <input
+                        id="home-edit-blog-heading"
+                        placeholder="Latest from the Blog"
+                        value={homeBlogHeadingDraft}
+                        onChange={(e) => setHomeBlogHeadingDraft(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
               {homeEditErr && <div className="error-msg" role="alert" style={{ marginBottom: '.65rem' }}>{homeEditErr}</div>}
               <div className="actions">

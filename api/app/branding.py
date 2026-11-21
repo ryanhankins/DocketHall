@@ -14,6 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """Core site branding & general preferences endpoints."""
+from typing import Literal
+
 from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel
 
@@ -31,6 +33,11 @@ def get_branding():
 class HomeTextIn(BaseModel):
     home_heading: str = ""
     home_intro_body: str = ""
+    home_blog_enabled: bool | None = None
+    home_blog_count: int | None = None
+    home_blog_style: Literal["cards", "full"] | None = None
+    home_blog_position: Literal["above_services", "below_services"] | None = None
+    home_blog_heading: str | None = None
 
 
 @router.put("")
@@ -46,7 +53,15 @@ def update_branding_home_text(
     body: HomeTextIn,
     _: dict = Depends(require_permission("settings.manage", "pages.manage", "blog.manage", "agendas.manage")),
 ):
-    return agendas.update_home_text(body.home_heading, body.home_intro_body)
+    return agendas.update_home_text(
+        body.home_heading,
+        body.home_intro_body,
+        home_blog_enabled=body.home_blog_enabled,
+        home_blog_count=body.home_blog_count,
+        home_blog_style=body.home_blog_style,
+        home_blog_position=body.home_blog_position,
+        home_blog_heading=body.home_blog_heading,
+    )
 
 
 @router.get("/logo")

@@ -276,6 +276,11 @@ ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_surface TEXT NOT N
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS theme_header_bg TEXT NOT NULL DEFAULT '#ffffff';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_heading TEXT NOT NULL DEFAULT '';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_intro_body TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_blog_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_blog_count INTEGER NOT NULL DEFAULT 3;
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_blog_style TEXT NOT NULL DEFAULT 'cards';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_blog_position TEXT NOT NULL DEFAULT 'below_services';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_blog_heading TEXT NOT NULL DEFAULT '';
 """
 
 def _minio():
@@ -759,6 +764,11 @@ class GeneralPreferencesIn(BaseModel):
     theme_header_bg: str = "#ffffff"
     home_heading: str = ""
     home_intro_body: str = ""
+    home_blog_enabled: bool = True
+    home_blog_count: int = 3
+    home_blog_style: Literal["cards", "full"] = "cards"
+    home_blog_position: Literal["above_services", "below_services"] = "below_services"
+    home_blog_heading: str = ""
 
 
 class AgendaPreferencesIn(BaseModel):
@@ -804,7 +814,8 @@ def _load_preferences(conn) -> dict:
         "       alert_enabled, alert_level, alert_title, alert_message, alert_link_url, alert_link_label, "
         "       footer_text, city_website_url, city_website_label, "
         "       theme_primary, theme_secondary, theme_tint, theme_bg, theme_surface, theme_header_bg, "
-        "       directory_url, directory_label, home_heading, home_intro_body "
+        "       directory_url, directory_label, home_heading, home_intro_body, "
+        "       home_blog_enabled, home_blog_count, home_blog_style, home_blog_position, home_blog_heading "
         "FROM agenda_preferences WHERE id = 1"
     ).fetchone()
     if not row:
@@ -834,6 +845,11 @@ def _load_preferences(conn) -> dict:
             "directory_label": "",
             "home_heading": "",
             "home_intro_body": "",
+            "home_blog_enabled": True,
+            "home_blog_count": 3,
+            "home_blog_style": "cards",
+            "home_blog_position": "below_services",
+            "home_blog_heading": "",
             **DEFAULT_THEME_COLORS,
             "city_logo_key": "",
             "has_city_logo": False,
@@ -847,6 +863,9 @@ def _load_preferences(conn) -> dict:
     ]
     if not cats:
         cats = [dict(c) for c in DEFAULT_CATEGORIES]
+    blog_count = max(1, min(20, int(row[33]) if row[33] is not None else 3))
+    blog_style = row[34] if row[34] in ("cards", "full") else "cards"
+    blog_pos = row[35] if row[35] in ("above_services", "below_services") else "below_services"
     return {
         "include_item_cover_sheets": bool(row[0]),
         "include_page_numbers": bool(row[1]),
@@ -879,6 +898,11 @@ def _load_preferences(conn) -> dict:
         "directory_label": row[29] or "",
         "home_heading": row[30] or "",
         "home_intro_body": row[31] or "",
+        "home_blog_enabled": True if row[32] is None else bool(row[32]),
+        "home_blog_count": blog_count,
+        "home_blog_style": blog_style,
+        "home_blog_position": blog_pos,
+        "home_blog_heading": row[36] or "",
         "city_logo_key": logo_key,
         "has_city_logo": bool(logo_key),
     }
@@ -910,6 +934,11 @@ def get_preferences_branding():
         "directory_label": prefs.get("directory_label", ""),
         "home_heading": prefs.get("home_heading", ""),
         "home_intro_body": prefs.get("home_intro_body", ""),
+        "home_blog_enabled": bool(prefs.get("home_blog_enabled", True)),
+        "home_blog_count": int(prefs.get("home_blog_count", 3)),
+        "home_blog_style": prefs.get("home_blog_style", "cards"),
+        "home_blog_position": prefs.get("home_blog_position", "below_services"),
+        "home_blog_heading": prefs.get("home_blog_heading", ""),
         "theme_primary": prefs.get("theme_primary", DEFAULT_THEME_COLORS["theme_primary"]),
         "theme_secondary": prefs.get("theme_secondary", DEFAULT_THEME_COLORS["theme_secondary"]),
         "theme_tint": prefs.get("theme_tint", DEFAULT_THEME_COLORS["theme_tint"]),
@@ -939,14 +968,17 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
     theme_bg = _validate_hex_color(body.theme_bg, DEFAULT_THEME_COLORS["theme_bg"], "Page background color")
     theme_surface = _validate_hex_color(body.theme_surface, DEFAULT_THEME_COLORS["theme_surface"], "Card & sidebar color")
     theme_header_bg = _validate_hex_color(body.theme_header_bg, DEFAULT_THEME_COLORS["theme_header_bg"], "Header background color")
+    if not (1 <= int(body.home_blog_count) <= 20):
+        raise HTTPException(status_code=400, detail="Main page blog entry count must be between 1 and 20")
     with pool.connection() as conn:
         conn.execute(
             "INSERT INTO agenda_preferences "
             "(id, city_title, alert_enabled, alert_level, alert_title, alert_message, "
             " alert_link_url, alert_link_label, footer_text, city_website_url, city_website_label, "
             " theme_primary, theme_secondary, theme_tint, theme_bg, theme_surface, theme_header_bg, "
-            " directory_url, directory_label, home_heading, home_intro_body, updated_at) "
-            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
+            " directory_url, directory_label, home_heading, home_intro_body, "
+            " home_blog_enabled, home_blog_count, home_blog_style, home_blog_position, home_blog_heading, updated_at) "
+            "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now()) "
             "ON CONFLICT (id) DO UPDATE SET "
             "city_title = EXCLUDED.city_title, "
             "alert_enabled = EXCLUDED.alert_enabled, "
@@ -968,6 +1000,11 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
             "directory_label = EXCLUDED.directory_label, "
             "home_heading = EXCLUDED.home_heading, "
             "home_intro_body = EXCLUDED.home_intro_body, "
+            "home_blog_enabled = EXCLUDED.home_blog_enabled, "
+            "home_blog_count = EXCLUDED.home_blog_count, "
+            "home_blog_style = EXCLUDED.home_blog_style, "
+            "home_blog_position = EXCLUDED.home_blog_position, "
+            "home_blog_heading = EXCLUDED.home_blog_heading, "
             "updated_at = now()",
             (
                 body.city_title.strip(),
@@ -990,22 +1027,60 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
                 body.directory_label.strip(),
                 body.home_heading.strip(),
                 body.home_intro_body.strip(),
+                bool(body.home_blog_enabled),
+                int(body.home_blog_count),
+                body.home_blog_style,
+                body.home_blog_position,
+                body.home_blog_heading.strip(),
             ),
         )
         return _load_preferences(conn)
 
 
-def update_home_text(home_heading: str, home_intro_body: str) -> dict:
-    """Update only the custom public portal welcome heading and body text."""
+def update_home_text(
+    home_heading: str,
+    home_intro_body: str,
+    *,
+    home_blog_enabled: bool | None = None,
+    home_blog_count: int | None = None,
+    home_blog_style: str | None = None,
+    home_blog_position: str | None = None,
+    home_blog_heading: str | None = None,
+) -> dict:
+    """Update custom portal welcome text and optional main-page blog feed display preferences."""
+    if home_blog_count is not None and not (1 <= int(home_blog_count) <= 20):
+        raise HTTPException(status_code=400, detail="Main page blog entry count must be between 1 and 20")
+    clean_blog_heading = home_blog_heading.strip() if home_blog_heading is not None else None
     with pool.connection() as conn:
         conn.execute(
-            "INSERT INTO agenda_preferences (id, home_heading, home_intro_body, updated_at) "
-            "VALUES (1, %s, %s, now()) "
+            "INSERT INTO agenda_preferences "
+            "(id, home_heading, home_intro_body, home_blog_enabled, home_blog_count, "
+            " home_blog_style, home_blog_position, home_blog_heading, updated_at) "
+            "VALUES (1, %s, %s, COALESCE(%s, TRUE), COALESCE(%s, 3), COALESCE(%s, 'cards'), "
+            "        COALESCE(%s, 'below_services'), COALESCE(%s, ''), now()) "
             "ON CONFLICT (id) DO UPDATE SET "
             "home_heading = EXCLUDED.home_heading, "
             "home_intro_body = EXCLUDED.home_intro_body, "
+            "home_blog_enabled = COALESCE(%s, agenda_preferences.home_blog_enabled), "
+            "home_blog_count = COALESCE(%s, agenda_preferences.home_blog_count), "
+            "home_blog_style = COALESCE(%s, agenda_preferences.home_blog_style), "
+            "home_blog_position = COALESCE(%s, agenda_preferences.home_blog_position), "
+            "home_blog_heading = COALESCE(%s, agenda_preferences.home_blog_heading), "
             "updated_at = now()",
-            (home_heading.strip(), home_intro_body.strip()),
+            (
+                home_heading.strip(),
+                home_intro_body.strip(),
+                home_blog_enabled,
+                home_blog_count,
+                home_blog_style,
+                home_blog_position,
+                clean_blog_heading,
+                home_blog_enabled,
+                home_blog_count,
+                home_blog_style,
+                home_blog_position,
+                clean_blog_heading,
+            ),
         )
     return get_preferences_branding()
 
