@@ -192,7 +192,7 @@ def all_permissions_catalog() -> list[dict]:
 
 def get_module_backup_tables() -> list[tuple[str, list[str], set[str], bool]]:
     tables: list[tuple[str, list[str], set[str], bool]] = []
-    for mod in get_enabled_modules():
+    for mod in get_all_registered_modules():
         tables.extend(mod.backup_tables)
     return tables
 

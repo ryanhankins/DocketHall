@@ -478,13 +478,16 @@ async def import_archive(
 
             table_rows: dict[str, list[dict]] = {}
             has_users = ("data/users.json" in names) and (user["role"] == "admin")
+            core_names = {t for t, _, _, _ in _CORE_TABLES}
             export_tables = _get_export_tables()
             for tname, _, _, _ in export_tables:
                 if tname == "users" and not has_users:
                     continue
                 path = f"data/{tname}.json"
                 if path not in names:
-                    raise HTTPException(status_code=400, detail=f"Archive missing {path}")
+                    if tname in core_names:
+                        raise HTTPException(status_code=400, detail=f"Archive missing {path}")
+                    continue
                 table_rows[tname] = json.loads(zf.read(path).decode("utf-8"))
 
             # Upload binary files to MinIO
