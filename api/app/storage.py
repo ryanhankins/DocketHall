@@ -156,7 +156,12 @@ class BotoS3StorageClient:
             aws_access_key_id=access_key or "dockethall",
             aws_secret_access_key=secret_key or "dockethall",
             region_name=os.environ.get("S3_REGION", "us-east-1"),
-            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+            config=Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
+            ),
         )
         self._ensured_buckets: set[str] = set()
 
