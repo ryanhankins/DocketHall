@@ -74,6 +74,16 @@ COMMUNICATIONS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         True,
     ),
     (
+        "city_locations",
+        [
+            "id", "name", "category", "description", "address", "hours",
+            "phone", "email", "website_url", "amenities", "ada_accessible",
+            "latitude", "longitude", "sort_order", "is_public", "created_at", "updated_at",
+        ],
+        set(),
+        True,
+    ),
+    (
         "city_pages",
         ["id", "slug", "title", "summary", "body", "category", "sort_order", "is_public", "updated_by", "created_at", "updated_at"],
         set(),

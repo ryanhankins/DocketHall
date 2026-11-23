@@ -60,6 +60,7 @@ def test_admin_cms_reads_and_rbac(anon_client, applicant_client, admin_client):
         "/api/directory/faqs",
         "/api/directory/resources",
         "/api/directory/boards",
+        "/api/directory/locations",
         "/api/forms",
         "/api/notices",
         "/api/subscriptions",
@@ -69,3 +70,32 @@ def test_admin_cms_reads_and_rbac(anon_client, applicant_client, admin_client):
         assert applicant_client.get(path).status_code == 403, f"applicant 403 on {path}"
         res = admin_client.get(path)
         assert res.status_code == 200, f"admin failed on {path}: {res.status_code} {res.text}"
+
+
+def test_directory_locations_crud_and_public(admin_client, anon_client):
+    pub_before = anon_client.get("/api/directory/locations/public")
+    assert pub_before.status_code == 200
+    assert len(pub_before.json()) >= 1
+
+    created = admin_client.post(
+        "/api/directory/locations",
+        json={
+            "name": "Pine Ridge Nature Trail",
+            "category": "Park & Trail",
+            "address": "700 Pine Ridge Rd",
+            "hours": "Dawn to Dusk",
+            "amenities": "Trailhead, Restrooms, Bike Rack",
+            "ada_accessible": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    loc_id = created.json()["id"]
+
+    pub_dir = anon_client.get("/api/directory/public?q=Pine+Ridge").json()
+    assert any(loc["id"] == loc_id for loc in pub_dir["locations"])
+
+    patched = admin_client.patch(f"/api/directory/locations/{loc_id}", json={"hours": "Daily 6am-9pm"})
+    assert patched.status_code == 200
+    assert patched.json()["hours"] == "Daily 6am-9pm"
+
+    assert admin_client.delete(f"/api/directory/locations/{loc_id}").status_code == 200

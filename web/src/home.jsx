@@ -521,7 +521,7 @@ function FormsPublicTab({ initialItemId = '', onItemChange }) {
 }
 
 function DirectoryPublicTab({ features = {} }) {
-  const [data, setData] = useState({ contacts: [], faqs: [], resources: [], boards: [] });
+  const [data, setData] = useState({ contacts: [], faqs: [], resources: [], boards: [], locations: [] });
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState('');
   const [subTab, setSubTab] = useState('all');
@@ -534,13 +534,13 @@ function DirectoryPublicTab({ features = {} }) {
     if (resourceCat) params.set('resource_category', resourceCat);
     const qs = params.toString() ? `?${params.toString()}` : '';
     fetch(`/api/directory/public${qs}`)
-      .then((r) => (r.ok ? r.json() : { contacts: [], faqs: [], resources: [], boards: [] }))
+      .then((r) => (r.ok ? r.json() : { contacts: [], faqs: [], resources: [], boards: [], locations: [] }))
       .then((d) => {
-        setData({ contacts: d.contacts || [], faqs: d.faqs || [], resources: d.resources || [], boards: d.boards || [] });
+        setData({ contacts: d.contacts || [], faqs: d.faqs || [], resources: d.resources || [], boards: d.boards || [], locations: d.locations || [] });
         setLoading(false);
       })
       .catch(() => {
-        setData({ contacts: [], faqs: [], resources: [], boards: [] });
+        setData({ contacts: [], faqs: [], resources: [], boards: [], locations: [] });
         setLoading(false);
       });
   }, [q, resourceCat]);
@@ -565,6 +565,7 @@ function DirectoryPublicTab({ features = {} }) {
   const showContacts = subTab === 'all' || subTab === 'contacts';
   const showResources = features.resources !== false && (subTab === 'all' || subTab === 'resources');
   const showBoards = subTab === 'all' || subTab === 'boards';
+  const showLocations = subTab === 'all' || subTab === 'locations';
   const showFaqs = subTab === 'all' || subTab === 'faqs';
 
   return (
@@ -590,6 +591,7 @@ function DirectoryPublicTab({ features = {} }) {
             { id: 'contacts', label: `Staff & Council (${data.contacts.length})` },
             ...(features.resources !== false ? [{ id: 'resources', label: `Local Business & Resources (${data.resources.length})` }] : []),
             { id: 'boards', label: `Boards & Commissions (${data.boards.length})` },
+            { id: 'locations', label: `Locations & Parks (${data.locations.length})` },
             { id: 'faqs', label: `FAQs (${data.faqs.length})` },
           ].map((t) => (
             <button
@@ -702,6 +704,35 @@ function DirectoryPublicTab({ features = {} }) {
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {showLocations && data.locations.length > 0 && (
+              <div>
+                <h3 style={{ margin: '0 0 .5rem', fontSize: '1rem' }}>City Locations, Parks &amp; Trails</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '.65rem' }}>
+                  {data.locations.map((loc) => (
+                    <div key={loc.id} style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: '.8rem', background: '#fff' }}>
+                      <div className="between" style={{ gap: '.4rem', alignItems: 'flex-start' }}>
+                        <strong>{loc.name}</strong>
+                        <span className="badge draft" style={{ fontSize: '.72rem' }}>{loc.category}</span>
+                      </div>
+                      {loc.description && <p style={{ margin: '.35rem 0 .4rem', fontSize: '.86rem', color: '#334e68' }}>{loc.description}</p>}
+                      {loc.address && <div className="muted" style={{ fontSize: '.82rem' }}>{loc.address}</div>}
+                      {loc.hours && <div className="muted" style={{ fontSize: '.8rem', marginTop: 2 }}>Hours: {loc.hours}</div>}
+                      {loc.amenities && <div className="muted" style={{ fontSize: '.8rem', marginTop: 4 }}>Amenities: {loc.amenities}</div>}
+                      <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap', alignItems: 'center', marginTop: '.45rem', fontSize: '.82rem' }}>
+                        {loc.ada_accessible && <span className="badge active" style={{ fontSize: '.72rem' }}>ADA Accessible</span>}
+                        {loc.phone && <a href={`tel:${loc.phone}`}>{loc.phone}</a>}
+                        {loc.address && (
+                          <a href={`https://www.openstreetmap.org/search?query=${encodeURIComponent(loc.address)}`} target="_blank" rel="noreferrer">
+                            Map ↗
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

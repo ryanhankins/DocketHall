@@ -78,12 +78,38 @@ const EMPTY_BOARD = {
   notes: '',
 };
 
+const EMPTY_LOCATION = {
+  name: '',
+  category: 'Park & Trail',
+  description: '',
+  address: '',
+  hours: '',
+  phone: '',
+  email: '',
+  website_url: '',
+  amenities: '',
+  ada_accessible: true,
+  sort_order: 0,
+  is_public: true,
+};
+
+const LOCATION_CATEGORIES = [
+  'Park & Trail',
+  'City Facility',
+  'Recreation',
+  'Public Safety',
+  'Library & Culture',
+  'Utility & Drop-off',
+  'Other',
+];
+
 export default function DirectoryManagePage() {
   const [tab, setTab] = useState('contacts');
   const [contacts, setContacts] = useState([]);
   const [faqs, setFaqs] = useState([]);
   const [resources, setResources] = useState([]);
   const [boards, setBoards] = useState([]);
+  const [locations, setLocations] = useState([]);
 
   const [contactForm, setContactForm] = useState({ ...EMPTY_CONTACT });
   const [editContactId, setEditContactId] = useState(null);
@@ -97,20 +123,25 @@ export default function DirectoryManagePage() {
   const [boardForm, setBoardForm] = useState({ ...EMPTY_BOARD });
   const [editBoardId, setEditBoardId] = useState(null);
 
+  const [locForm, setLocForm] = useState({ ...EMPTY_LOCATION });
+  const [editLocId, setEditLocId] = useState(null);
+
   const [busy, setBusy] = useState(false);
   const showToast = useToast();
 
   const loadAll = useCallback(async () => {
-    const [cRows, fRows, rRows, bRows] = await Promise.all([
+    const [cRows, fRows, rRows, bRows, lRows] = await Promise.all([
       api('/api/directory/contacts'),
       api('/api/directory/faqs'),
       api('/api/directory/resources'),
       api('/api/directory/boards'),
+      api('/api/directory/locations'),
     ]);
     setContacts(Array.isArray(cRows) ? cRows : []);
     setFaqs(Array.isArray(fRows) ? fRows : []);
     setResources(Array.isArray(rRows) ? rRows : []);
     setBoards(Array.isArray(bRows) ? bRows : []);
+    setLocations(Array.isArray(lRows) ? lRows : []);
   }, []);
 
   useEffect(() => {
@@ -229,6 +260,9 @@ export default function DirectoryManagePage() {
         </button>
         <button type="button" className={`btn sm${tab === 'boards' ? ' active' : ''}`} onClick={() => setTab('boards')}>
           Boards &amp; Commissions ({boards.length})
+        </button>
+        <button type="button" className={`btn sm${tab === 'locations' ? ' active' : ''}`} onClick={() => setTab('locations')}>
+          Locations &amp; Parks ({locations.length})
         </button>
         <button type="button" className={`btn sm${tab === 'faqs' ? ' active' : ''}`} onClick={() => setTab('faqs')}>
           Self-Service FAQs ({faqs.length})
@@ -634,6 +668,154 @@ export default function DirectoryManagePage() {
                             onClick={async () => {
                               if (!window.confirm(`Delete FAQ "${fq.question}"?`)) return;
                               await api(`/api/directory/faqs/${fq.id}`, { method: 'DELETE' });
+                              await loadAll();
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
+
+      {tab === 'locations' && (
+        <>
+          <div className="card">
+            <h2>{editLocId ? 'Edit Location / Park' : 'Add City Location, Park, or Trail'}</h2>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!locForm.name.trim()) return;
+                setBusy(true);
+                try {
+                  const payload = {
+                    ...locForm,
+                    name: locForm.name.trim(),
+                    address: locForm.address.trim(),
+                    hours: locForm.hours.trim(),
+                    phone: locForm.phone.trim(),
+                    email: locForm.email.trim(),
+                    website_url: locForm.website_url.trim(),
+                    amenities: locForm.amenities.trim(),
+                    description: locForm.description.trim(),
+                    sort_order: Number(locForm.sort_order) || 0,
+                  };
+                  if (editLocId) {
+                    await api(`/api/directory/locations/${editLocId}`, { method: 'PATCH', body: JSON.stringify(payload) });
+                    showToast('Location updated', 'ok');
+                  } else {
+                    await api('/api/directory/locations', { method: 'POST', body: JSON.stringify(payload) });
+                    showToast('Location added', 'ok');
+                  }
+                  setLocForm({ ...EMPTY_LOCATION });
+                  setEditLocId(null);
+                  await loadAll();
+                } catch (err) {
+                  showToast(err.message, 'error');
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              <div className="row" style={{ marginBottom: '.75rem' }}>
+                <div className="field" style={{ flex: 2, minWidth: 200 }}>
+                  <label htmlFor="loc-name">Location Name *</label>
+                  <input id="loc-name" required placeholder="e.g. Lakeside Park & Trailhead" value={locForm.name} onChange={(e) => setLocForm((f) => ({ ...f, name: e.target.value }))} />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 160 }}>
+                  <label htmlFor="loc-cat">Category</label>
+                  <select id="loc-cat" value={locForm.category} onChange={(e) => setLocForm((f) => ({ ...f, category: e.target.value }))}>
+                    {LOCATION_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div className="field" style={{ width: 90 }}>
+                  <label htmlFor="loc-sort">Order</label>
+                  <input id="loc-sort" type="number" value={locForm.sort_order} onChange={(e) => setLocForm((f) => ({ ...f, sort_order: e.target.value }))} />
+                </div>
+              </div>
+              <div className="row" style={{ marginBottom: '.75rem' }}>
+                <div className="field" style={{ flex: 2, minWidth: 200 }}>
+                  <label htmlFor="loc-addr">Address</label>
+                  <input id="loc-addr" placeholder="e.g. 450 Lakeshore Drive" value={locForm.address} onChange={(e) => setLocForm((f) => ({ ...f, address: e.target.value }))} />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 180 }}>
+                  <label htmlFor="loc-hours">Hours</label>
+                  <input id="loc-hours" placeholder="e.g. Daily 6am–10pm" value={locForm.hours} onChange={(e) => setLocForm((f) => ({ ...f, hours: e.target.value }))} />
+                </div>
+                <div className="field" style={{ flex: 1, minWidth: 150 }}>
+                  <label htmlFor="loc-phone">Phone</label>
+                  <input id="loc-phone" value={locForm.phone} onChange={(e) => setLocForm((f) => ({ ...f, phone: e.target.value }))} />
+                </div>
+              </div>
+              <div className="field" style={{ marginBottom: '.75rem' }}>
+                <label htmlFor="loc-amenities">Amenities (comma-separated)</label>
+                <input id="loc-amenities" placeholder="e.g. Playground, Boat Launch, Restrooms, Paved ADA Trail" value={locForm.amenities} onChange={(e) => setLocForm((f) => ({ ...f, amenities: e.target.value }))} />
+              </div>
+              <div className="field" style={{ marginBottom: '.75rem' }}>
+                <label htmlFor="loc-desc">Description</label>
+                <textarea id="loc-desc" rows={2} value={locForm.description} onChange={(e) => setLocForm((f) => ({ ...f, description: e.target.value }))} />
+              </div>
+              <div style={{ display: 'flex', gap: '1.25rem', flexWrap: 'wrap', marginBottom: '.85rem' }}>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', cursor: 'pointer', fontSize: '.9rem' }}>
+                  <input type="checkbox" style={{ width: 'auto', flexShrink: 0 }} checked={locForm.ada_accessible} onChange={(e) => setLocForm((f) => ({ ...f, ada_accessible: e.target.checked }))} />
+                  <span>ADA Accessible</span>
+                </label>
+                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', cursor: 'pointer', fontSize: '.9rem' }}>
+                  <input type="checkbox" style={{ width: 'auto', flexShrink: 0 }} checked={locForm.is_public} onChange={(e) => setLocForm((f) => ({ ...f, is_public: e.target.checked }))} />
+                  <span>Visible on Public Portal</span>
+                </label>
+              </div>
+              <div className="actions">
+                <button type="submit" className="btn primary" disabled={busy}>
+                  {busy ? 'Saving…' : (editLocId ? 'Save Location' : 'Add Location')}
+                </button>
+                {editLocId && (
+                  <button type="button" className="btn" onClick={() => { setEditLocId(null); setLocForm({ ...EMPTY_LOCATION }); }}>
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </form>
+          </div>
+
+          <div className="card">
+            <h2>Locations &amp; Parks ({locations.length})</h2>
+            {locations.length === 0 ? (
+              <p className="muted">No locations yet.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr><th>Location</th><th>Category</th><th>Address &amp; Hours</th><th>Visibility</th><th style={{ width: 150 }}>Actions</th></tr>
+                </thead>
+                <tbody>
+                  {locations.map((loc) => (
+                    <tr key={loc.id}>
+                      <td>
+                        <strong>{loc.name}</strong>
+                        {loc.ada_accessible && <> <span className="badge active">ADA</span></>}
+                        {loc.amenities && <div className="muted" style={{ fontSize: '.8rem' }}>{loc.amenities}</div>}
+                      </td>
+                      <td><span className="badge draft">{loc.category}</span></td>
+                      <td>
+                        <div>{loc.address || '—'}</div>
+                        {loc.hours && <div className="muted" style={{ fontSize: '.8rem' }}>{loc.hours}</div>}
+                      </td>
+                      <td><span className={`badge ${loc.is_public ? 'active' : 'disabled'}`}>{loc.is_public ? 'Public' : 'Hidden'}</span></td>
+                      <td>
+                        <div className="actions">
+                          <button type="button" className="btn sm" onClick={() => { setEditLocId(loc.id); setLocForm({ ...loc }); }}>Edit</button>
+                          <button
+                            type="button"
+                            className="btn sm danger"
+                            onClick={async () => {
+                              if (!window.confirm(`Delete location "${loc.name}"?`)) return;
+                              await api(`/api/directory/locations/${loc.id}`, { method: 'DELETE' });
                               await loadAll();
                             }}
                           >

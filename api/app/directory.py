@@ -76,6 +76,25 @@ CREATE TABLE IF NOT EXISTS city_board_members (
     notes       TEXT NOT NULL DEFAULT '',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS city_locations (
+    id             BIGSERIAL PRIMARY KEY,
+    name           TEXT NOT NULL,
+    category       TEXT NOT NULL DEFAULT 'Park & Trail',
+    description    TEXT NOT NULL DEFAULT '',
+    address        TEXT NOT NULL DEFAULT '',
+    hours          TEXT NOT NULL DEFAULT '',
+    phone          TEXT NOT NULL DEFAULT '',
+    email          TEXT NOT NULL DEFAULT '',
+    website_url    TEXT NOT NULL DEFAULT '',
+    amenities      TEXT NOT NULL DEFAULT '',
+    ada_accessible BOOLEAN NOT NULL DEFAULT TRUE,
+    latitude       DOUBLE PRECISION,
+    longitude      DOUBLE PRECISION,
+    sort_order     INTEGER NOT NULL DEFAULT 0,
+    is_public      BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 _SEED_RESOURCES = [
@@ -153,6 +172,18 @@ def bootstrap() -> None:
                     "(board_name, seat_name, member_name, email, term_start, term_end, is_vacant, sort_order, notes, is_public) "
                     "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)",
                     b_row,
+                )
+        if conn.execute("SELECT COUNT(*) FROM city_locations").fetchone()[0] == 0:
+            for loc_row in (
+                ("City Hall", "City Facility", "Municipal administrative offices, City Clerk counter, and Council Chambers.", "100 Main Street", "Mon–Fri 8:00am–4:30pm", "(555) 234-1000", "clerk@city.example", "", "Council Chambers, Permit Counter, Public Wi-Fi, ADA Parking", True, 1),
+                ("Lakeside Park & Trailhead", "Park & Trail", "Waterfront park with paved multi-use trail, picnic pavilion, and public boat launch.", "450 Lakeshore Drive", "Daily 6:00am–10:00pm", "(555) 234-1050", "", "", "Playground, Picnic Pavilion, Boat Launch, Restrooms, Paved ADA Trail", True, 2),
+                ("Municipal Recycling & Yard Waste Drop-off", "Utility & Drop-off", "Residential brush, leaves, and single-stream recycling drop-off site.", "920 Public Works Way", "Wed 12pm–6pm, Sat 8am–2pm", "(555) 234-1080", "", "", "Yard Waste, Electronics Recycling, Cardboard", True, 3),
+            ):
+                conn.execute(
+                    "INSERT INTO city_locations "
+                    "(name, category, description, address, hours, phone, email, website_url, amenities, ada_accessible, sort_order, is_public) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE)",
+                    loc_row,
                 )
 
 
@@ -328,6 +359,62 @@ class BoardMemberPatch(BaseModel):
     notes: str | None = None
 
 
+def _row_to_location(r) -> dict:
+    return {
+        "id": r[0],
+        "name": r[1],
+        "category": r[2],
+        "description": r[3],
+        "address": r[4],
+        "hours": r[5],
+        "phone": r[6],
+        "email": r[7],
+        "website_url": r[8],
+        "amenities": r[9],
+        "ada_accessible": bool(r[10]),
+        "latitude": r[11],
+        "longitude": r[12],
+        "sort_order": r[13],
+        "is_public": bool(r[14]),
+        "created_at": r[15].isoformat() if r[15] else None,
+        "updated_at": r[16].isoformat() if r[16] else None,
+    }
+
+
+class LocationIn(BaseModel):
+    name: str
+    category: str = "Park & Trail"
+    description: str = ""
+    address: str = ""
+    hours: str = ""
+    phone: str = ""
+    email: str = ""
+    website_url: str = ""
+    amenities: str = ""
+    ada_accessible: bool = True
+    latitude: float | None = None
+    longitude: float | None = None
+    sort_order: int = 0
+    is_public: bool = True
+
+
+class LocationPatch(BaseModel):
+    name: str | None = None
+    category: str | None = None
+    description: str | None = None
+    address: str | None = None
+    hours: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    website_url: str | None = None
+    amenities: str | None = None
+    ada_accessible: bool | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    sort_order: int | None = None
+    is_public: bool | None = None
+
+
 @router.get("/public")
 def get_public_directory(q: str = "", resource_category: str = ""):
     ql = f"%{q.strip()}%"
@@ -366,6 +453,14 @@ def get_public_directory(q: str = "", resource_category: str = ""):
                 "ORDER BY board_name ASC, sort_order ASC, id ASC",
                 (ql, ql, ql),
             ).fetchall()
+            l_rows = conn.execute(
+                "SELECT id, name, category, description, address, hours, phone, email, website_url, "
+                "       amenities, ada_accessible, latitude, longitude, sort_order, is_public, created_at, updated_at "
+                "FROM city_locations "
+                "WHERE is_public = TRUE AND (name ILIKE %s OR category ILIKE %s OR description ILIKE %s OR address ILIKE %s OR amenities ILIKE %s) "
+                "ORDER BY sort_order ASC, name ASC",
+                (ql, ql, ql, ql, ql),
+            ).fetchall()
         else:
             c_rows = conn.execute(
                 "SELECT id, name, title_role, department, email, phone, office_hours, notes, "
@@ -392,11 +487,18 @@ def get_public_directory(q: str = "", resource_category: str = ""):
                 "FROM city_board_members WHERE is_public = TRUE "
                 "ORDER BY board_name ASC, sort_order ASC, id ASC"
             ).fetchall()
+            l_rows = conn.execute(
+                "SELECT id, name, category, description, address, hours, phone, email, website_url, "
+                "       amenities, ada_accessible, latitude, longitude, sort_order, is_public, created_at, updated_at "
+                "FROM city_locations WHERE is_public = TRUE "
+                "ORDER BY sort_order ASC, name ASC"
+            ).fetchall()
     return {
         "contacts": [_row_to_contact(r) for r in c_rows],
         "faqs": [_row_to_faq(r) for r in f_rows],
         "resources": [_row_to_resource(r) for r in r_rows],
         "boards": [_row_to_board(r) for r in b_rows],
+        "locations": [_row_to_location(r) for r in l_rows],
     }
 
 
@@ -729,3 +831,120 @@ def delete_board_member(board_id: int, user: dict = Depends(require_permission("
             raise HTTPException(status_code=404, detail="Board member not found")
     record_audit(user["username"], "directory.board_delete", f"Deleted board seat #{board_id}")
     return {"deleted": True, "id": board_id}
+
+
+_LOC_COLS = (
+    "id, name, category, description, address, hours, phone, email, website_url, "
+    "amenities, ada_accessible, latitude, longitude, sort_order, is_public, created_at, updated_at"
+)
+
+
+@router.get("/locations/public")
+def list_public_locations(q: str = "", category: str = ""):
+    ql = f"%{q.strip()}%"
+    cat = category.strip()
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"SELECT {_LOC_COLS} FROM city_locations "
+            "WHERE is_public = TRUE AND (%s = '' OR category = %s) "
+            "AND (%s = '%%' OR name ILIKE %s OR description ILIKE %s OR address ILIKE %s OR amenities ILIKE %s) "
+            "ORDER BY sort_order ASC, name ASC",
+            (cat, cat, ql, ql, ql, ql, ql),
+        ).fetchall()
+    return [_row_to_location(r) for r in rows]
+
+
+@router.get("/locations")
+def list_locations(_: dict = Depends(require_permission("directory.manage"))):
+    with pool.connection() as conn:
+        rows = conn.execute(
+            f"SELECT {_LOC_COLS} FROM city_locations ORDER BY sort_order ASC, name ASC"
+        ).fetchall()
+    return [_row_to_location(r) for r in rows]
+
+
+@router.post("/locations", status_code=201)
+def create_location(body: LocationIn, user: dict = Depends(require_permission("directory.manage"))):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Location name is required")
+    with pool.connection() as conn:
+        row = conn.execute(
+            "INSERT INTO city_locations "
+            "(name, category, description, address, hours, phone, email, website_url, "
+            " amenities, ada_accessible, latitude, longitude, sort_order, is_public) "
+            f"VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING {_LOC_COLS}",
+            (
+                name,
+                body.category.strip() or "Park & Trail",
+                body.description.strip(),
+                body.address.strip(),
+                body.hours.strip(),
+                body.phone.strip(),
+                body.email.strip(),
+                body.website_url.strip(),
+                body.amenities.strip(),
+                body.ada_accessible,
+                body.latitude,
+                body.longitude,
+                body.sort_order,
+                body.is_public,
+            ),
+        ).fetchone()
+    record_audit(user["username"], "directory.location_create", f"Added location: {name}")
+    return _row_to_location(row)
+
+
+@router.patch("/locations/{loc_id}")
+def update_location(loc_id: int, body: LocationPatch, user: dict = Depends(require_permission("directory.manage"))):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "UPDATE city_locations SET "
+            "name = COALESCE(%s, name), "
+            "category = COALESCE(%s, category), "
+            "description = COALESCE(%s, description), "
+            "address = COALESCE(%s, address), "
+            "hours = COALESCE(%s, hours), "
+            "phone = COALESCE(%s, phone), "
+            "email = COALESCE(%s, email), "
+            "website_url = COALESCE(%s, website_url), "
+            "amenities = COALESCE(%s, amenities), "
+            "ada_accessible = COALESCE(%s, ada_accessible), "
+            "latitude = COALESCE(%s, latitude), "
+            "longitude = COALESCE(%s, longitude), "
+            "sort_order = COALESCE(%s, sort_order), "
+            "is_public = COALESCE(%s, is_public), "
+            "updated_at = now() "
+            f"WHERE id = %s RETURNING {_LOC_COLS}",
+            (
+                body.name.strip() if body.name is not None else None,
+                body.category.strip() if body.category is not None else None,
+                body.description.strip() if body.description is not None else None,
+                body.address.strip() if body.address is not None else None,
+                body.hours.strip() if body.hours is not None else None,
+                body.phone.strip() if body.phone is not None else None,
+                body.email.strip() if body.email is not None else None,
+                body.website_url.strip() if body.website_url is not None else None,
+                body.amenities.strip() if body.amenities is not None else None,
+                body.ada_accessible,
+                body.latitude,
+                body.longitude,
+                body.sort_order,
+                body.is_public,
+                loc_id,
+            ),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Location not found")
+    record_audit(user["username"], "directory.location_update", f"Updated location #{loc_id}")
+    return _row_to_location(row)
+
+
+@router.delete("/locations/{loc_id}")
+def delete_location(loc_id: int, user: dict = Depends(require_permission("directory.manage"))):
+    with pool.connection() as conn:
+        row = conn.execute("DELETE FROM city_locations WHERE id = %s RETURNING id, name", (loc_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Location not found")
+    record_audit(user["username"], "directory.location_delete", f"Deleted location #{loc_id}: {row[1]}")
+    return {"deleted": True, "id": loc_id}
