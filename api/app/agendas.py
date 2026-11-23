@@ -801,6 +801,13 @@ class DocTemplateIn(BaseModel):
     body_template: str
 
 
+class DocTemplatePatch(BaseModel):
+    name: str | None = None
+    doc_kind: Literal["resolution", "ordinance", "proclamation", "memo"] | None = None
+    description: str | None = None
+    body_template: str | None = None
+
+
 class GenerateDocIn(BaseModel):
     doc_kind: Literal["resolution", "ordinance", "proclamation", "memo"] = "resolution"
     doc_number: str = ""
@@ -1441,6 +1448,39 @@ def create_doc_template(body: DocTemplateIn, _: dict = Depends(get_staff_user)):
             "VALUES (%s, %s, %s, %s, FALSE) "
             "RETURNING id, name, doc_kind, description, body_template, is_system, created_at, updated_at",
             (name, body.doc_kind, body.description.strip(), tpl),
+        ).fetchone()
+    return {
+        "id": row[0],
+        "name": row[1],
+        "doc_kind": row[2],
+        "description": row[3],
+        "body_template": row[4],
+        "is_system": bool(row[5]),
+        "created_at": row[6].isoformat() if row[6] else None,
+        "updated_at": row[7].isoformat() if row[7] else None,
+    }
+
+
+@router.patch("/doc-templates/{tpl_id}")
+def update_doc_template(tpl_id: int, body: DocTemplatePatch, _: dict = Depends(get_staff_user)):
+    with pool.connection() as conn:
+        cur = conn.execute(
+            "SELECT name, doc_kind, description, body_template FROM document_templates WHERE id = %s",
+            (tpl_id,),
+        ).fetchone()
+        if not cur:
+            raise HTTPException(status_code=404, detail="Document template not found")
+        new_name = body.name.strip() if body.name is not None else cur[0]
+        new_kind = body.doc_kind if body.doc_kind is not None else cur[1]
+        new_desc = body.description.strip() if body.description is not None else cur[2]
+        new_body = body.body_template.strip() if body.body_template is not None else cur[3]
+        if not new_name or not new_body:
+            raise HTTPException(status_code=400, detail="Template name and body cannot be empty")
+        row = conn.execute(
+            "UPDATE document_templates SET name = %s, doc_kind = %s, description = %s, body_template = %s, updated_at = now() "
+            "WHERE id = %s "
+            "RETURNING id, name, doc_kind, description, body_template, is_system, created_at, updated_at",
+            (new_name, new_kind, new_desc, new_body, tpl_id),
         ).fetchone()
     return {
         "id": row[0],

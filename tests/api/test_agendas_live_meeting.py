@@ -100,6 +100,13 @@ def test_legislative_doc_template_and_adopt_to_code(admin_client):
     assert custom_tpl.status_code == 201, custom_tpl.text
     custom_tpl_id = custom_tpl.json()["id"]
 
+    patched_tpl = admin_client.patch(
+        f"/api/agendas/doc-templates/{custom_tpl_id}",
+        json={"name": "Custom Zoning Ordinance v2"},
+    )
+    assert patched_tpl.status_code == 200, patched_tpl.text
+    assert patched_tpl.json()["name"] == "Custom Zoning Ordinance v2"
+
     # 2. Create an agenda + item, generate a PDF from the template
     ag = admin_client.post(
         "/api/agendas",

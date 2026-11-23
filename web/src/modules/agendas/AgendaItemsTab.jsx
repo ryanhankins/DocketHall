@@ -584,6 +584,7 @@ function InlineTextDocForm({ agendaId, itemId, onUploaded }) {
 
 function InlineTemplateDocForm({ agenda, item, onGenerated }) {
   const [templates, setTemplates] = useState([]);
+  const [selectedTplId, setSelectedTplId] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [docKind, setDocKind] = useState('resolution');
   const [docNumber, setDocNumber] = useState(item.ordinance_number || '');
@@ -591,6 +592,7 @@ function InlineTemplateDocForm({ agenda, item, onGenerated }) {
   const [effectiveDate, setEffectiveDate] = useState('');
   const [body, setBody] = useState('');
   const [busy, setBusy] = useState(false);
+  const [tplMsg, setTplMsg] = useState('');
   const [err, setErr] = useState('');
 
   async function ensureTemplates() {
@@ -601,9 +603,49 @@ function InlineTemplateDocForm({ agenda, item, onGenerated }) {
       setTemplates(list || []);
       if (list?.length && !body) {
         const first = list[0];
+        setSelectedTplId(String(first.id));
         setDocKind(first.doc_kind || 'resolution');
         setBody(first.body_template || '');
       }
+    } catch (error) {
+      setErr(error.message);
+    }
+  }
+
+  async function handleSaveAsNewTemplate() {
+    const name = window.prompt('New template name (e.g. Street Closure Resolution):', title || 'Custom Template');
+    if (!name || !name.trim()) return;
+    setErr('');
+    setTplMsg('');
+    try {
+      const created = await api('/api/agendas/doc-templates', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: name.trim(),
+          doc_kind: docKind,
+          description: '',
+          body_template: body,
+        }),
+      });
+      setTemplates((prev) => [...prev, created]);
+      setSelectedTplId(String(created.id));
+      setTplMsg(`Saved template "${created.name}".`);
+    } catch (error) {
+      setErr(error.message);
+    }
+  }
+
+  async function handleUpdateSelectedTemplate() {
+    if (!selectedTplId) return;
+    setErr('');
+    setTplMsg('');
+    try {
+      const updated = await api(`/api/agendas/doc-templates/${selectedTplId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ doc_kind: docKind, body_template: body }),
+      });
+      setTemplates((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+      setTplMsg(`Updated template "${updated.name}".`);
     } catch (error) {
       setErr(error.message);
     }
@@ -616,6 +658,7 @@ function InlineTemplateDocForm({ agenda, item, onGenerated }) {
       onSubmit={async (e) => {
         e.preventDefault();
         setErr('');
+        setTplMsg('');
         setBusy(true);
         try {
           const updated = await api(`/api/agendas/${agenda.id}/items/${item.id}/generate-document`, {
@@ -640,8 +683,10 @@ function InlineTemplateDocForm({ agenda, item, onGenerated }) {
         <div className="field" style={{ flex: 1 }}>
           <label>Template</label>
           <select
+            value={selectedTplId}
             onClick={ensureTemplates}
             onChange={(e) => {
+              setSelectedTplId(e.target.value);
               const tpl = templates.find((t) => String(t.id) === e.target.value);
               if (tpl) {
                 setDocKind(tpl.doc_kind || 'resolution');
@@ -672,10 +717,21 @@ function InlineTemplateDocForm({ agenda, item, onGenerated }) {
         <label>Body (supports {'{{city_name}}'}, {'{{doc_number}}'}, {'{{title}}'}, {'{{meeting_date}}'}, {'{{effective_date}}'})</label>
         <textarea rows={7} required value={body} onChange={(e) => setBody(e.target.value)} />
       </div>
-      <button type="submit" className="btn sm primary" disabled={busy}>
-        {busy ? 'Generating PDF…' : 'Generate & Attach PDF'}
-      </button>
-      {err && <div className="error-msg">{err}</div>}
+      <div className="actions" style={{ flexWrap: 'wrap', gap: '.4rem' }}>
+        <button type="submit" className="btn sm primary" disabled={busy}>
+          {busy ? 'Generating PDF…' : 'Generate & Attach PDF'}
+        </button>
+        {selectedTplId && (
+          <button type="button" className="btn sm" onClick={handleUpdateSelectedTemplate}>
+            Update Selected Template
+          </button>
+        )}
+        <button type="button" className="btn sm" onClick={handleSaveAsNewTemplate}>
+          Save as New Template
+        </button>
+      </div>
+      {tplMsg && <div className="ok-msg" style={{ marginTop: '.4rem' }}>{tplMsg}</div>}
+      {err && <div className="error-msg" style={{ marginTop: '.4rem' }}>{err}</div>}
     </form>
   );
 }

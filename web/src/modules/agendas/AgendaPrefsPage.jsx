@@ -374,6 +374,7 @@ export default function AgendaPrefsPage() {
       )}
 
       {tab === 'templates' && (
+      <>
       <div className="card">
         <h2>Meeting Templates</h2>
         <p className="muted" style={{ marginTop: 0 }}>
@@ -414,6 +415,8 @@ export default function AgendaPrefsPage() {
           </table>
         )}
       </div>
+      <DocumentTemplatesCard />
+      </>
       )}
 
       {tab === 'notifications' && (
@@ -424,5 +427,170 @@ export default function AgendaPrefsPage() {
       />
       )}
     </section>
+  );
+}
+
+function DocumentTemplatesCard() {
+  const [docTemplates, setDocTemplates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(null);
+  const [newName, setNewName] = useState('');
+  const [newKind, setNewKind] = useState('resolution');
+  const [newBody, setNewBody] = useState('');
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+
+  async function load() {
+    setLoading(true);
+    try {
+      setDocTemplates(await api('/api/agendas/doc-templates'));
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  return (
+    <div className="card" style={{ marginTop: '1rem' }}>
+      <h2>Document Templates (Resolutions &amp; Ordinances)</h2>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Customize boilerplate templates for Resolutions, Ordinances, Proclamations, and Staff Memos.
+        Supported placeholders: <code>{'{{city_name}}'}</code>, <code>{'{{doc_number}}'}</code>, <code>{'{{title}}'}</code>, <code>{'{{meeting_date}}'}</code>, <code>{'{{effective_date}}'}</code>.
+      </p>
+      {loading ? (
+        <div className="muted">Loading…</div>
+      ) : (
+        <div className="stack" style={{ gap: '.75rem', marginBottom: '1rem' }}>
+          {docTemplates.map((t) => (
+            <div key={t.id} style={{ border: '1px solid #cbd5e1', borderRadius: 6, padding: '.75rem', background: '#f8fafc' }}>
+              {editing?.id === t.id ? (
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setErr('');
+                    setMsg('');
+                    try {
+                      await api(`/api/agendas/doc-templates/${t.id}`, {
+                        method: 'PATCH',
+                        body: JSON.stringify({
+                          name: editing.name,
+                          doc_kind: editing.doc_kind,
+                          description: editing.description,
+                          body_template: editing.body_template,
+                        }),
+                      });
+                      setEditing(null);
+                      setMsg(`Saved "${editing.name}".`);
+                      await load();
+                    } catch (error) {
+                      setErr(error.message);
+                    }
+                  }}
+                >
+                  <div className="row" style={{ gap: '.5rem', marginBottom: '.5rem' }}>
+                    <div className="field" style={{ flex: 2 }}>
+                      <label>Name</label>
+                      <input required value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+                    </div>
+                    <div className="field" style={{ flex: 1 }}>
+                      <label>Kind</label>
+                      <select value={editing.doc_kind} onChange={(e) => setEditing({ ...editing, doc_kind: e.target.value })}>
+                        <option value="resolution">resolution</option>
+                        <option value="ordinance">ordinance</option>
+                        <option value="proclamation">proclamation</option>
+                        <option value="memo">memo</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="field" style={{ marginBottom: '.5rem' }}>
+                    <label>Template Body</label>
+                    <textarea rows={6} required value={editing.body_template} onChange={(e) => setEditing({ ...editing, body_template: e.target.value })} />
+                  </div>
+                  <div className="actions">
+                    <button type="submit" className="btn sm primary">Save Template</button>
+                    <button type="button" className="btn sm" onClick={() => setEditing(null)}>Cancel</button>
+                  </div>
+                </form>
+              ) : (
+                <div className="between" style={{ alignItems: 'flex-start', gap: '1rem' }}>
+                  <div>
+                    <strong>{t.name}</strong> <span className="badge">{t.doc_kind}</span>
+                    {t.description && <div className="muted" style={{ fontSize: '.85rem', marginTop: '.2rem' }}>{t.description}</div>}
+                  </div>
+                  <div className="actions">
+                    <button type="button" className="btn sm" onClick={() => setEditing({ ...t })}>Edit</button>
+                    {!t.is_system && (
+                      <button
+                        type="button"
+                        className="btn sm danger"
+                        onClick={async () => {
+                          if (!confirm(`Delete document template "${t.name}"?`)) return;
+                          await api(`/api/agendas/doc-templates/${t.id}`, { method: 'DELETE' });
+                          await load();
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <details>
+        <summary style={{ cursor: 'pointer', fontWeight: 600 }}>+ Create New Document Template</summary>
+        <form
+          style={{ marginTop: '.6rem' }}
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setErr('');
+            setMsg('');
+            try {
+              await api('/api/agendas/doc-templates', {
+                method: 'POST',
+                body: JSON.stringify({ name: newName.trim(), doc_kind: newKind, body_template: newBody }),
+              });
+              setNewName('');
+              setNewBody('');
+              setMsg('Created document template.');
+              await load();
+            } catch (error) {
+              setErr(error.message);
+            }
+          }}
+        >
+          <div className="row" style={{ gap: '.5rem', marginBottom: '.5rem' }}>
+            <div className="field" style={{ flex: 2 }}>
+              <label>Template Name</label>
+              <input required placeholder="e.g. Budget Amendment Resolution" value={newName} onChange={(e) => setNewName(e.target.value)} />
+            </div>
+            <div className="field" style={{ flex: 1 }}>
+              <label>Kind</label>
+              <select value={newKind} onChange={(e) => setNewKind(e.target.value)}>
+                <option value="resolution">resolution</option>
+                <option value="ordinance">ordinance</option>
+                <option value="proclamation">proclamation</option>
+                <option value="memo">memo</option>
+              </select>
+            </div>
+          </div>
+          <div className="field" style={{ marginBottom: '.5rem' }}>
+            <label>Template Body</label>
+            <textarea rows={5} required placeholder="WHEREAS, ..." value={newBody} onChange={(e) => setNewBody(e.target.value)} />
+          </div>
+          <button type="submit" className="btn sm primary">Create Template</button>
+        </form>
+      </details>
+      {msg && <div className="ok-msg" style={{ marginTop: '.5rem' }}>{msg}</div>}
+      {err && <div className="error-msg" style={{ marginTop: '.5rem' }}>{err}</div>}
+    </div>
   );
 }
