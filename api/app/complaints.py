@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from .agendas import _bucket, _minio
+from .agendas import _bucket, _storage
 from .audit import record_audit
 from .auth import current_user, has_permission, require_permission
 from .db import pool
@@ -1514,7 +1514,7 @@ async def upload_complaint_document(
     object_key = tenant_object_key(f"complaints/{complaint_id}/{secrets.token_hex(8)}_{safe_name}")
     ctype = file.content_type or "application/octet-stream"
 
-    _minio().put_object(
+    _storage().put_object(
         _bucket(),
         object_key,
         io.BytesIO(raw),
@@ -1585,7 +1585,7 @@ def download_complaint_document(doc_id: int, request: Request):
         if not (can_view_private or is_owner):
             raise HTTPException(status_code=403, detail="Confidential document requires complaints.view_private")
 
-    obj = _minio().get_object(_bucket(), object_key)
+    obj = _storage().get_object(_bucket(), object_key)
     try:
         data = obj.read()
     finally:
@@ -1699,7 +1699,7 @@ def delete_complaint(complaint_id: int, user: dict = Depends(require_permission(
             row = conn.execute("DELETE FROM complaints WHERE id = %s RETURNING id, complaint_number", (complaint_id,)).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Complaint not found")
-    mc = _minio()
+    mc = _storage()
     bkt = _bucket()
     for k in keys:
         try:

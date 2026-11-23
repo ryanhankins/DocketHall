@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 from psycopg.types.json import Jsonb
 from starlette.background import BackgroundTask
 
-from .agendas import _bucket, _minio, get_staff_user
+from .agendas import _bucket, _storage, get_staff_user
 from .audit import record_audit
 from .auth import require_permission
 from .db import pool
@@ -351,7 +351,7 @@ def _build_backup_zip(include_users: bool, exported_by: str) -> str:
             zf.writestr("human/preferences.json", json.dumps(table_data.get("agenda_preferences", []), indent=2))
             zf.writestr("human/templates.json", json.dumps(table_data.get("agenda_templates", []), indent=2))
 
-            # 4. Binary files from MinIO (documents + logo)
+            # 4. Binary files from object storage (documents + logo)
             object_keys: list[str] = [d["object_key"] for d in table_data.get("agenda_documents", []) if d.get("object_key")]
             object_keys.extend(
                 sd["object_key"] for sd in table_data.get("council_submission_documents", []) if sd.get("object_key")
@@ -378,14 +378,14 @@ def _build_backup_zip(include_users: bool, exported_by: str) -> str:
                 if pref.get("city_logo_key"):
                     object_keys.append(pref["city_logo_key"])
             seen_keys: set[str] = set()
-            minio_client = _minio()
+            storage_client = _storage()
             bucket = _bucket()
             for key in object_keys:
                 if key in seen_keys:
                     continue
                 seen_keys.add(key)
                 try:
-                    obj = minio_client.get_object(bucket, key)
+                    obj = storage_client.get_object(bucket, key)
                     try:
                         raw = obj.read()
                     finally:
@@ -395,7 +395,7 @@ def _build_backup_zip(include_users: bool, exported_by: str) -> str:
                     zf.writestr(arc_path, raw)
                     file_checksums[arc_path] = hashlib.sha256(raw).hexdigest()
                 except Exception as exc:
-                    warnings.append(f"Missing MinIO object {key}: {exc}")
+                    warnings.append(f"Missing storage object {key}: {exc}")
 
             # 5. Manifest & README
             manifest = {
@@ -449,7 +449,7 @@ async def import_archive(
     file: UploadFile = File(...),
     user: dict = Depends(get_staff_user),
 ):
-    """Reconstruct DocketHall database and MinIO files from a backup .zip archive."""
+    """Reconstruct DocketHall database and stored files from a backup .zip archive."""
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
     tmp_path = tmp.name
     try:
@@ -490,8 +490,8 @@ async def import_archive(
                     continue
                 table_rows[tname] = json.loads(zf.read(path).decode("utf-8"))
 
-            # Upload binary files to MinIO
-            minio_client = _minio()
+            # Upload binary files to object storage
+            storage_client = _storage()
             bucket = _bucket()
             restored_files = 0
             for arc_path in manifest.get("file_checksums") or {}:
@@ -501,7 +501,7 @@ async def import_archive(
                 key = tenant_object_key(strip_tenant_prefix(raw_key))
                 raw = zf.read(arc_path)
                 ctype = mimetypes.guess_type(key)[0] or "application/octet-stream"
-                minio_client.put_object(bucket, key, io.BytesIO(raw), length=len(raw), content_type=ctype)
+                storage_client.put_object(bucket, key, io.BytesIO(raw), length=len(raw), content_type=ctype)
                 restored_files += 1
 
         # Restore Postgres tables in a single transaction
@@ -620,7 +620,7 @@ def _get_offsite_s3_client(cfg: dict, secret: str) -> tuple[object, str, str]:
             secure=bool(cfg.get("s3_secure", True)),
         )
         return client, bucket, full_prefix
-    return _minio(), (cfg.get("s3_bucket") or "").strip() or _bucket(), full_prefix
+    return _storage(), (cfg.get("s3_bucket") or "").strip() or _bucket(), full_prefix
 
 
 class BackupPolicyIn(BaseModel):

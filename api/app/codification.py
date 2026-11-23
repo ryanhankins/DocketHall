@@ -36,7 +36,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
 
 from .agenda_pdf import apply_pdf_accessibility_metadata
-from .agendas import _bucket, _minio, _remove_minio_objects
+from .agendas import _bucket, _storage, _remove_storage_objects
 from .auth import require_permission
 from .codification_parser import (
     clean_pdf_pages,
@@ -505,7 +505,7 @@ def get_full_code_pdf(download: bool = False):
     if chapters and attached_pdfs:
         for _, _, obj_key in attached_pdfs:
             try:
-                obj = _minio().get_object(_bucket(), obj_key)
+                obj = _storage().get_object(_bucket(), obj_key)
                 try:
                     raw = obj.read()
                 finally:
@@ -553,7 +553,7 @@ def get_section_pdf(section_id: int):
 
     safe_sec = _SAFE_FILENAME_RE.sub("_", str(row[0] or "section")).strip("._") or "section"
     if row[6]:
-        obj = _minio().get_object(_bucket(), row[6])
+        obj = _storage().get_object(_bucket(), row[6])
         try:
             data = obj.read()
         finally:
@@ -676,7 +676,7 @@ def delete_chapter(chapter_id: int, _: dict = Depends(require_permission("codifi
         if not row:
             raise HTTPException(status_code=404, detail="Chapter not found")
     if keys:
-        _remove_minio_objects(keys)
+        _remove_storage_objects(keys)
     return {"deleted": True, "id": chapter_id}
 
 
@@ -832,7 +832,7 @@ def delete_section(section_id: int, _: dict = Depends(require_permission("codifi
         if not row:
             raise HTTPException(status_code=404, detail="Section not found")
     if keys:
-        _remove_minio_objects(keys)
+        _remove_storage_objects(keys)
     return {"deleted": True, "id": section_id}
 
 
@@ -1119,11 +1119,11 @@ def _upsert_section_tree(
                 raw_name, raw_bytes = raw_pair
                 obj_key = tenant_object_key(f"codification/{sec_id}/{uuid.uuid4().hex[:12]}_{raw_name}")
                 try:
-                    _minio().put_object(_bucket(), obj_key, io.BytesIO(raw_bytes), length=len(raw_bytes), content_type="application/pdf")
+                    _storage().put_object(_bucket(), obj_key, io.BytesIO(raw_bytes), length=len(raw_bytes), content_type="application/pdf")
                     old_obj = existing_sec[8] if existing_sec else ""
                     conn.execute("UPDATE code_sections SET object_key = %s WHERE id = %s", (obj_key, sec_id))
                     if old_obj:
-                        _remove_minio_objects([old_obj])
+                        _remove_storage_objects([old_obj])
                 except Exception as exc:
                     stats["warnings"].append(f"Section {sec_num}: stored text but PDF upload failed ({exc})")
 
@@ -1232,7 +1232,7 @@ async def upload_section_pdf(
 
     orig_name = _SAFE_FILENAME_RE.sub("_", (file.filename or "section.pdf").strip()) or "section.pdf"
     obj_key = tenant_object_key(f"codification/{section_id}/{uuid.uuid4().hex[:12]}_{orig_name}")
-    _minio().put_object(_bucket(), obj_key, io.BytesIO(raw), length=len(raw), content_type="application/pdf")
+    _storage().put_object(_bucket(), obj_key, io.BytesIO(raw), length=len(raw), content_type="application/pdf")
 
     parsed_body = ""
     parsed_ord = ""
@@ -1275,7 +1275,7 @@ async def upload_section_pdf(
             (section_id,),
         ).fetchone()
         if not old:
-            _remove_minio_objects([obj_key])
+            _remove_storage_objects([obj_key])
             raise HTTPException(status_code=404, detail="Section not found")
         chap_id = old[0]
         if parsed_body or parsed_children:
@@ -1305,7 +1305,7 @@ async def upload_section_pdf(
                 (section_id, f"Uploaded PDF: {orig_name}", user["username"]),
             )
     if old[1]:
-        _remove_minio_objects([old[1]])
+        _remove_storage_objects([old[1]])
     return {
         "ok": True,
         "has_uploaded_pdf": True,
@@ -1356,7 +1356,7 @@ async def extract_section_pdf_text(
     def _run_extract() -> dict:
         pdf_bytes: bytes | None = None
         if obj_key:
-            obj = _minio().get_object(_bucket(), obj_key)
+            obj = _storage().get_object(_bucket(), obj_key)
             try:
                 pdf_bytes = obj.read()
             finally:
@@ -1842,7 +1842,7 @@ def _reextract_single_section(
     sec_id, chap_id, sec_num, cur_art, cur_body, cur_ord, cur_eff, src_url, obj_key = row_tuple[:9]
     src = (src_url or "").strip()
     if obj_key:
-        obj = _minio().get_object(_bucket(), obj_key)
+        obj = _storage().get_object(_bucket(), obj_key)
         try:
             raw_bytes = obj.read()
         finally:
@@ -2100,7 +2100,7 @@ def _bulk_section_action_worker(body: BulkSectionActionIn, user: dict) -> dict:
             # Deleting selected top/chosen IDs cascades to their descendants
             res = conn.execute("DELETE FROM code_sections WHERE id = ANY(%s)", (raw_ids,))
             if obj_keys:
-                _remove_minio_objects(obj_keys)
+                _remove_storage_objects(obj_keys)
             return {"action": action, "affected": res.rowcount or 0, "skipped": 0, "children_created": 0, "children_updated": 0, "ocr_used_count": 0, "failed": []}
 
         if action == "move_chapter":

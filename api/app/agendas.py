@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-"""Staff agenda management and supporting document storage (MinIO)."""
+"""Staff agenda management and supporting document object storage."""
 import calendar
 import hashlib
 import io
@@ -283,7 +283,7 @@ ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_blog_position TEXT 
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_blog_heading TEXT NOT NULL DEFAULT '';
 """
 
-def _minio():
+def _storage():
     return get_storage_client()
 
 
@@ -291,10 +291,10 @@ def _bucket() -> str:
     return os.environ.get("S3_BUCKET") or os.environ.get("MINIO_BUCKET") or "records"
 
 
-def _remove_minio_objects(keys: list[str]) -> None:
+def _remove_storage_objects(keys: list[str]) -> None:
     if not keys:
         return
-    client = _minio()
+    client = _storage()
     bucket = _bucket()
     for key in keys:
         if not key:
@@ -1137,7 +1137,7 @@ async def upload_preferences_logo(
             raise HTTPException(status_code=400, detail="Unsupported image format; use PNG or JPEG")
 
         new_key = tenant_object_key(f"preferences/city_logo_{uuid.uuid4().hex[:12]}.{ext}")
-        _minio().put_object(
+        _storage().put_object(
             _bucket(),
             new_key,
             io.BytesIO(out_bytes),
@@ -1157,7 +1157,7 @@ async def upload_preferences_logo(
             prefs = _load_preferences(conn)
 
         if old_key and old_key != new_key:
-            _remove_minio_objects([old_key])
+            _remove_storage_objects([old_key])
         return prefs
 
     return await run_in_threadpool(_process_and_store_logo)
@@ -1174,7 +1174,7 @@ def get_preferences_logo():
     ext = key.rsplit(".", 1)[-1].lower() if "." in key else "png"
     media_type = _LOGO_MEDIA.get(ext, "image/png")
     try:
-        obj = _minio().get_object(_bucket(), key)
+        obj = _storage().get_object(_bucket(), key)
         try:
             data = obj.read()
         finally:
@@ -1202,7 +1202,7 @@ def delete_preferences_logo(_: dict = Depends(get_staff_user)):
         )
         prefs = _load_preferences(conn)
 
-    _remove_minio_objects([old_key] if old_key else [])
+    _remove_storage_objects([old_key] if old_key else [])
     return prefs
 
 
@@ -1608,7 +1608,7 @@ def delete_backlog_item(item_id: int, _: dict = Depends(get_staff_user)):
         if not row:
             raise HTTPException(status_code=404, detail="Backlog item not found")
         items = _load_backlog(conn)
-    _remove_minio_objects(keys)
+    _remove_storage_objects(keys)
     return items
 
 
@@ -1638,7 +1638,7 @@ async def upload_backlog_document(
                 (item_id,),
             ).fetchone()[0]
             object_key = tenant_object_key(f"backlog/{item_id}/{digest[:12]}_{safe_name}")
-            _minio().put_object(
+            _storage().put_object(
                 _bucket(),
                 object_key,
                 io.BytesIO(data),
@@ -1669,7 +1669,7 @@ def delete_backlog_document(item_id: int, doc_id: int, _: dict = Depends(get_sta
             raise HTTPException(status_code=404, detail="Document not found")
         _renumber_docs(conn, item_id)
         items = _load_backlog(conn)
-    _remove_minio_objects([row[0]])
+    _remove_storage_objects([row[0]])
     return items
 
 
@@ -1687,7 +1687,7 @@ def download_backlog_document(doc_id: int, _: dict = Depends(get_staff_user)):
         raise HTTPException(status_code=404, detail="Document not found")
     filename, content_type, object_key = row
     try:
-        obj = _minio().get_object(_bucket(), object_key)
+        obj = _storage().get_object(_bucket(), object_key)
     except Exception:
         raise HTTPException(status_code=404, detail="Document file not found")
     inline_types = ("application/pdf", "image/png", "image/jpeg")
@@ -1725,7 +1725,7 @@ def view_backlog_document_as_pdf(doc_id: int, _: dict = Depends(get_staff_user))
     if not target_doc:
         raise HTTPException(status_code=404, detail="Document not found")
     try:
-        obj = _minio().get_object(_bucket(), target_doc["object_key"])
+        obj = _storage().get_object(_bucket(), target_doc["object_key"])
         try:
             raw = obj.read()
         finally:
@@ -2082,10 +2082,10 @@ def _attach_submission_doc_to_item(
     item_id: int,
     uploaded_by: int | None,
 ) -> int:
-    """Copy a submission attachment in MinIO onto an agenda item and link agenda_doc_id."""
+    """Copy a submission attachment in object storage onto an agenda item and link agenda_doc_id."""
     bucket = _bucket()
     dst_key = f"agendas/{agenda_id}/{item_id}/{uuid.uuid4().hex[:12]}_{filename}"
-    _minio().copy_object(bucket, dst_key, CopySource(bucket, src_key))
+    _storage().copy_object(bucket, dst_key, CopySource(bucket, src_key))
     doc_pos = conn.execute(
         "SELECT COALESCE(MAX(position), 0) + 1 FROM agenda_documents WHERE agenda_item_id = %s",
         (item_id,),
@@ -2132,7 +2132,7 @@ async def upload_council_submission_document(
 
             approval_status = "pending" if (sub[1] == "accepted" and not has_permission(user, "agendas.manage")) else "approved"
             obj_key = tenant_object_key(f"submissions/{sub_id}/{uuid.uuid4().hex[:12]}_{safe_name}")
-            _minio().put_object(
+            _storage().put_object(
                 _bucket(), obj_key, io.BytesIO(data), length=len(data), content_type=content_type
             )
             row = conn.execute(
@@ -2339,7 +2339,7 @@ def decline_council_submission(
 
 @router.delete("/council/submissions/{sub_id}")
 def delete_council_submission(sub_id: int, user: dict = Depends(get_council_or_staff_user)):
-    """Delete a pending council submission and its MinIO attachments."""
+    """Delete a pending council submission and its object storage attachments."""
     with pool.connection() as conn:
         sub = conn.execute(
             "SELECT submitted_by, status FROM council_submissions WHERE id = %s",
@@ -2359,7 +2359,7 @@ def delete_council_submission(sub_id: int, user: dict = Depends(get_council_or_s
             ).fetchall()
         ]
         conn.execute("DELETE FROM council_submissions WHERE id = %s", (sub_id,))
-    _remove_minio_objects(keys)
+    _remove_storage_objects(keys)
     return {"status": "deleted"}
 
 
@@ -2726,7 +2726,7 @@ def delete_agenda(agenda_id: int, _: dict = Depends(get_staff_user)):
 
         conn.execute("DELETE FROM agendas WHERE id = %s", (agenda_id,))
 
-    _remove_minio_objects(keys)
+    _remove_storage_objects(keys)
     return {
         "deleted": True,
         "id": agenda_id,
@@ -2939,7 +2939,7 @@ def _copy_item_to_agenda(conn, src_item_id: int, target_agenda_id: int, position
         old_key = d[6]
         ext = os.path.splitext(d[2])[1].lower()
         new_key = f"agendas/{target_agenda_id}/{new_item_id}/{uuid.uuid4().hex}{ext}"
-        _minio().copy_object(_bucket(), new_key, CopySource(_bucket(), old_key))
+        _storage().copy_object(_bucket(), new_key, CopySource(_bucket(), old_key))
         conn.execute(
             "INSERT INTO agenda_documents "
             "(agenda_item_id, position, title, filename, content_type, size_bytes, sha256, object_key, uploaded_by) "
@@ -2968,7 +2968,7 @@ def delete_item(agenda_id: int, item_id: int, _: dict = Depends(get_staff_user))
         _renumber_items(conn, agenda_id)
         _touch_agenda(conn, agenda_id)
         agenda = _load_agenda(conn, agenda_id)
-    _remove_minio_objects(keys)
+    _remove_storage_objects(keys)
     return agenda
 
 
@@ -3142,7 +3142,7 @@ async def upload_document(
                 (item_id,),
             ).fetchone()[0]
             object_key = tenant_object_key(f"agendas/{agenda_id}/{item_id}/{digest[:12]}_{safe_name}")
-            _minio().put_object(
+            _storage().put_object(
                 _bucket(),
                 object_key,
                 io.BytesIO(data),
@@ -3202,7 +3202,7 @@ def create_text_document(
             (item_id,),
         ).fetchone()[0]
         object_key = tenant_object_key(f"agendas/{agenda_id}/{item_id}/{digest[:12]}_{safe_name}")
-        _minio().put_object(
+        _storage().put_object(
             _bucket(),
             object_key,
             io.BytesIO(data),
@@ -3262,7 +3262,7 @@ def update_document(
                 raise HTTPException(status_code=400, detail="Only text attachments can be edited inline")
             data = body.content.encode("utf-8")
             digest = hashlib.sha256(data).hexdigest()
-            _minio().put_object(
+            _storage().put_object(
                 _bucket(),
                 cur[3],
                 io.BytesIO(data),
@@ -3332,7 +3332,7 @@ def delete_document(
         _renumber_docs(conn, item_id)
         _touch_agenda(conn, agenda_id)
         agenda = _load_agenda(conn, agenda_id)
-    _remove_minio_objects([row[0]])
+    _remove_storage_objects([row[0]])
     return agenda
 
 
@@ -3351,7 +3351,7 @@ def download_document(agenda_id: int, doc_id: int, _: dict = Depends(get_staff_u
 
     filename, content_type, object_key = row
     try:
-        obj = _minio().get_object(_bucket(), object_key)
+        obj = _storage().get_object(_bucket(), object_key)
     except Exception:
         raise HTTPException(status_code=404, detail="Document file not found")
     inline_types = ("application/pdf", "image/png", "image/jpeg")
@@ -3393,7 +3393,7 @@ def view_document_as_pdf(agenda_id: int, doc_id: int, _: dict = Depends(get_staf
         raise HTTPException(status_code=404, detail="Document not found")
 
     try:
-        obj = _minio().get_object(_bucket(), target_doc["object_key"])
+        obj = _storage().get_object(_bucket(), target_doc["object_key"])
         try:
             raw = obj.read()
         finally:
@@ -3413,7 +3413,7 @@ def view_document_as_pdf(agenda_id: int, doc_id: int, _: dict = Depends(get_staf
 
 def _build_packet_response(agenda: dict, prefs: dict, agenda_id: int, summary: bool, download: bool) -> Response:
     def fetch_doc(object_key: str) -> bytes:
-        obj = _minio().get_object(_bucket(), object_key)
+        obj = _storage().get_object(_bucket(), object_key)
         try:
             return obj.read()
         finally:
@@ -3440,7 +3440,7 @@ def _build_packet_response(agenda: dict, prefs: dict, agenda_id: int, summary: b
 
 def _build_minutes_response(agenda: dict, prefs: dict, agenda_id: int, download: bool) -> Response:
     def fetch_doc(object_key: str) -> bytes:
-        obj = _minio().get_object(_bucket(), object_key)
+        obj = _storage().get_object(_bucket(), object_key)
         try:
             return obj.read()
         finally:

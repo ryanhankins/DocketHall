@@ -28,7 +28,7 @@ from fastapi.responses import Response
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
-from .agendas import _bucket, _minio, _remove_minio_objects
+from .agendas import _bucket, _storage, _remove_storage_objects
 from .audit import record_audit
 from .auth import current_user, has_permission, require_permission
 from .blog_utils import (
@@ -643,7 +643,7 @@ def _serve_blog_image(key: str, filename: str, is_visible: bool, request: Reques
         user = current_user(request)
         if not user or not has_permission(user, "blog.manage"):
             raise HTTPException(status_code=404, detail="Image not found")
-    resp = _minio().get_object(_bucket(), key)
+    resp = _storage().get_object(_bucket(), key)
     try:
         data = resp.read()
     finally:
@@ -861,7 +861,7 @@ def delete_category(category_id: int, user: dict = Depends(require_permission("b
         ).fetchall()
         conn.execute("DELETE FROM blog_categories WHERE id = %s", (category_id,))
     keys = [k for k in ([cat_row[2]] + [r[0] for r in post_imgs]) if k]
-    _remove_minio_objects(keys)
+    _remove_storage_objects(keys)
     record_audit(user["username"], "blog.category_delete", f"Deleted blog category #{category_id}: {cat_row[1]}")
     return {"deleted": True, "id": category_id}
 
@@ -876,7 +876,7 @@ async def _upload_validated_image(file: UploadFile, prefix: str) -> tuple[str, s
     ext, ctype = detected
     orig = _SAFE_FILE_RE.sub("_", os.path.basename(file.filename or f"image.{ext}")) or f"image.{ext}"
     obj_key = tenant_object_key(f"{prefix}/{uuid.uuid4().hex[:12]}-{orig}")
-    _minio().put_object(_bucket(), obj_key, io.BytesIO(raw), length=len(raw), content_type=ctype)
+    _storage().put_object(_bucket(), obj_key, io.BytesIO(raw), length=len(raw), content_type=ctype)
     return obj_key, orig, ctype
 
 
@@ -903,7 +903,7 @@ async def upload_category_image(
             (obj_key, orig, category_id),
         ).fetchone()
     if old_key:
-        _remove_minio_objects([old_key])
+        _remove_storage_objects([old_key])
     record_audit(user["username"], "blog.category_image", f"Uploaded {orig} to category #{category_id}")
     return _row_to_category(row)
 
@@ -925,7 +925,7 @@ def delete_category_image(category_id: int, user: dict = Depends(require_permiss
             (category_id,),
         ).fetchone()
     if old_key:
-        _remove_minio_objects([old_key])
+        _remove_storage_objects([old_key])
     record_audit(user["username"], "blog.category_image_delete", f"Removed image from category #{category_id}")
     return _row_to_category(row)
 
@@ -1148,7 +1148,7 @@ def delete_post(post_id: int, user: dict = Depends(require_permission("blog.mana
         if not row:
             raise HTTPException(status_code=404, detail="Blog post not found")
     if row[2]:
-        _remove_minio_objects([row[2]])
+        _remove_storage_objects([row[2]])
     record_audit(user["username"], "blog.post_delete", f"Deleted blog post #{post_id}: {row[1]}")
     return {"deleted": True, "id": post_id}
 
@@ -1178,7 +1178,7 @@ async def upload_post_image(
             (post_id,),
         ).fetchone()
     if old_key:
-        _remove_minio_objects([old_key])
+        _remove_storage_objects([old_key])
     record_audit(user["username"], "blog.post_image", f"Uploaded {orig} to blog post #{post_id}")
     return _row_to_post(full_row)
 
@@ -1202,7 +1202,7 @@ def delete_post_image(post_id: int, user: dict = Depends(require_permission("blo
             (post_id,),
         ).fetchone()
     if old_key:
-        _remove_minio_objects([old_key])
+        _remove_storage_objects([old_key])
     record_audit(user["username"], "blog.post_image_delete", f"Removed image from blog post #{post_id}")
     return _row_to_post(full_row)
 

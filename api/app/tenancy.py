@@ -95,7 +95,7 @@ def schema_for_slug(slug: str) -> str:
 
 
 def tenant_object_key(key: str) -> str:
-    """Prefix MinIO/S3 object keys with tenants/<slug>/ in multi-tenant schemas."""
+    """Prefix S3 object keys with tenants/<slug>/ in multi-tenant schemas."""
     clean = (key or "").lstrip("/")
     if not clean:
         return ""

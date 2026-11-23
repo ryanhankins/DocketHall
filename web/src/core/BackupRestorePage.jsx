@@ -297,7 +297,7 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
           <div>
             <h2 style={{ margin: 0 }}>Automated Scheduled Backups (S3 / Offsite Storage)</h2>
             <p className="muted" style={{ margin: '.2rem 0 0', fontSize: '.88rem' }}>
-              Schedule automatic encrypted snapshots to MinIO or an external S3-compatible bucket.
+              Schedule automatic encrypted snapshots to Local SeaweedFS or an external S3-compatible bucket.
             </p>
           </div>
           <button type="button" className="btn sm primary" onClick={runOffsiteNow} disabled={runningOffsite}>
@@ -330,7 +330,7 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
                 value={policy.target_type}
                 onChange={(e) => setPolicy((p) => ({ ...p, target_type: e.target.value }))}
               >
-                <option value="minio_offsite">Managed MinIO Object Bucket</option>
+                <option value="minio_offsite">Local SeaweedFS Object Bucket</option>
                 <option value="s3_compatible">External S3-Compatible Endpoint</option>
               </select>
             </div>

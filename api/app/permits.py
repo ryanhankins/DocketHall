@@ -33,7 +33,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from .agendas import _bucket, _minio, _remove_minio_objects
+from .agendas import _bucket, _storage, _remove_storage_objects
 from .audit import record_audit
 from .auth import has_permission, require_permission
 from .db import pool
@@ -2813,7 +2813,7 @@ async def upload_permit_document(
     clean_title = title.strip() or orig_name
     clean_cat = doc_category.strip() or "Other"
 
-    _minio().put_object(
+    _storage().put_object(
         _bucket(),
         obj_key,
         io.BytesIO(raw),
@@ -2854,7 +2854,7 @@ def download_permit_document(
         if not row:
             raise HTTPException(status_code=404, detail="Document not found")
 
-    obj = _minio().get_object(_bucket(), row[2])
+    obj = _storage().get_object(_bucket(), row[2])
     try:
         data = obj.read()
     finally:
@@ -2909,7 +2909,7 @@ def delete_permit_document(
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Document not found")
-        _remove_minio_objects([row[0]])
+        _remove_storage_objects([row[0]])
         return _get_permit_or_404(conn, permit_id, include_internal=has_permission(user, "permits.manage"))
 
 
@@ -3672,7 +3672,7 @@ def delete_permit(permit_id: int, admin: dict = Depends(require_permission("perm
         row = conn.execute("DELETE FROM permits WHERE id = %s RETURNING id, permit_number", (permit_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Permit not found")
-    _remove_minio_objects(keys)
+    _remove_storage_objects(keys)
     record_audit(admin["username"], "permit.deleted", "permits", row[1], f"Deleted permit {row[1]}")
     return {"deleted": True, "id": permit_id}
 

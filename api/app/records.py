@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from .agendas import _bucket, _minio, _remove_minio_objects
+from .agendas import _bucket, _storage, _remove_storage_objects
 from .audit import record_audit
 from .pdf_check import check_pdf_compliance
 from .auth import require_permission
@@ -260,7 +260,7 @@ def download_public_file(file_id: int):
             {"is_public": bool(row[3]), "auto_unpublish_on_expire": bool(row[4]), "expiration_date": row[5] or ""},
         ):
             raise HTTPException(status_code=404, detail="File not found")
-    obj = _minio().get_object(_bucket(), row[2])
+    obj = _storage().get_object(_bucket(), row[2])
     try:
         data = obj.read()
     finally:
@@ -411,7 +411,7 @@ async def upload_foia_fulfillment_file(
     orig_name = (file.filename or "fulfillment.pdf").strip() or "fulfillment.pdf"
     safe_name = _SAFE_FILENAME_RE.sub("_", orig_name).strip("._") or "fulfillment"
     obj_key = tenant_object_key(f"foia/{req_id}/{uuid.uuid4().hex[:12]}_{safe_name}")
-    _minio().put_object(_bucket(), obj_key, io.BytesIO(raw), length=len(raw), content_type=file.content_type or "application/octet-stream")
+    _storage().put_object(_bucket(), obj_key, io.BytesIO(raw), length=len(raw), content_type=file.content_type or "application/octet-stream")
     with pool.connection() as conn:
         row = conn.execute(
             f"UPDATE public_records_requests SET fulfillment_object_key = %s, fulfillment_filename = %s, "
@@ -435,7 +435,7 @@ def download_foia_fulfillment_file(request_number: str):
         ).fetchone()
     if not row or not row[0] or row[2] not in ("ready", "fulfilled"):
         raise HTTPException(status_code=404, detail="Fulfillment file not available")
-    obj = _minio().get_object(_bucket(), row[0])
+    obj = _storage().get_object(_bucket(), row[0])
     try:
         data = obj.read()
     finally:
@@ -662,7 +662,7 @@ def delete_record(doc_id: int, _: dict = Depends(require_permission("records.man
         row = conn.execute("DELETE FROM repository_documents WHERE id = %s RETURNING id", (doc_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Repository record not found")
-    _remove_minio_objects(keys)
+    _remove_storage_objects(keys)
     return {"deleted": True, "id": doc_id}
 
 
@@ -686,7 +686,7 @@ async def upload_record_file(
     obj_key = tenant_object_key(f"records/{doc_id}/{uuid.uuid4().hex[:12]}_{safe_name}")
     sha = hashlib.sha256(raw).hexdigest()
     ctype = file.content_type or "application/octet-stream"
-    _minio().put_object(_bucket(), obj_key, io.BytesIO(raw), length=len(raw), content_type=ctype)
+    _storage().put_object(_bucket(), obj_key, io.BytesIO(raw), length=len(raw), content_type=ctype)
 
     with pool.connection() as conn:
         conn.execute(
@@ -710,7 +710,7 @@ def download_record_file(
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="File not found")
-    obj = _minio().get_object(_bucket(), row[2])
+    obj = _storage().get_object(_bucket(), row[2])
     try:
         data = obj.read()
     finally:
@@ -742,7 +742,7 @@ def check_record_file_compliance(
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="File not found")
-    obj = _minio().get_object(_bucket(), row[2])
+    obj = _storage().get_object(_bucket(), row[2])
     try:
         data = obj.read()
     finally:
@@ -764,5 +764,5 @@ def delete_record_file(
         ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="File not found")
-        _remove_minio_objects([row[0]])
+        _remove_storage_objects([row[0]])
         return _get_record_or_404(conn, doc_id)

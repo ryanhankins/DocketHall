@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from .agendas import _bucket, _minio
+from .agendas import _bucket, _storage
 from .audit import record_audit
 from .auth import require_permission
 from .db import pool
@@ -328,7 +328,7 @@ async def upload_notice_attachment(
     orig = _SAFE_FILE_RE.sub("_", os.path.basename(file.filename or "attachment.pdf")) or "attachment.pdf"
     obj_key = tenant_object_key(f"notices/{notice_id}/{uuid.uuid4().hex[:12]}-{orig}")
     ctype = file.content_type or "application/octet-stream"
-    _minio().put_object(_bucket(), obj_key, __import__("io").BytesIO(raw), length=len(raw), content_type=ctype)
+    _storage().put_object(_bucket(), obj_key, __import__("io").BytesIO(raw), length=len(raw), content_type=ctype)
     public_url = f"/api/notices/public/{notice_id}/attachment"
     with pool.connection() as conn:
         row = conn.execute(
@@ -351,7 +351,7 @@ def download_notice_attachment(notice_id: int):
         ).fetchone()
     if not row or not row[0] or not row[2]:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    resp = _minio().get_object(_bucket(), row[0])
+    resp = _storage().get_object(_bucket(), row[0])
     try:
         data = resp.read()
     finally:
