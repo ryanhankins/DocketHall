@@ -53,6 +53,7 @@ export default function CoreShell() {
   const [backlogDueCount, setBacklogDueCount] = useState(0);
   const [hash, setHash] = useState(() => getWorkspaceRoute());
   const [menuFilter, setMenuFilter] = useState('');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [openSubmenus, setOpenSubmenus] = useState(() => {
     try {
       const saved = localStorage.getItem('dockethall.openSubmenus');
@@ -192,6 +193,7 @@ export default function CoreShell() {
     const curUrl = `${location.pathname}${location.search}`;
     if (curUrl !== nextUrl) history.pushState(null, '', nextUrl);
     setHash(clean);
+    setMobileNavOpen(false);
   }, []);
 
   const canManageSettings = hasPermission(me, 'settings.manage') || hasPermission(me, 'agendas.manage');
@@ -373,6 +375,17 @@ export default function CoreShell() {
           </span>
         </a>
         <div className="user-bar">
+          {me && (
+            <button
+              type="button"
+              className="btn sm mobile-menu-toggle"
+              aria-expanded={mobileNavOpen}
+              aria-controls="menu"
+              onClick={() => setMobileNavOpen(v => !v)}
+            >
+              {mobileNavOpen ? '✕ Close' : '☰ Menu'}
+            </button>
+          )}
           <span id="whoami">
             {me ? `${me.username} (${ROLE_LABELS[me.role] || me.role})` : ''}
           </span>
@@ -427,7 +440,7 @@ export default function CoreShell() {
 
       <div className="shell">
         {me && (
-          <nav id="menu">
+          <nav id="menu" className={mobileNavOpen ? 'mobile-open' : ''}>
             <div style={{ marginBottom: '.45rem', paddingBottom: '.45rem', borderBottom: '1px solid #e2e8f0' }}>
               <button
                 type="button"
