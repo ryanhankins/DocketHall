@@ -78,3 +78,86 @@ def test_agenda_and_backlog_crud_lifecycle(anon_client, applicant_client, admin_
     # Clean up agenda and backlog item
     assert admin_client.delete(f"/api/agendas/{ag_id}").status_code in (200, 204)
     assert admin_client.delete(f"/api/agendas/backlog/{bl_id}").status_code in (200, 204)
+
+
+def test_legislative_doc_template_and_adopt_to_code(admin_client):
+    # 1. List seeded document templates and create a custom one
+    tpls_res = admin_client.get("/api/agendas/doc-templates")
+    assert tpls_res.status_code == 200, tpls_res.text
+    tpls = tpls_res.json()
+    assert any(t["doc_kind"] == "ordinance" for t in tpls)
+    assert any(t["doc_kind"] == "resolution" for t in tpls)
+
+    custom_tpl = admin_client.post(
+        "/api/agendas/doc-templates",
+        json={
+            "name": "Custom Zoning Ordinance",
+            "doc_kind": "ordinance",
+            "description": "Test template",
+            "body_template": "AN ORDINANCE OF {{city_name}} ({{doc_number}}) FOR {{title}}.",
+        },
+    )
+    assert custom_tpl.status_code == 201, custom_tpl.text
+    custom_tpl_id = custom_tpl.json()["id"]
+
+    # 2. Create an agenda + item, generate a PDF from the template
+    ag = admin_client.post(
+        "/api/agendas",
+        json={"title": "Ordinance Adoption Meeting", "body": "City Council", "meeting_date": "2026-12-15"},
+    ).json()
+    ag_id = ag["id"]
+    item_ag = admin_client.post(
+        f"/api/agendas/{ag_id}/items",
+        json={"title": "Short-Term Rental Regulations", "section": "New Business"},
+    ).json()
+    item_id = item_ag["items"][-1]["id"]
+
+    gen_res = admin_client.post(
+        f"/api/agendas/{ag_id}/items/{item_id}/generate-document",
+        json={
+            "doc_kind": "ordinance",
+            "doc_number": "ORD-2026-88",
+            "title": "Short-Term Rental Regulations",
+            "body": custom_tpl.json()["body_template"],
+            "effective_date": "2027-01-01",
+        },
+    )
+    assert gen_res.status_code == 201, gen_res.text
+    gen_item = next(i for i in gen_res.json()["items"] if i["id"] == item_id)
+    assert gen_item["ordinance_number"] == "ORD-2026-88"
+    assert len(gen_item["documents"]) == 1
+    doc_id = gen_item["documents"][0]["id"]
+
+    pdf_res = admin_client.get(f"/api/agendas/{ag_id}/documents/{doc_id}/download")
+    assert pdf_res.status_code == 200
+    assert pdf_res.content.startswith(b"%PDF")
+
+    # 3. Adopt the ordinance into Codification and verify it is tagged in /api/codification/public
+    ch = admin_client.post(
+        "/api/codification/chapters",
+        json={"code_prefix": "880", "title": "Rental Licensing", "is_published": True},
+    ).json()
+    adopt_res = admin_client.post(
+        f"/api/agendas/{ag_id}/items/{item_id}/adopt-to-code",
+        json={
+            "chapter_id": ch["id"],
+            "section_number": "880.01",
+            "section_title": "Short-Term Rental Permits",
+            "body": "All short-term rentals must hold an annual city permit.",
+            "effective_date": "2027-01-01",
+        },
+    )
+    assert adopt_res.status_code == 200, adopt_res.text
+    adopt_data = adopt_res.json()
+    assert adopt_data["status"] == "codified"
+    assert adopt_data["ordinance_ref"] == "ORD-2026-88"
+
+    pub_code = admin_client.get("/api/codification/public").json()["chapters"]
+    target_ch = next(c for c in pub_code if c["id"] == ch["id"])
+    tagged_sec = next(s for s in target_ch["sections"] if s["section_number"] == "880.01")
+    assert tagged_sec["ordinance_ref"] == "ORD-2026-88"
+    assert tagged_sec["effective_date"] == "2027-01-01"
+
+    # Clean up custom template & agenda
+    assert admin_client.delete(f"/api/agendas/doc-templates/{custom_tpl_id}").status_code == 200
+    assert admin_client.delete(f"/api/agendas/{ag_id}").status_code in (200, 204)

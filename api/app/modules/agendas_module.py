@@ -72,6 +72,12 @@ AGENDAS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         True,
     ),
     (
+        "document_templates",
+        ["id", "name", "doc_kind", "description", "body_template", "is_system", "created_at", "updated_at"],
+        set(),
+        True,
+    ),
+    (
         "agenda_public_comments",
         [
             "id", "agenda_id", "agenda_item_id", "author_user_id", "author_name",

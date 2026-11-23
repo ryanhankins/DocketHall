@@ -37,7 +37,7 @@ class CopySource:
     bucket_name: str
     object_name: str
 
-from .agenda_pdf import build_agenda_packet_pdf, build_minutes_pdf, render_single_document_pdf
+from .agenda_pdf import build_agenda_packet_pdf, build_minutes_pdf, render_legislative_document_pdf, render_single_document_pdf
 from .audit import record_audit
 from .auth import current_user, has_permission
 from .db import _read_secret, pool
@@ -170,6 +170,16 @@ CREATE TABLE IF NOT EXISTS agenda_templates (
     body          TEXT NOT NULL DEFAULT '',
     meeting_time  TEXT NOT NULL DEFAULT '',
     items         JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS document_templates (
+    id            BIGSERIAL PRIMARY KEY,
+    name          TEXT NOT NULL,
+    doc_kind      TEXT NOT NULL DEFAULT 'resolution',
+    description   TEXT NOT NULL DEFAULT '',
+    body_template TEXT NOT NULL DEFAULT '',
+    is_system     BOOLEAN NOT NULL DEFAULT FALSE,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -350,6 +360,59 @@ def bootstrap() -> None:
                 "INSERT INTO agenda_templates (name, body, meeting_time, items) VALUES (%s, %s, %s, %s::jsonb)",
                 ("Regular City Council Meeting", "City Council", "18:30", json.dumps(default_items)),
             )
+
+        doc_tpl_cnt = conn.execute("SELECT COUNT(*) FROM document_templates").fetchone()[0]
+        if doc_tpl_cnt == 0:
+            default_doc_templates = [
+                (
+                    "Standard Resolution",
+                    "resolution",
+                    "Formal City Council resolution with WHEREAS recitals and BE IT RESOLVED clause.",
+                    "WHEREAS, the City Council of {{city_name}} finds it in the best interest of residents to take action regarding {{title}};\n\n"
+                    "WHEREAS, staff has reviewed the proposal and recommended approval at the {{meeting_date}} meeting;\n\n"
+                    "NOW, THEREFORE, BE IT RESOLVED BY THE CITY COUNCIL OF {{city_name}}:\n\n"
+                    "Section 1. The Council hereby approves {{title}} as presented.\n\n"
+                    "Section 2. This resolution ({{doc_number}}) shall take effect immediately upon adoption.",
+                    True,
+                ),
+                (
+                    "Standard Ordinance",
+                    "ordinance",
+                    "Municipal ordinance amending or adding a section of the City Code.",
+                    "THE CITY COUNCIL OF {{city_name}} HEREBY ORDAINS:\n\n"
+                    "WHEREAS, {{city_name}} desires to update its Municipal Code regarding {{title}};\n\n"
+                    "Section 1. Amendment. The Municipal Code of {{city_name}} is hereby amended to enact {{title}}.\n\n"
+                    "Section 2. Severability. If any provision of this Ordinance ({{doc_number}}) is held invalid, the remainder shall remain in full force.\n\n"
+                    "Section 3. Effective Date. This Ordinance shall take effect on {{effective_date}} following adoption and publication as provided by law.",
+                    True,
+                ),
+                (
+                    "Mayoral Proclamation",
+                    "proclamation",
+                    "Ceremonial proclamation for community recognition or awareness.",
+                    "WHEREAS, {{city_name}} recognizes the contributions and importance of {{title}};\n\n"
+                    "NOW, THEREFORE, I, Mayor of {{city_name}}, do hereby proclaim {{title}} on this {{meeting_date}}, and encourage all residents to observe this occasion.",
+                    True,
+                ),
+                (
+                    "Staff Report / Memo",
+                    "memo",
+                    "Structured staff memorandum with background, fiscal impact, and recommendation.",
+                    "TO: Mayor and City Council, {{city_name}}\n"
+                    "DATE: {{meeting_date}}\n"
+                    "SUBJECT: {{title}}\n\n"
+                    "BACKGROUND:\nProvide relevant context, history, and staff analysis.\n\n"
+                    "FISCAL IMPACT:\nState budget account, cost estimate, or 'None'.\n\n"
+                    "RECOMMENDATION:\nStaff recommends that the City Council approve {{title}}.",
+                    True,
+                ),
+            ]
+            for name, kind, desc, body_tpl, is_sys in default_doc_templates:
+                conn.execute(
+                    "INSERT INTO document_templates (name, doc_kind, description, body_template, is_system) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (name, kind, desc, body_tpl, is_sys),
+                )
 
 
 def _is_agenda_staff(user: dict) -> bool:
@@ -729,6 +792,34 @@ class ReorderItemsIn(BaseModel):
 class TextDocIn(BaseModel):
     title: str
     content: str
+
+
+class DocTemplateIn(BaseModel):
+    name: str
+    doc_kind: Literal["resolution", "ordinance", "proclamation", "memo"] = "resolution"
+    description: str = ""
+    body_template: str
+
+
+class GenerateDocIn(BaseModel):
+    doc_kind: Literal["resolution", "ordinance", "proclamation", "memo"] = "resolution"
+    doc_number: str = ""
+    title: str
+    body: str
+    effective_date: str = ""
+    signatory_primary: str = "Mayor"
+    signatory_secondary: str = "City Clerk"
+
+
+class AdoptToCodeIn(BaseModel):
+    chapter_id: int
+    section_number: str
+    section_title: str = ""
+    body: str = ""
+    ordinance_number: str = ""
+    effective_date: str = ""
+    change_summary: str = ""
+    is_published: bool = True
 
 
 class DocPatch(BaseModel):
@@ -1314,6 +1405,65 @@ def delete_template(template_id: int, _: dict = Depends(get_staff_user)):
         if not row:
             raise HTTPException(status_code=404, detail="Template not found")
     return {"deleted": True, "id": template_id}
+
+
+@router.get("/doc-templates")
+def list_doc_templates(_: dict = Depends(get_staff_user)):
+    with pool.connection() as conn:
+        rows = conn.execute(
+            "SELECT id, name, doc_kind, description, body_template, is_system, created_at, updated_at "
+            "FROM document_templates ORDER BY is_system DESC, doc_kind, name, id"
+        ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "name": r[1],
+            "doc_kind": r[2],
+            "description": r[3],
+            "body_template": r[4],
+            "is_system": bool(r[5]),
+            "created_at": r[6].isoformat() if r[6] else None,
+            "updated_at": r[7].isoformat() if r[7] else None,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/doc-templates", status_code=201)
+def create_doc_template(body: DocTemplateIn, _: dict = Depends(get_staff_user)):
+    name = body.name.strip()
+    tpl = body.body_template.strip()
+    if not name or not tpl:
+        raise HTTPException(status_code=400, detail="Template name and body are required")
+    with pool.connection() as conn:
+        row = conn.execute(
+            "INSERT INTO document_templates (name, doc_kind, description, body_template, is_system) "
+            "VALUES (%s, %s, %s, %s, FALSE) "
+            "RETURNING id, name, doc_kind, description, body_template, is_system, created_at, updated_at",
+            (name, body.doc_kind, body.description.strip(), tpl),
+        ).fetchone()
+    return {
+        "id": row[0],
+        "name": row[1],
+        "doc_kind": row[2],
+        "description": row[3],
+        "body_template": row[4],
+        "is_system": bool(row[5]),
+        "created_at": row[6].isoformat() if row[6] else None,
+        "updated_at": row[7].isoformat() if row[7] else None,
+    }
+
+
+@router.delete("/doc-templates/{tpl_id}")
+def delete_doc_template(tpl_id: int, _: dict = Depends(get_staff_user)):
+    with pool.connection() as conn:
+        row = conn.execute(
+            "DELETE FROM document_templates WHERE id = %s AND is_system = FALSE RETURNING id",
+            (tpl_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Custom document template not found")
+    return {"deleted": True, "id": tpl_id}
 
 
 def _add_months(d: date, months: int) -> date:
@@ -2767,6 +2917,7 @@ def add_item(agenda_id: int, body: ItemIn, _: dict = Depends(get_staff_user)):
         return _load_agenda(conn, agenda_id)
 
 
+
 @router.post("/{agenda_id}/items/reorder")
 def reorder_items(
     agenda_id: int, body: ReorderItemsIn, _: dict = Depends(get_staff_user)
@@ -2788,6 +2939,7 @@ def reorder_items(
             )
         _touch_agenda(conn, agenda_id)
         return _load_agenda(conn, agenda_id)
+
 
 
 @router.patch("/{agenda_id}/items/{item_id}")
@@ -3229,6 +3381,190 @@ def create_text_document(
         return _load_agenda(conn, agenda_id)
 
 
+@router.post("/{agenda_id}/items/{item_id}/generate-document", status_code=201)
+def generate_document_from_template(
+    agenda_id: int,
+    item_id: int,
+    body: GenerateDocIn,
+    user: dict = Depends(get_staff_user),
+):
+    doc_title = body.title.strip()
+    raw_body = body.body.strip()
+    if not doc_title or not raw_body:
+        raise HTTPException(status_code=400, detail="Document title and body are required")
+
+    doc_num = body.doc_number.strip()
+    eff_date = body.effective_date.strip()
+
+    with pool.connection() as conn:
+        ag_row = conn.execute(
+            "SELECT meeting_date FROM agendas WHERE id = %s",
+            (agenda_id,),
+        ).fetchone()
+        if not ag_row:
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        if not conn.execute(
+            "SELECT 1 FROM agenda_items WHERE id = %s AND agenda_id = %s",
+            (item_id, agenda_id),
+        ).fetchone():
+            raise HTTPException(status_code=404, detail="Agenda item not found")
+
+        prefs = _load_preferences(conn)
+        city_name = (prefs.get("city_name") or prefs.get("city_title") or "Municipality").strip()
+        meeting_date_str = str(ag_row[0]) if ag_row[0] else ""
+        rendered_body = (
+            raw_body
+            .replace("{{city_name}}", city_name)
+            .replace("{{doc_number}}", doc_num or "TBD")
+            .replace("{{title}}", doc_title)
+            .replace("{{meeting_date}}", meeting_date_str or "TBD")
+            .replace("{{effective_date}}", eff_date or meeting_date_str or "upon adoption")
+        )
+
+        pdf_bytes = render_legislative_document_pdf(
+            city_name=city_name,
+            doc_kind=body.doc_kind,
+            doc_number=doc_num,
+            title=doc_title,
+            body=rendered_body,
+            meeting_date=meeting_date_str,
+            effective_date=eff_date,
+            signatory_primary=body.signatory_primary,
+            signatory_secondary=body.signatory_secondary,
+        )
+
+        label = f"{doc_num} — {doc_title}" if doc_num else doc_title
+        slug = _SAFE_NAME_RE.sub("_", doc_num or doc_title).strip("._") or "document"
+        safe_name = f"{slug[:60]}.pdf"
+        digest = hashlib.sha256(pdf_bytes).hexdigest()
+        object_key = tenant_object_key(f"agendas/{agenda_id}/{item_id}/{digest[:12]}_{safe_name}")
+        _storage().put_object(
+            _bucket(),
+            object_key,
+            io.BytesIO(pdf_bytes),
+            length=len(pdf_bytes),
+            content_type="application/pdf",
+        )
+
+        next_pos = conn.execute(
+            "SELECT COALESCE(MAX(position), 0) + 1 FROM agenda_documents WHERE agenda_item_id = %s",
+            (item_id,),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO agenda_documents "
+            "(agenda_item_id, position, title, filename, content_type, size_bytes, sha256, object_key, uploaded_by) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                item_id,
+                next_pos,
+                label,
+                safe_name,
+                "application/pdf",
+                len(pdf_bytes),
+                digest,
+                object_key,
+                user["id"],
+            ),
+        )
+        if doc_num:
+            conn.execute(
+                "UPDATE agenda_items SET ordinance_number = %s WHERE id = %s AND agenda_id = %s",
+                (doc_num, item_id, agenda_id),
+            )
+        _touch_agenda(conn, agenda_id)
+        return _load_agenda(conn, agenda_id)
+
+
+@router.post("/{agenda_id}/items/{item_id}/adopt-to-code")
+def adopt_ordinance_to_code(
+    agenda_id: int,
+    item_id: int,
+    body: AdoptToCodeIn,
+    user: dict = Depends(get_staff_user),
+):
+    """Adopt an ordinance agenda item and tag/update the corresponding City Code section."""
+    sec_num = body.section_number.strip()
+    if not sec_num:
+        raise HTTPException(status_code=400, detail="section_number is required")
+
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT i.title, i.description, i.ordinance_number, a.meeting_date "
+            "FROM agenda_items i JOIN agendas a ON a.id = i.agenda_id "
+            "WHERE i.id = %s AND i.agenda_id = %s",
+            (item_id, agenda_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Agenda item not found")
+
+        item_title, item_desc, item_ord_num, meeting_date = row
+        ord_num = body.ordinance_number.strip() or (item_ord_num or "").strip()
+        if not ord_num:
+            raise HTTPException(status_code=400, detail="ordinance_number is required to tag City Code")
+
+        eff_date = body.effective_date.strip() or (str(meeting_date) if meeting_date else "")
+        sec_title = body.section_title.strip() or (item_title or "").strip()
+        sec_body = body.body.strip() or (item_desc or "").strip()
+        summary = body.change_summary.strip() or f"Adopted via {ord_num}"
+
+        chap = conn.execute("SELECT id FROM code_chapters WHERE id = %s", (body.chapter_id,)).fetchone()
+        if not chap:
+            raise HTTPException(status_code=404, detail="Code chapter not found")
+
+        existing = conn.execute(
+            "SELECT id, body FROM code_sections WHERE chapter_id = %s AND section_number = %s",
+            (body.chapter_id, sec_num),
+        ).fetchone()
+        if existing:
+            sec_id, prev_body = existing
+            new_body = sec_body if sec_body else prev_body
+            conn.execute(
+                "UPDATE code_sections SET title = COALESCE(NULLIF(%s, ''), title), "
+                "body = %s, ordinance_ref = %s, effective_date = %s, is_published = %s, updated_at = now() "
+                "WHERE id = %s",
+                (sec_title, new_body, ord_num, eff_date, body.is_published, sec_id),
+            )
+            conn.execute(
+                "INSERT INTO code_revisions "
+                "(section_id, ordinance_number, effective_date, change_summary, previous_body, new_body, edited_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (sec_id, ord_num, eff_date, summary, prev_body, new_body, user["username"]),
+            )
+            action = "updated"
+        else:
+            inserted = conn.execute(
+                "INSERT INTO code_sections "
+                "(chapter_id, node_type, section_number, title, body, ordinance_ref, effective_date, is_published) "
+                "VALUES (%s, 'section', %s, %s, %s, %s, %s, %s) RETURNING id",
+                (body.chapter_id, sec_num, sec_title, sec_body, ord_num, eff_date, body.is_published),
+            ).fetchone()
+            sec_id = inserted[0]
+            conn.execute(
+                "INSERT INTO code_revisions "
+                "(section_id, ordinance_number, effective_date, change_summary, previous_body, new_body, edited_by) "
+                "VALUES (%s, %s, %s, %s, '', %s, %s)",
+                (sec_id, ord_num, eff_date, summary, sec_body, user["username"]),
+            )
+            action = "created"
+
+        conn.execute(
+            "UPDATE agenda_items SET ordinance_number = %s, "
+            "minutes_action = COALESCE(NULLIF(minutes_action, ''), 'Adopted') "
+            "WHERE id = %s AND agenda_id = %s",
+            (ord_num, item_id, agenda_id),
+        )
+        _touch_agenda(conn, agenda_id)
+        return {
+            "status": "codified",
+            "action": action,
+            "section_id": sec_id,
+            "chapter_id": body.chapter_id,
+            "section_number": sec_num,
+            "ordinance_ref": ord_num,
+            "effective_date": eff_date,
+        }
+
+
 @router.patch("/{agenda_id}/items/{item_id}/documents/{doc_id}")
 def update_document(
     agenda_id: int,
@@ -3314,6 +3650,7 @@ def update_document(
 
         _touch_agenda(conn, agenda_id)
         return _load_agenda(conn, agenda_id)
+
 
 
 @router.delete("/{agenda_id}/items/{item_id}/documents/{doc_id}")

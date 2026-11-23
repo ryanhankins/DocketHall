@@ -1024,3 +1024,69 @@ def build_minutes_pdf(
         include_page_numbers=include_page_numbers,
         watermark_draft=watermark_draft,
     )
+
+
+def render_legislative_document_pdf(
+    *,
+    city_name: str,
+    doc_kind: str,
+    doc_number: str,
+    title: str,
+    body: str,
+    meeting_date: str = "",
+    effective_date: str = "",
+    signatory_primary: str = "Mayor",
+    signatory_secondary: str = "City Clerk",
+) -> bytes:
+    """Render a formal municipal Resolution, Ordinance, Proclamation, or Memo as a Tagged PDF."""
+    kind_labels = {
+        "resolution": "RESOLUTION",
+        "ordinance": "ORDINANCE",
+        "proclamation": "PROCLAMATION",
+        "memo": "MEMORANDUM",
+    }
+    kind_label = kind_labels.get((doc_kind or "").lower(), "DOCUMENT")
+    city_esc = _esc((city_name or "Municipality").strip())
+    num_esc = _esc(doc_number.strip())
+    title_esc = _esc(title.strip())
+
+    meta_bits = []
+    if meeting_date.strip():
+        meta_bits.append(f"Meeting Date: {_esc(meeting_date.strip())}")
+    if effective_date.strip():
+        meta_bits.append(f"Effective Date: {_esc(effective_date.strip())}")
+    meta_html = (
+        f'<p style="color:#475569;font-size:9.5pt;margin:4pt 0 14pt;">{" &nbsp;|&nbsp; ".join(meta_bits)}</p>'
+        if meta_bits
+        else ""
+    )
+
+    heading_line = f"{kind_label} NO. {num_esc}" if num_esc else kind_label
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", body.strip()) if p.strip()]
+    body_html = "\n".join(f'<p style="margin:0 0 10pt;text-align:justify;">{_esc_multiline(p)}</p>' for p in paragraphs)
+
+    sig_html = ""
+    if (doc_kind or "").lower() != "memo":
+        sig_html = (
+            '<div style="margin-top:28pt;display:flex;justify-content:space-between;gap:24pt;page-break-inside:avoid;">'
+            '<div style="flex:1;">'
+            '<div style="border-bottom:1px solid #334155;height:24pt;"></div>'
+            f'<p style="margin:4pt 0 0;font-size:9.5pt;"><strong>{_esc(signatory_primary or "Mayor")}</strong></p>'
+            '</div>'
+            '<div style="flex:1;">'
+            '<div style="border-bottom:1px solid #334155;height:24pt;"></div>'
+            f'<p style="margin:4pt 0 0;font-size:9.5pt;"><strong>Attest: {_esc(signatory_secondary or "City Clerk")}</strong></p>'
+            '</div>'
+            '</div>'
+        )
+
+    parts = [
+        f'<p style="text-transform:uppercase;letter-spacing:1.2px;font-size:9.5pt;color:#1e3a8a;font-weight:700;margin:0 0 4pt;">{city_esc}</p>',
+        f'<h1 style="font-size:15pt;margin:0 0 4pt;">{_esc(heading_line)}</h1>',
+        f'<h2 style="font-size:12pt;border-bottom:1px solid #cbd5e1;padding-bottom:6pt;margin:0 0 8pt;color:#0f172a;">{title_esc}</h2>',
+        meta_html,
+        body_html,
+        sig_html,
+    ]
+    full_title = f"{heading_line} — {title.strip()}" if num_esc else title.strip()
+    return _html_to_pdf_bytes("\n".join(parts), title=full_title, include_page_numbers=True)

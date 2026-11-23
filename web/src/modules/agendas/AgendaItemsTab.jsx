@@ -526,6 +526,20 @@ function ItemCard({
             </summary>
             <InlineTextDocForm agendaId={agenda.id} itemId={item.id} onUploaded={onAgendaUpdated} />
           </details>
+
+          <details style={{ marginTop: '.4rem' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '.85rem', color: '#1e3a5f', fontWeight: 600 }}>
+              Draft Resolution / Ordinance from Template (PDF)
+            </summary>
+            <InlineTemplateDocForm agenda={agenda} item={item} onGenerated={onAgendaUpdated} />
+          </details>
+
+          <details style={{ marginTop: '.4rem' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '.85rem', color: '#166534', fontWeight: 600 }}>
+              Adopt Ordinance &amp; Tag in City Code
+            </summary>
+            <AdoptToCodeForm agenda={agenda} item={item} onCodified={onAgendaUpdated} />
+          </details>
         </>
       )}
     </div>
@@ -564,6 +578,196 @@ function InlineTextDocForm({ agendaId, itemId, onUploaded }) {
       </div>
       <button type="submit" className="btn sm">Add Text Document</button>
       {err && <div className="error-msg">{err}</div>}
+    </form>
+  );
+}
+
+function InlineTemplateDocForm({ agenda, item, onGenerated }) {
+  const [templates, setTemplates] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [docKind, setDocKind] = useState('resolution');
+  const [docNumber, setDocNumber] = useState(item.ordinance_number || '');
+  const [title, setTitle] = useState(item.title || '');
+  const [effectiveDate, setEffectiveDate] = useState('');
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  async function ensureTemplates() {
+    if (loaded) return;
+    setLoaded(true);
+    try {
+      const list = await api('/api/agendas/doc-templates');
+      setTemplates(list || []);
+      if (list?.length && !body) {
+        const first = list[0];
+        setDocKind(first.doc_kind || 'resolution');
+        setBody(first.body_template || '');
+      }
+    } catch (error) {
+      setErr(error.message);
+    }
+  }
+
+  return (
+    <form
+      style={{ marginTop: '.5rem', padding: '.6rem', background: '#f8fafc', borderRadius: 6, border: '1px solid #cbd5e1' }}
+      onFocus={ensureTemplates}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setErr('');
+        setBusy(true);
+        try {
+          const updated = await api(`/api/agendas/${agenda.id}/items/${item.id}/generate-document`, {
+            method: 'POST',
+            body: JSON.stringify({
+              doc_kind: docKind,
+              doc_number: docNumber.trim(),
+              title: title.trim(),
+              body,
+              effective_date: effectiveDate.trim(),
+            }),
+          });
+          onGenerated(updated);
+        } catch (error) {
+          setErr(error.message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <div className="row" style={{ gap: '.5rem', marginBottom: '.5rem' }}>
+        <div className="field" style={{ flex: 1 }}>
+          <label>Template</label>
+          <select
+            onClick={ensureTemplates}
+            onChange={(e) => {
+              const tpl = templates.find((t) => String(t.id) === e.target.value);
+              if (tpl) {
+                setDocKind(tpl.doc_kind || 'resolution');
+                setBody(tpl.body_template || '');
+              }
+            }}
+          >
+            <option value="">-- Choose template --</option>
+            {templates.map((t) => (
+              <option key={t.id} value={t.id}>{t.name} ({t.doc_kind})</option>
+            ))}
+          </select>
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label>Document Number</label>
+          <input placeholder="e.g. ORD-2026-04 or RES-2026-12" value={docNumber} onChange={(e) => setDocNumber(e.target.value)} />
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label>Effective Date (optional)</label>
+          <input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
+        </div>
+      </div>
+      <div className="field" style={{ marginBottom: '.5rem' }}>
+        <label>Document Title</label>
+        <input required value={title} onChange={(e) => setTitle(e.target.value)} />
+      </div>
+      <div className="field" style={{ marginBottom: '.5rem' }}>
+        <label>Body (supports {'{{city_name}}'}, {'{{doc_number}}'}, {'{{title}}'}, {'{{meeting_date}}'}, {'{{effective_date}}'})</label>
+        <textarea rows={7} required value={body} onChange={(e) => setBody(e.target.value)} />
+      </div>
+      <button type="submit" className="btn sm primary" disabled={busy}>
+        {busy ? 'Generating PDF…' : 'Generate & Attach PDF'}
+      </button>
+      {err && <div className="error-msg">{err}</div>}
+    </form>
+  );
+}
+
+function AdoptToCodeForm({ agenda, item, onCodified }) {
+  const [chapters, setChapters] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [chapterId, setChapterId] = useState('');
+  const [sectionNumber, setSectionNumber] = useState('');
+  const [sectionTitle, setSectionTitle] = useState(item.title || '');
+  const [ordinanceNumber, setOrdinanceNumber] = useState(item.ordinance_number || '');
+  const [effectiveDate, setEffectiveDate] = useState(agenda.meeting_date || '');
+  const [body, setBody] = useState(item.description || '');
+  const [statusMsg, setStatusMsg] = useState('');
+  const [err, setErr] = useState('');
+
+  async function ensureChapters() {
+    if (loaded) return;
+    setLoaded(true);
+    try {
+      const res = await api('/api/codification/public');
+      const list = res?.chapters || [];
+      setChapters(list);
+      if (list.length && !chapterId) setChapterId(String(list[0].id));
+    } catch (error) {
+      setErr(error.message);
+    }
+  }
+
+  return (
+    <form
+      style={{ marginTop: '.5rem', padding: '.6rem', background: '#f0fdf4', borderRadius: 6, border: '1px solid #bbf7d0' }}
+      onFocus={ensureChapters}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setErr('');
+        setStatusMsg('');
+        try {
+          const res = await api(`/api/agendas/${agenda.id}/items/${item.id}/adopt-to-code`, {
+            method: 'POST',
+            body: JSON.stringify({
+              chapter_id: Number(chapterId),
+              section_number: sectionNumber.trim(),
+              section_title: sectionTitle.trim(),
+              ordinance_number: ordinanceNumber.trim(),
+              effective_date: effectiveDate.trim(),
+              body,
+            }),
+          });
+          setStatusMsg(`Code section ${res.section_number} ${res.action} and tagged with Ordinance ${res.ordinance_ref}.`);
+          onCodified(await api(`/api/agendas/${agenda.id}`));
+        } catch (error) {
+          setErr(error.message);
+        }
+      }}
+    >
+      <div className="row" style={{ gap: '.5rem', marginBottom: '.5rem' }}>
+        <div className="field" style={{ flex: 1 }}>
+          <label>Code Chapter</label>
+          <select required value={chapterId} onClick={ensureChapters} onChange={(e) => setChapterId(e.target.value)}>
+            <option value="">-- Select chapter --</option>
+            {chapters.map((c) => (
+              <option key={c.id} value={c.id}>{c.code_prefix} — {c.title}</option>
+            ))}
+          </select>
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label>Section Number</label>
+          <input required placeholder="e.g. 301.05" value={sectionNumber} onChange={(e) => setSectionNumber(e.target.value)} />
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label>Ordinance Number</label>
+          <input required placeholder="e.g. ORD-2026-04" value={ordinanceNumber} onChange={(e) => setOrdinanceNumber(e.target.value)} />
+        </div>
+      </div>
+      <div className="row" style={{ gap: '.5rem', marginBottom: '.5rem' }}>
+        <div className="field" style={{ flex: 2 }}>
+          <label>Code Section Title</label>
+          <input value={sectionTitle} onChange={(e) => setSectionTitle(e.target.value)} />
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label>Effective Date</label>
+          <input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
+        </div>
+      </div>
+      <div className="field" style={{ marginBottom: '.5rem' }}>
+        <label>Adopted Code Text</label>
+        <textarea rows={4} value={body} onChange={(e) => setBody(e.target.value)} />
+      </div>
+      <button type="submit" className="btn sm primary">Adopt &amp; Tag City Code</button>
+      {statusMsg && <div className="ok-msg" style={{ marginTop: '.4rem' }}>{statusMsg}</div>}
+      {err && <div className="error-msg" style={{ marginTop: '.4rem' }}>{err}</div>}
     </form>
   );
 }
