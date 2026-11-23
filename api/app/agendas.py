@@ -288,7 +288,7 @@ def _storage():
 
 
 def _bucket() -> str:
-    return os.environ.get("S3_BUCKET") or os.environ.get("MINIO_BUCKET") or "records"
+    return os.environ.get("S3_BUCKET") or "records"
 
 
 def _remove_storage_objects(keys: list[str]) -> None:

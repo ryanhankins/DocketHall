@@ -241,15 +241,15 @@ def get_storage_client():
     global _storage_client
     if _storage_client is None:
         backend = os.environ.get("STORAGE_BACKEND", "s3").strip().lower()
-        endpoint = (os.environ.get("S3_ENDPOINT") or os.environ.get("MINIO_ENDPOINT") or "seaweedfs:8333").strip()
+        endpoint = (os.environ.get("S3_ENDPOINT") or "seaweedfs:8333").strip()
         if backend == "local" or not endpoint:
             _storage_client = LocalStorageClient(os.environ.get("LOCAL_RECORDS_DIR", "/data/records"))
         else:
             from .db import _read_secret
 
-            secure = (os.environ.get("S3_SECURE") or os.environ.get("MINIO_SECURE") or "false").lower() == "true"
-            access_key = _read_secret("S3_ACCESS_KEY_FILE", "S3_ACCESS_KEY") or _read_secret("MINIO_ACCESS_KEY_FILE", "MINIO_ACCESS_KEY")
-            secret_key = _read_secret("S3_SECRET_KEY_FILE", "S3_SECRET_KEY") or _read_secret("MINIO_SECRET_KEY_FILE", "MINIO_SECRET_KEY")
+            secure = os.environ.get("S3_SECURE", "false").lower() == "true"
+            access_key = _read_secret("S3_ACCESS_KEY_FILE", "S3_ACCESS_KEY")
+            secret_key = _read_secret("S3_SECRET_KEY_FILE", "S3_SECRET_KEY")
             _storage_client = BotoS3StorageClient(
                 endpoint,
                 access_key=access_key,

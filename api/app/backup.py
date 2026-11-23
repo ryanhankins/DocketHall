@@ -573,7 +573,7 @@ async def import_archive(
 _DEFAULT_BACKUP_POLICY = {
     "enabled": False,
     "schedule_frequency": "daily",
-    "target_type": "minio_offsite",
+    "target_type": "local_s3",
     "s3_endpoint": "",
     "s3_bucket": "",
     "s3_prefix": "backups/",
@@ -626,7 +626,7 @@ def _get_offsite_s3_client(cfg: dict, secret: str) -> tuple[object, str, str]:
 class BackupPolicyIn(BaseModel):
     enabled: bool = False
     schedule_frequency: str = "daily"
-    target_type: str = "minio_offsite"
+    target_type: str = "local_s3"
     s3_endpoint: str = ""
     s3_bucket: str = ""
     s3_prefix: str = "backups/"
@@ -670,7 +670,7 @@ def update_backup_policy(
     user: dict = Depends(require_permission("settings.manage")),
 ):
     freq = body.schedule_frequency if body.schedule_frequency in ("daily", "weekly") else "daily"
-    ttype = body.target_type if body.target_type in ("minio_offsite", "s3_compatible") else "minio_offsite"
+    ttype = body.target_type if body.target_type in ("local_s3", "s3_compatible") else "local_s3"
     with pool.connection() as conn:
         cur_cfg, cur_secret = _load_backup_policy(conn)
         next_secret = body.s3_secret_key.strip() if body.s3_secret_key is not None and body.s3_secret_key.strip() else cur_secret

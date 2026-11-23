@@ -26,7 +26,7 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
   const [policy, setPolicy] = useState({
     enabled: false,
     schedule_frequency: 'daily',
-    target_type: 'minio_offsite',
+    target_type: 'local_s3',
     s3_endpoint: '',
     s3_bucket: '',
     s3_prefix: 'backups/',
@@ -330,7 +330,7 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
                 value={policy.target_type}
                 onChange={(e) => setPolicy((p) => ({ ...p, target_type: e.target.value }))}
               >
-                <option value="minio_offsite">Local SeaweedFS Object Bucket</option>
+                <option value="local_s3">Local SeaweedFS Object Bucket</option>
                 <option value="s3_compatible">External S3-Compatible Endpoint</option>
               </select>
             </div>

@@ -44,13 +44,12 @@ BACKUP_RCLONE_REMOTE="${BACKUP_RCLONE_REMOTE:-}"
 DB_CID="$(docker ps -q --filter "name=${STACK_NAME}_db" | head -n 1)"
 API_CID="$(docker ps -q --filter "name=${STACK_NAME}_api" | head -n 1)"
 SEAWEEDFS_CID="$(docker ps -q --filter "name=${STACK_NAME}_seaweedfs" | head -n 1)"
-MINIO_CID="$(docker ps -q --filter "name=${STACK_NAME}_minio" | head -n 1)"
 
 if [ -z "$DB_CID" ]; then
   echo "ERROR: No running container found for ${STACK_NAME}_db" >&2
   exit 1
 fi
-if [ -z "$SEAWEEDFS_CID" ] && [ -z "$MINIO_CID" ] && [ -z "$API_CID" ]; then
+if [ -z "$SEAWEEDFS_CID" ] && [ -z "$API_CID" ]; then
   echo "ERROR: Neither ${STACK_NAME}_seaweedfs nor ${STACK_NAME}_api is running" >&2
   exit 1
 fi
@@ -60,9 +59,6 @@ stage_storage_dir() {
   if [ -n "$SEAWEEDFS_CID" ]; then
     echo "==> Copying SeaweedFS data (${STACK_NAME}_seaweedfs)"
     docker cp "${SEAWEEDFS_CID}:/data" "$target"
-  elif [ -n "$MINIO_CID" ]; then
-    echo "==> Copying legacy MinIO data (${STACK_NAME}_minio)"
-    docker cp "${MINIO_CID}:/data" "$target"
   else
     echo "==> Copying local storage (${STACK_NAME}_api:/data/records)"
     docker cp "${API_CID}:/data/records" "$target"

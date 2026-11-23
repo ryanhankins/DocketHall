@@ -46,7 +46,7 @@ REPO_URL="${REPO_URL:-https://github.com/ryanhankins/DocketHall.git}"
 export CIVICDESK_REGISTRY="${CIVICDESK_REGISTRY:-ghcr.io/ryanhankins/}"
 export CIVICDESK_PULL_ONLY="${CIVICDESK_PULL_ONLY:-true}"
 export STORAGE_BACKEND="${STORAGE_BACKEND:-local}"
-S3_REPLICAS="${S3_REPLICAS:-${MINIO_REPLICAS:-}}"
+S3_REPLICAS="${S3_REPLICAS:-}"
 if [ -z "$S3_REPLICAS" ]; then
   if [ "$STORAGE_BACKEND" = "local" ]; then S3_REPLICAS=0; else S3_REPLICAS=1; fi
 fi
