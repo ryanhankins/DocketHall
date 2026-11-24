@@ -203,3 +203,20 @@ def test_backup_export_and_import_restores_all_stored_data(admin_client):
 
     bills_after = admin_client.get("/api/payments/bills").json()
     assert any(b["reference_number"] == "UTIL-BACKUP-901" for b in bills_after)
+
+
+def test_home_hidden_cards_branding_config(admin_client, anon_client):
+    res = admin_client.put(
+        "/api/branding",
+        json={"city_title": "Test City", "home_hidden_cards": ["complaints", "records"]},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["home_hidden_cards"] == ["complaints", "records"]
+
+    pub = anon_client.get("/api/branding")
+    assert pub.status_code == 200
+    assert pub.json()["home_hidden_cards"] == ["complaints", "records"]
+
+    reset = admin_client.put("/api/branding", json={"city_title": "Test City", "home_hidden_cards": []})
+    assert reset.status_code == 200
+    assert reset.json()["home_hidden_cards"] == []

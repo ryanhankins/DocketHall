@@ -3754,17 +3754,30 @@ function PublicHomePage() {
     };
   }, [enabledModules, publicFeatures]);
 
+  const hiddenCards = useMemo(
+    () => new Set((Array.isArray(branding.home_hidden_cards) ? branding.home_hidden_cards : []).map((c) => String(c).toLowerCase())),
+    [branding.home_hidden_cards],
+  );
+
+  useEffect(() => {
+    if (activeTab !== 'overview' && hiddenCards.has(activeTab)) {
+      setActiveTab('overview');
+      setActiveItemSlug('');
+    }
+  }, [activeTab, hiddenCards]);
+
   const visibleTabs = useMemo(() => {
     if (!enabledModules) return [];
     const hasComms = enabledModules.includes('communications');
     const blogEnabled = hasComms && publicFeatures?.communications?.blog !== false;
     const cmsIds = new Set(['notices', 'directory', 'forms', 'pages']);
     const out = TAB_DEFS.filter((t) => {
+      if (hiddenCards.has(t.id)) return false;
       if (t.id === 'blog') return blogEnabled || enabledModules.includes('blog');
       if (cmsIds.has(t.id)) return hasComms || enabledModules.includes(t.id);
       return enabledModules.includes(t.id);
     });
-    if (enabledModules.includes('utilities')) {
+    if (enabledModules.includes('utilities') && !hiddenCards.has('utilities')) {
       out.push({
         id: 'utilities',
         label: 'Pay Utility Bill',
@@ -3772,7 +3785,7 @@ function PublicHomePage() {
         actionLabel: 'Look Up Utility Bill →',
       });
     }
-    if (enabledModules.includes('citations')) {
+    if (enabledModules.includes('citations') && !hiddenCards.has('citations')) {
       out.push({
         id: 'citations',
         label: 'Pay / Contest Citation',
@@ -3781,7 +3794,7 @@ function PublicHomePage() {
       });
     }
     return out;
-  }, [enabledModules, publicFeatures]);
+  }, [enabledModules, publicFeatures, hiddenCards]);
 
   const overviewTabs = useMemo(() => {
     if (showAllServices || visibleTabs.length <= 4) return visibleTabs;

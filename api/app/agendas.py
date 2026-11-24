@@ -291,6 +291,7 @@ ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_blog_count INTEGER 
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_blog_style TEXT NOT NULL DEFAULT 'cards';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_blog_position TEXT NOT NULL DEFAULT 'below_services';
 ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_blog_heading TEXT NOT NULL DEFAULT '';
+ALTER TABLE agenda_preferences ADD COLUMN IF NOT EXISTS home_hidden_cards JSONB NOT NULL DEFAULT '[]'::jsonb;
 """
 
 def _storage():
@@ -867,6 +868,7 @@ class GeneralPreferencesIn(BaseModel):
     home_blog_style: Literal["cards", "full"] | None = None
     home_blog_position: Literal["above_services", "below_services"] | None = None
     home_blog_heading: str | None = None
+    home_hidden_cards: list[str] | None = None
 
 
 class AgendaPreferencesIn(BaseModel):
@@ -913,7 +915,8 @@ def _load_preferences(conn) -> dict:
         "       footer_text, city_website_url, city_website_label, "
         "       theme_primary, theme_secondary, theme_tint, theme_bg, theme_surface, theme_header_bg, "
         "       directory_url, directory_label, home_heading, home_intro_body, "
-        "       home_blog_enabled, home_blog_count, home_blog_style, home_blog_position, home_blog_heading "
+        "       home_blog_enabled, home_blog_count, home_blog_style, home_blog_position, home_blog_heading, "
+        "       home_hidden_cards "
         "FROM agenda_preferences WHERE id = 1"
     ).fetchone()
     if not row:
@@ -948,6 +951,7 @@ def _load_preferences(conn) -> dict:
             "home_blog_style": "cards",
             "home_blog_position": "below_services",
             "home_blog_heading": "",
+            "home_hidden_cards": [],
             **DEFAULT_THEME_COLORS,
             "city_logo_key": "",
             "has_city_logo": False,
@@ -1001,6 +1005,7 @@ def _load_preferences(conn) -> dict:
         "home_blog_style": blog_style,
         "home_blog_position": blog_pos,
         "home_blog_heading": row[36] or "",
+        "home_hidden_cards": list(row[37]) if row[37] else [],
         "city_logo_key": logo_key,
         "has_city_logo": bool(logo_key),
     }
@@ -1037,6 +1042,7 @@ def get_preferences_branding():
         "home_blog_style": prefs.get("home_blog_style", "cards"),
         "home_blog_position": prefs.get("home_blog_position", "below_services"),
         "home_blog_heading": prefs.get("home_blog_heading", ""),
+        "home_hidden_cards": list(prefs.get("home_hidden_cards") or []),
         "theme_primary": prefs.get("theme_primary", DEFAULT_THEME_COLORS["theme_primary"]),
         "theme_secondary": prefs.get("theme_secondary", DEFAULT_THEME_COLORS["theme_secondary"]),
         "theme_tint": prefs.get("theme_tint", DEFAULT_THEME_COLORS["theme_tint"]),
@@ -1069,6 +1075,11 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
     if body.home_blog_count is not None and not (1 <= int(body.home_blog_count) <= 20):
         raise HTTPException(status_code=400, detail="Main page blog entry count must be between 1 and 20")
     clean_blog_heading = body.home_blog_heading.strip() if body.home_blog_heading is not None else None
+    hidden_cards_json = (
+        json.dumps([c.strip().lower() for c in body.home_hidden_cards if c and c.strip()])
+        if body.home_hidden_cards is not None
+        else None
+    )
     with pool.connection() as conn:
         conn.execute(
             "INSERT INTO agenda_preferences "
@@ -1076,10 +1087,10 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
             " alert_link_url, alert_link_label, footer_text, city_website_url, city_website_label, "
             " theme_primary, theme_secondary, theme_tint, theme_bg, theme_surface, theme_header_bg, "
             " directory_url, directory_label, home_heading, home_intro_body, "
-            " home_blog_enabled, home_blog_count, home_blog_style, home_blog_position, home_blog_heading, updated_at) "
+            " home_blog_enabled, home_blog_count, home_blog_style, home_blog_position, home_blog_heading, home_hidden_cards, updated_at) "
             "VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
             "        COALESCE(%s, TRUE), COALESCE(%s, 3), COALESCE(%s, 'cards'), "
-            "        COALESCE(%s, 'below_services'), COALESCE(%s, ''), now()) "
+            "        COALESCE(%s, 'below_services'), COALESCE(%s, ''), COALESCE(%s::jsonb, '[]'::jsonb), now()) "
             "ON CONFLICT (id) DO UPDATE SET "
             "city_title = EXCLUDED.city_title, "
             "alert_enabled = EXCLUDED.alert_enabled, "
@@ -1106,6 +1117,7 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
             "home_blog_style = COALESCE(%s, agenda_preferences.home_blog_style), "
             "home_blog_position = COALESCE(%s, agenda_preferences.home_blog_position), "
             "home_blog_heading = COALESCE(%s, agenda_preferences.home_blog_heading), "
+            "home_hidden_cards = COALESCE(%s::jsonb, agenda_preferences.home_hidden_cards), "
             "updated_at = now()",
             (
                 body.city_title.strip(),
@@ -1133,11 +1145,13 @@ def update_general_preferences(body: GeneralPreferencesIn, _: dict = Depends(get
                 body.home_blog_style,
                 body.home_blog_position,
                 clean_blog_heading,
+                hidden_cards_json,
                 body.home_blog_enabled,
                 int(body.home_blog_count) if body.home_blog_count is not None else None,
                 body.home_blog_style,
                 body.home_blog_position,
                 clean_blog_heading,
+                hidden_cards_json,
             ),
         )
         return _load_preferences(conn)

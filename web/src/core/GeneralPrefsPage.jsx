@@ -44,6 +44,7 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
   const [directoryLabel, setDirectoryLabel] = useState('');
   const [homeHeading, setHomeHeading] = useState('');
   const [homeIntroBody, setHomeIntroBody] = useState('');
+  const [homeHiddenCards, setHomeHiddenCards] = useState([]);
   const [tab, setTab] = useState('identity');
   const [themeColors, setThemeColors] = useState(() => ({ ...DEFAULT_THEME }));
   const [hasLogo, setHasLogo] = useState(false);
@@ -68,6 +69,7 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
         setDirectoryLabel(b.directory_label || '');
         setHomeHeading(b.home_heading || '');
         setHomeIntroBody(b.home_intro_body || '');
+        setHomeHiddenCards(Array.isArray(b.home_hidden_cards) ? b.home_hidden_cards : []);
         setThemeColors({
           theme_primary: b.theme_primary || DEFAULT_THEME.theme_primary,
           theme_secondary: b.theme_secondary || DEFAULT_THEME.theme_secondary,
@@ -139,6 +141,7 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
           directory_label: directoryLabel.trim(),
           home_heading: homeHeading.trim(),
           home_intro_body: homeIntroBody.trim(),
+          home_hidden_cards: homeHiddenCards,
           ...themeColors,
         }),
       });
@@ -482,6 +485,72 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
                 })()}
               </>
             )}
+
+            <hr style={{ border: 0, borderTop: '1px solid #e2e8f0', margin: '1rem 0' }} />
+            {(() => {
+              const serviceCards = [
+                ['agendas', 'Meeting Agendas & Minutes'],
+                ['permits', 'Permits & Fees'],
+                ['codification', 'City Code'],
+                ['records', 'Public Records'],
+                ['complaints', 'Complaints & 311'],
+                ['calendar', 'City Calendar & Rentals'],
+                ['notices', 'News, Notices, Bids & Jobs'],
+                ['blog', 'Blog & Community Updates'],
+                ['directory', 'Directory, Locations & FAQs'],
+                ['forms', 'Forms & Opinion Polls'],
+                ['pages', 'City Info Pages & Quick Links'],
+                ['utilities', 'Pay Utility Bill'],
+                ['citations', 'Pay / Contest Citation'],
+              ];
+              return (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '.5rem', marginBottom: '.35rem' }}>
+                    <h3 style={{ margin: 0, fontSize: '.95rem' }}>Public Home Page Service Cards</h3>
+                    <div style={{ display: 'flex', gap: '.4rem' }}>
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={() => setHomeHiddenCards([])}
+                      >
+                        Check All
+                      </button>
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={() => setHomeHiddenCards(serviceCards.map(([id]) => id))}
+                      >
+                        Uncheck All
+                      </button>
+                    </div>
+                  </div>
+                  <p className="muted" style={{ marginTop: 0, fontSize: '.85rem' }}>
+                    Choose which service cards and tabs are visible on the public home page. Unchecking a card hides it from residents while keeping staff tools active.
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '.45rem .85rem', marginBottom: '1rem' }}>
+                    {serviceCards.map(([id, label]) => {
+                      const isVisible = !homeHiddenCards.includes(id);
+                      return (
+                        <label key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: '.45rem', cursor: 'pointer', fontSize: '.88rem' }}>
+                          <input
+                            type="checkbox"
+                            style={{ width: 'auto', flexShrink: 0 }}
+                            checked={isVisible}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setHomeHiddenCards((prev) =>
+                                checked ? prev.filter((c) => c !== id) : (prev.includes(id) ? prev : [...prev, id]),
+                              );
+                            }}
+                          />
+                          <span>{label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
 
             <button type="submit" className="btn primary">Save General Preferences</button>
             {msg.text && (
