@@ -4044,7 +4044,7 @@ function PublicHomePage() {
                       <button
                         type="button"
                         className="btn primary"
-                        onClick={() => openAuthModal('/app', false, 'Choose any role below to explore DocketHall instantly—no credentials required.')}
+                        onClick={() => openAuth('/app', false, 'Choose any role below to explore DocketHall instantly—no credentials required.')}
                       >
                         Try One-Click Sign In &rarr;
                       </button>
