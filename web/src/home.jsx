@@ -4036,17 +4036,38 @@ function PublicHomePage() {
                     Want to see behind the scenes? Click <strong>Sign In</strong> in the top-right corner to try DocketHall with one click as a <strong>City Clerk</strong>, <strong>Field Inspector</strong>, <strong>Resident</strong>, or <strong>Administrator</strong>—no credentials required.
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: '.5rem', flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '.75rem', flexShrink: 0 }}>
                   {me ? (
-                    <a className="btn primary" href="/app">Go to Workspace</a>
+                    <a className="btn primary" href="/app">Go to Workspace &rarr;</a>
                   ) : (
-                    <button
-                      type="button"
-                      className="btn primary"
-                      onClick={() => openAuthModal('/app', false, 'Choose any role below to explore DocketHall instantly—no credentials required.')}
-                    >
-                      Try One-Click Sign In
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="btn primary"
+                        onClick={() => openAuthModal('/app', false, 'Choose any role below to explore DocketHall instantly—no credentials required.')}
+                      >
+                        Try One-Click Sign In &rarr;
+                      </button>
+                      <span
+                        aria-hidden="true"
+                        title="Sign In button is in the top-right corner"
+                        style={{
+                          display: 'inline-flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          color: '#2563eb',
+                          fontSize: '.72rem',
+                          fontWeight: 700,
+                          lineHeight: 1.1,
+                        }}
+                      >
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M7 17L17 7" />
+                          <path d="M8 7h9v9" />
+                        </svg>
+                        <span>Sign In</span>
+                      </span>
+                    </>
                   )}
                 </div>
               </div>
