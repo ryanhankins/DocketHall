@@ -220,3 +220,32 @@ def test_home_hidden_cards_branding_config(admin_client, anon_client):
     reset = admin_client.put("/api/branding", json={"city_title": "Test City", "home_hidden_cards": []})
     assert reset.status_code == 200
     assert reset.json()["home_hidden_cards"] == []
+
+
+def test_hidden_home_cards_block_public_endpoints(admin_client, anon_client):
+    """Unchecking a card in Public Home Page Service Cards blocks its public endpoints while keeping staff endpoints active."""
+    r = admin_client.put(
+        "/api/branding",
+        json={"city_title": "Test City", "home_hidden_cards": ["complaints", "citations", "utilities"]},
+    )
+    assert r.status_code == 200
+
+    # Public complaint submission & log are blocked (404)
+    sub = anon_client.post(
+        "/api/complaints/public",
+        json={"category": "Noise", "description": "Loud music", "location": "123 Main St"},
+    )
+    assert sub.status_code == 404
+    assert anon_client.get("/api/complaints/public-log").status_code == 404
+
+    # Staff complaints endpoint remains available
+    assert admin_client.get("/api/complaints").status_code == 200
+
+    # Public citation contest & billing lookup are blocked (404)
+    assert anon_client.post("/api/payments/public/bills/contest", json={"reference_number": "CIT-1", "reason": "Test"}).status_code == 404
+    assert anon_client.get("/api/payments/bills/public-lookup?q=TEST").status_code == 404
+
+    # Re-enabling restores public access
+    reset = admin_client.put("/api/branding", json={"city_title": "Test City", "home_hidden_cards": []})
+    assert reset.status_code == 200
+    assert anon_client.get("/api/complaints/public-log").status_code == 200

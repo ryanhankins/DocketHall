@@ -28,6 +28,7 @@ from .agendas import _bucket, _storage
 from .audit import record_audit
 from .auth import require_permission
 from .db import pool
+from .registry import require_public_card_enabled
 from .integrations import send_notification_email
 from .tenancy import tenant_object_key
 
@@ -148,7 +149,7 @@ _COLS = (
 )
 
 
-@router.get("/public")
+@router.get("/public", dependencies=[Depends(require_public_card_enabled("notices"))])
 def list_public_notices(category: str | None = None, q: str = ""):
     clauses = ["is_published = TRUE", "(expires_at IS NULL OR expires_at >= CURRENT_DATE)"]
     params: list = []
@@ -342,7 +343,7 @@ async def upload_notice_attachment(
     return _row_to_notice(row)
 
 
-@router.get("/public/{notice_id}/attachment")
+@router.get("/public/{notice_id}/attachment", dependencies=[Depends(require_public_card_enabled("notices"))])
 def download_notice_attachment(notice_id: int):
     with pool.connection() as conn:
         row = conn.execute(
@@ -374,7 +375,7 @@ class NoticeResponseIn(BaseModel):
     cover_note: str = ""
 
 
-@router.post("/public/{notice_id}/respond", status_code=201)
+@router.post("/public/{notice_id}/respond", status_code=201, dependencies=[Depends(require_public_card_enabled("notices"))])
 def submit_notice_response(notice_id: int, body: NoticeResponseIn, request: Request):
     name = body.applicant_name.strip()
     if not name:

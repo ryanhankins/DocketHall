@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 from .auth import require_permission
 from .db import pool
+from .registry import require_public_card_enabled
 from .integrations import send_direct_email, send_notification_email
 
 router = APIRouter(prefix="/api/calendar", tags=["calendar"])
@@ -244,7 +245,7 @@ def _parse_date(val: str, label: str = "Date") -> date:
 
 
 # ------------------------------------------------------------------ public endpoints
-@router.get("/public")
+@router.get("/public", dependencies=[Depends(require_public_card_enabled("calendar"))])
 def get_public_calendar(month: str = ""):
     """Return public meetings, city events, approved facility bookings, and reservable facilities."""
     if month:
@@ -388,7 +389,7 @@ def _compute_reservation_fee(rental_mode: str, start_min: int, end_min: int, dai
     return base
 
 
-@router.get("/public/ics")
+@router.get("/public/ics", dependencies=[Depends(require_public_card_enabled("calendar"))])
 def download_event_ics(kind: Literal["meeting", "event"], item_id: int):
     with pool.connection() as conn:
         if kind == "meeting":
@@ -447,7 +448,7 @@ def download_event_ics(kind: Literal["meeting", "event"], item_id: int):
     )
 
 
-@router.get("/reservations/public-lookup")
+@router.get("/reservations/public-lookup", dependencies=[Depends(require_public_card_enabled("calendar"))])
 def lookup_public_reservation(reservation_number: str = ""):
     num = reservation_number.strip().upper()
     if not num:
@@ -476,7 +477,7 @@ def lookup_public_reservation(reservation_number: str = ""):
     }
 
 
-@router.post("/reservations/public", status_code=201)
+@router.post("/reservations/public", status_code=201, dependencies=[Depends(require_public_card_enabled("calendar"))])
 def create_public_reservation(body: PublicReservationIn, request: Request):
     name = body.requester_name.strip()
     if not name:

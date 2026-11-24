@@ -48,6 +48,7 @@ from .codification_parser import (
     split_section_body_into_children,
 )
 from .db import pool
+from .registry import require_public_card_enabled
 from .subscriptions import notify_topic_subscribers
 from .tenancy import tenant_object_key
 
@@ -389,7 +390,7 @@ def _load_tree(conn, published_only: bool, q: str = "") -> list[dict]:
 
 
 # ------------------------------------------------------------------ public endpoints
-@router.get("/public")
+@router.get("/public", dependencies=[Depends(require_public_card_enabled("codification"))])
 def get_public_code(q: str = ""):
     with pool.connection() as conn:
         return {"chapters": _load_tree(conn, published_only=True, q=q)}
@@ -452,7 +453,7 @@ def _append_pdf_toc_and_story(
             )
 
 
-@router.get("/public/full.pdf")
+@router.get("/public/full.pdf", dependencies=[Depends(require_public_card_enabled("codification"))])
 def get_full_code_pdf(download: bool = False):
     """Compile all published City Code chapters and hierarchical sections into a single PDF."""
     with pool.connection() as conn:

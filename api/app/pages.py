@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from .audit import record_audit
 from .auth import require_permission
 from .db import pool
+from .registry import require_public_card_enabled
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS city_pages (
@@ -198,7 +199,7 @@ class QuickLinkPatch(BaseModel):
     is_public: bool | None = None
 
 
-@router.get("/public")
+@router.get("/public", dependencies=[Depends(require_public_card_enabled("pages"))])
 def get_public_pages(q: str = ""):
     ql = f"%{q.strip()}%"
     with pool.connection() as conn:

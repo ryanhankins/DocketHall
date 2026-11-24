@@ -143,6 +143,29 @@ def require_module_enabled(module_id: str):
     return _dep
 
 
+def get_hidden_home_cards() -> set[str]:
+    """Return the set of service card IDs hidden on the public home page."""
+    try:
+        with pool.connection() as conn:
+            row = conn.execute("SELECT home_hidden_cards FROM agenda_preferences WHERE id = 1").fetchone()
+        if row and row[0]:
+            return {str(c).strip().lower() for c in row[0] if c and str(c).strip()}
+    except Exception:
+        pass
+    return set()
+
+
+def is_public_card_enabled(card_id: str) -> bool:
+    return card_id.strip().lower() not in get_hidden_home_cards()
+
+
+def require_public_card_enabled(card_id: str):
+    def _dep():
+        if not is_public_card_enabled(card_id):
+            raise HTTPException(status_code=404, detail=f'Public feature "{card_id}" is disabled')
+    return _dep
+
+
 def get_all_module_features() -> dict[str, dict[str, bool]]:
     stored: dict[str, dict] = {}
     try:

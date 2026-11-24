@@ -37,6 +37,7 @@ from .agendas import _bucket, _storage, _remove_storage_objects
 from .audit import record_audit
 from .auth import has_permission, require_permission
 from .db import pool
+from .registry import require_public_card_enabled
 from .integrations import send_direct_email, send_notification_email
 from .tenancy import tenant_object_key
 
@@ -1501,13 +1502,13 @@ def _check_permit_access(permit: dict, user: dict) -> None:
 
 
 # ------------------------------------------------------------------ public catalog
-@router.get("/public/catalog")
+@router.get("/public/catalog", dependencies=[Depends(require_public_card_enabled("permits"))])
 def get_public_catalog():
     with pool.connection() as conn:
         return _load_catalog(conn, active_only=True)
 
 
-@router.get("/public/lookup")
+@router.get("/public/lookup", dependencies=[Depends(require_public_card_enabled("permits"))])
 def public_permit_lookup(q: str = ""):
     term = q.strip()
     if len(term) < 2:

@@ -41,6 +41,7 @@ from .agenda_pdf import build_agenda_packet_pdf, build_minutes_pdf, render_legis
 from .audit import record_audit
 from .auth import current_user, has_permission
 from .db import _read_secret, pool
+from .registry import require_public_card_enabled
 from .integrations import send_notification_email
 from .pdf_check import check_pdf_compliance
 from .storage import get_storage_client
@@ -2603,7 +2604,7 @@ def _query_finalized_agendas() -> list[dict]:
     ]
 
 
-@router.get("/public")
+@router.get("/public", dependencies=[Depends(require_public_card_enabled("agendas"))])
 def list_public_finalized_agendas():
     """Publicly list finalized meeting agendas and minutes."""
     return {"items": _query_finalized_agendas()}
@@ -3854,7 +3855,7 @@ def _build_minutes_response(agenda: dict, prefs: dict, agenda_id: int, download:
     )
 
 
-@router.get("/public/{agenda_id}/packet.pdf")
+@router.get("/public/{agenda_id}/packet.pdf", dependencies=[Depends(require_public_card_enabled("agendas"))])
 def generate_public_agenda_pdf(
     agenda_id: int,
     download: bool = False,
@@ -3870,7 +3871,7 @@ def generate_public_agenda_pdf(
     return _build_packet_response(agenda, prefs, agenda_id, summary, download)
 
 
-@router.get("/public/{agenda_id}/minutes.pdf")
+@router.get("/public/{agenda_id}/minutes.pdf", dependencies=[Depends(require_public_card_enabled("agendas"))])
 def generate_public_minutes_pdf(
     agenda_id: int,
     download: bool = False,
@@ -3976,7 +3977,7 @@ class CommentStatusPatch(BaseModel):
     status: Literal["approved", "hidden"]
 
 
-@router.get("/public/{agenda_id}")
+@router.get("/public/{agenda_id}", dependencies=[Depends(require_public_card_enabled("agendas"))])
 def get_public_agenda_detail(agenda_id: int):
     with pool.connection() as conn:
         if not _is_council_finalized(conn, agenda_id):
@@ -4029,7 +4030,7 @@ def get_public_agenda_detail(agenda_id: int):
     }
 
 
-@router.post("/public/{agenda_id}/comments", status_code=201)
+@router.post("/public/{agenda_id}/comments", status_code=201, dependencies=[Depends(require_public_card_enabled("agendas"))])
 def submit_public_comment(
     agenda_id: int,
     body: PublicCommentIn,

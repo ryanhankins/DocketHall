@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from .audit import record_audit
 from .auth import require_permission
 from .db import pool
+from .registry import require_public_card_enabled
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS city_directory_entries (
@@ -415,7 +416,7 @@ class LocationPatch(BaseModel):
     is_public: bool | None = None
 
 
-@router.get("/public")
+@router.get("/public", dependencies=[Depends(require_public_card_enabled("directory"))])
 def get_public_directory(q: str = "", resource_category: str = ""):
     ql = f"%{q.strip()}%"
     rc_filter = resource_category.strip()
@@ -839,7 +840,7 @@ _LOC_COLS = (
 )
 
 
-@router.get("/locations/public")
+@router.get("/locations/public", dependencies=[Depends(require_public_card_enabled("directory"))])
 def list_public_locations(q: str = "", category: str = ""):
     ql = f"%{q.strip()}%"
     cat = category.strip()

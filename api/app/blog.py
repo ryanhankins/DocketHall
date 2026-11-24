@@ -47,6 +47,7 @@ from .blog_utils import (
     validate_comment_input,
 )
 from .db import pool
+from .registry import require_public_card_enabled
 from .integrations import get_app_base_url, send_notification_email
 from .subscriptions import notify_topic_subscribers
 from .tenancy import tenant_object_key
@@ -446,7 +447,7 @@ def _row_to_public_comment(r) -> dict:
 # ------------------------------------------------------------------ Public endpoints
 
 
-@router.get("/public")
+@router.get("/public", dependencies=[Depends(require_public_card_enabled("blog"))])
 def list_public_blog(
     category: str = "",
     tag: str = "",
@@ -527,7 +528,7 @@ def list_public_blog(
     }
 
 
-@router.get("/public/posts/{slug_or_id}")
+@router.get("/public/posts/{slug_or_id}", dependencies=[Depends(require_public_card_enabled("blog"))])
 def get_public_blog_post(slug_or_id: str, request: Request, preview: int = 0):
     """Fetch a single published blog post and its approved comments (or preview for staff)."""
     can_preview = False
@@ -570,7 +571,7 @@ def get_public_blog_post(slug_or_id: str, request: Request, preview: int = 0):
     }
 
 
-@router.post("/public/posts/{post_id}/comments", status_code=201)
+@router.post("/public/posts/{post_id}/comments", status_code=201, dependencies=[Depends(require_public_card_enabled("blog"))])
 def submit_public_comment(post_id: int, body: CommentIn, request: Request):
     """Submit a resident comment on a published blog post respecting its moderation policy."""
     if body.website.strip():
@@ -662,7 +663,7 @@ def _serve_blog_image(key: str, filename: str, is_visible: bool, request: Reques
     )
 
 
-@router.get("/public/categories/{category_id}/image")
+@router.get("/public/categories/{category_id}/image", dependencies=[Depends(require_public_card_enabled("blog"))])
 def get_category_image(category_id: int, request: Request):
     """Serve the header image for a blog category."""
     with pool.connection() as conn:
@@ -675,7 +676,7 @@ def get_category_image(category_id: int, request: Request):
     return _serve_blog_image(row[0], row[1], bool(row[2]), request)
 
 
-@router.get("/public/posts/{post_id}/image")
+@router.get("/public/posts/{post_id}/image", dependencies=[Depends(require_public_card_enabled("blog"))])
 def get_post_image(post_id: int, request: Request):
     """Serve the featured cover image for a blog post."""
     with pool.connection() as conn:

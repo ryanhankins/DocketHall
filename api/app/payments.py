@@ -34,6 +34,7 @@ from pydantic import BaseModel
 from .audit import record_audit
 from .auth import current_user, has_permission, require_admin, require_permission
 from .db import pool
+from .registry import is_public_card_enabled, require_public_card_enabled
 from .integrations import _mask_key, get_app_base_url
 from .tenancy import get_current_tenant_slug, is_multi_tenant, schema_for_slug, tenant_context, validate_tenant_slug
 
@@ -347,6 +348,11 @@ def create_checkout_session(
             ).fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Bill or citation not found")
+            if not user and (
+                (row[2] == "utility" and not is_public_card_enabled("utilities"))
+                or (row[2] == "citation" and not is_public_card_enabled("citations"))
+            ):
+                raise HTTPException(status_code=404, detail="Public payment for this bill type is disabled")
             if row[6] == "paid":
                 raise HTTPException(status_code=400, detail="This bill is already paid")
             if row[6] == "waived":
@@ -556,6 +562,10 @@ _BILL_COLS = (
 @router.get("/bills/public-lookup")
 def public_lookup_bills(q: str = Query(..., min_length=3, max_length=64)):
     """Public lookup of utility bills, citations, or misc fees by exact reference or account number."""
+    allow_util = is_public_card_enabled("utilities")
+    allow_cit = is_public_card_enabled("citations")
+    if not allow_util and not allow_cit:
+        raise HTTPException(status_code=404, detail="Public billing lookup is disabled")
     term = q.strip()
     if len(term) < 3:
         raise HTTPException(status_code=400, detail="Enter at least 3 characters")
@@ -566,7 +576,11 @@ def public_lookup_bills(q: str = Query(..., min_length=3, max_length=64)):
             "ORDER BY (payment_status = 'unpaid') DESC, id DESC LIMIT 20",
             (term, term),
         ).fetchall()
-    return [_row_to_bill(r, include_private=False) for r in rows]
+    return [
+        _row_to_bill(r, include_private=False)
+        for r in rows
+        if (r[2] != "utility" or allow_util) and (r[2] != "citation" or allow_cit)
+    ]
 
 
 def _require_billing_staff(user: dict = Depends(require_permission("settings.manage", "utilities.manage", "citations.manage"))) -> dict:
@@ -954,7 +968,7 @@ class ContestCitationIn(BaseModel):
     reason: str = ""
 
 
-@router.post("/public/bills/contest")
+@router.post("/public/bills/contest", dependencies=[Depends(require_public_card_enabled("citations"))])
 def contest_public_citation(body: ContestCitationIn):
     ref = body.reference_number.strip().upper()
     reason = body.reason.strip()
@@ -1042,6 +1056,10 @@ def download_public_bill_pdf(reference_number: str):
         if not r:
             raise HTTPException(status_code=404, detail="Bill not found")
         bill = _row_to_bill(r, include_private=False)
+    if (bill["bill_type"] == "utility" and not is_public_card_enabled("utilities")) or (
+        bill["bill_type"] == "citation" and not is_public_card_enabled("citations")
+    ):
+        raise HTTPException(status_code=404, detail="Bill not found")
     pdf = _render_bill_pdf(bill)
     return Response(content=pdf, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{bill["reference_number"]}.pdf"'})
 

@@ -33,6 +33,7 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 from .audit import record_audit
 from .auth import require_permission
 from .db import pool
+from .registry import require_public_card_enabled
 from .integrations import send_notification_email
 
 SCHEMA = """
@@ -379,7 +380,7 @@ class SubmissionPatch(BaseModel):
     staff_notes: str | None = None
 
 
-@router.get("/public")
+@router.get("/public", dependencies=[Depends(require_public_card_enabled("forms"))])
 def list_public_forms():
     with pool.connection() as conn:
         rows = conn.execute(
@@ -395,7 +396,7 @@ def list_public_forms():
         return out
 
 
-@router.post("/public/{form_id}/submit", status_code=201)
+@router.post("/public/{form_id}/submit", status_code=201, dependencies=[Depends(require_public_card_enabled("forms"))])
 def submit_public_form(form_id: int, body: FormSubmitIn, request: Request):
     with pool.connection() as conn:
         f_row = conn.execute(

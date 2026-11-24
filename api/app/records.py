@@ -30,6 +30,7 @@ from .audit import record_audit
 from .pdf_check import check_pdf_compliance
 from .auth import require_permission
 from .db import pool
+from .registry import require_public_card_enabled
 from .tenancy import tenant_object_key
 from .subscriptions import notify_topic_subscribers
 
@@ -224,7 +225,7 @@ def _is_publicly_visible(rec: dict, today: date | None = None) -> bool:
 
 
 # ------------------------------------------------------------------ public endpoints
-@router.get("/public")
+@router.get("/public", dependencies=[Depends(require_public_card_enabled("records"))])
 def list_public_records(q: str = "", category: str = "", year: str = ""):
     with pool.connection() as conn:
         rows = conn.execute(
@@ -247,7 +248,7 @@ def list_public_records(q: str = "", category: str = "", year: str = ""):
     return items
 
 
-@router.get("/public/files/{file_id}/download")
+@router.get("/public/files/{file_id}/download", dependencies=[Depends(require_public_card_enabled("records"))])
 def download_public_file(file_id: int):
     with pool.connection() as conn:
         row = conn.execute(
@@ -331,7 +332,7 @@ _FOIA_COLS = (
 )
 
 
-@router.post("/requests/public", status_code=201)
+@router.post("/requests/public", status_code=201, dependencies=[Depends(require_public_card_enabled("records"))])
 def submit_public_foia_request(body: FoiaRequestIn):
     name = body.requester_name.strip()
     subj = body.subject.strip()
@@ -372,7 +373,7 @@ def submit_public_foia_request(body: FoiaRequestIn):
     }
 
 
-@router.get("/requests/public-lookup")
+@router.get("/requests/public-lookup", dependencies=[Depends(require_public_card_enabled("records"))])
 def lookup_public_foia_request(request_number: str = ""):
     num = request_number.strip().upper()
     if not num:
@@ -425,7 +426,7 @@ async def upload_foia_fulfillment_file(
     return _row_to_foia(row)
 
 
-@router.get("/requests/public-download/{request_number}")
+@router.get("/requests/public-download/{request_number}", dependencies=[Depends(require_public_card_enabled("records"))])
 def download_foia_fulfillment_file(request_number: str):
     num = request_number.strip().upper()
     with pool.connection() as conn:

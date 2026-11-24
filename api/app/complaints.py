@@ -32,6 +32,7 @@ from .agendas import _bucket, _storage
 from .audit import record_audit
 from .auth import current_user, has_permission, require_permission
 from .db import pool
+from .registry import require_public_card_enabled
 from .tenancy import tenant_object_key
 from .integrations import send_notification_email
 
@@ -692,7 +693,7 @@ def update_complaint_settings(
     return res
 
 
-@router.post("/public")
+@router.post("/public", dependencies=[Depends(require_public_card_enabled("complaints"))])
 def file_public_complaint(body: ComplaintCreateIn, request: Request):
     """Public / anonymous complaint filing endpoint (no fee, confidential complainant protection)."""
     user = current_user(request)
@@ -710,7 +711,7 @@ def file_complaint(
     return _create_complaint_row(body, user, allow_staff_channel=is_staff, request=request)
 
 
-@router.get("/public-log")
+@router.get("/public-log", dependencies=[Depends(require_public_card_enabled("complaints"))])
 def public_complaint_log(
     q: str = Query(""),
     status: str = Query(""),
@@ -750,7 +751,7 @@ def public_complaint_log(
     return {"items": items}
 
 
-@router.get("/public-lookup")
+@router.get("/public-lookup", dependencies=[Depends(require_public_card_enabled("complaints"))])
 def public_complaint_lookup(number: str = Query(..., min_length=3)):
     """Public status lookup by COM-YYYY-XXXX tracking number (MN Stat. 13.44 compliant)."""
     num = number.strip().upper()
@@ -966,7 +967,7 @@ def _create_work_order_row(conn, body: WorkOrderIn) -> dict:
     return _row_to_wo(full)
 
 
-@router.post("/work-orders/public", status_code=201)
+@router.post("/work-orders/public", status_code=201, dependencies=[Depends(require_public_card_enabled("complaints"))])
 def submit_public_311_request(body: WorkOrderIn, request: Request):
     with pool.connection() as conn:
         wo = _create_work_order_row(conn, body)
@@ -980,7 +981,7 @@ def submit_public_311_request(body: WorkOrderIn, request: Request):
     return wo
 
 
-@router.get("/work-orders/public-lookup")
+@router.get("/work-orders/public-lookup", dependencies=[Depends(require_public_card_enabled("complaints"))])
 def lookup_public_311_request(work_order_number: str = ""):
     num = work_order_number.strip().upper()
     if not num:
