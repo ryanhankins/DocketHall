@@ -1131,7 +1131,10 @@ function AuthModal({ open, initialRegister, initialResetToken, nextUrl, reason, 
                       body: JSON.stringify({ role }),
                     });
                     if (r.ok) {
-                      location.replace(role === 'resident' && (!nextUrl || nextUrl === '/app') ? '/' : safeNext);
+                      const dest = role === 'resident' && (!nextUrl || nextUrl === '/app')
+                        ? '/'
+                        : (role === 'inspector' ? '/app#field-inspector' : safeNext);
+                      location.replace(dest);
                       return;
                     }
                     const data = await r.json().catch(() => ({}));

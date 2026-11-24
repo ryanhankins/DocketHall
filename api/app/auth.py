@@ -258,11 +258,16 @@ class DemoLoginIn(BaseModel):
     role: str = "clerk"
 
 
-_DEMO_ACCOUNTS: dict[str, tuple[str, str, str]] = {
-    "admin": ("demo_admin", "admin", "admin@millbrook.example"),
-    "clerk": ("demo_clerk", "admin_staff", "clerk@millbrook.example"),
-    "inspector": ("demo_inspector", "admin_staff", "inspector@millbrook.example"),
-    "resident": ("demo_resident", "applicant", "resident@millbrook.example"),
+_DEMO_ACCOUNTS: dict[str, tuple[str, str, str, list[str]]] = {
+    "admin": ("demo_admin", "admin", "admin@millbrook.example", []),
+    "clerk": ("demo_clerk", "admin_staff", "clerk@millbrook.example", []),
+    "inspector": (
+        "demo_inspector",
+        "read_only",
+        "inspector@millbrook.example",
+        ["permits.manage", "complaints.manage", "complaints.log", "licensing.manage"],
+    ),
+    "resident": ("demo_resident", "applicant", "resident@millbrook.example", []),
 }
 
 
@@ -274,22 +279,23 @@ def demo_login(body: DemoLoginIn, response: Response):
     key = (body.role or "clerk").strip().lower()
     if key not in _DEMO_ACCOUNTS:
         raise HTTPException(status_code=400, detail="Invalid demo role")
-    uname, db_role, email = _DEMO_ACCOUNTS[key]
+    uname, db_role, email, explicit_perms = _DEMO_ACCOUNTS[key]
     token = secrets.token_urlsafe(32)
+    from psycopg.types.json import Jsonb
     with pool.connection() as conn:
         row = conn.execute("SELECT id FROM users WHERE username = %s", (uname,)).fetchone()
         if row:
             uid = row[0]
             conn.execute(
-                "UPDATE users SET is_active = TRUE, role = %s, last_login_at = now() WHERE id = %s",
-                (db_role, uid),
+                "UPDATE users SET is_active = TRUE, role = %s, permissions = %s, last_login_at = now() WHERE id = %s",
+                (db_role, Jsonb(explicit_perms), uid),
             )
         else:
             pw_hash = hash_password(secrets.token_urlsafe(24))
             uid = conn.execute(
-                "INSERT INTO users (username, password_hash, role, email, is_active, is_default_password, last_login_at) "
-                "VALUES (%s, %s, %s, %s, TRUE, FALSE, now()) RETURNING id",
-                (uname, pw_hash, db_role, email),
+                "INSERT INTO users (username, password_hash, role, permissions, email, is_active, is_default_password, last_login_at) "
+                "VALUES (%s, %s, %s, %s, %s, TRUE, FALSE, now()) RETURNING id",
+                (uname, pw_hash, db_role, Jsonb(explicit_perms), email),
             ).fetchone()[0]
         conn.execute(
             "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (%s, %s, now() + %s)",

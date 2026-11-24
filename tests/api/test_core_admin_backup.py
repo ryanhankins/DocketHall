@@ -265,6 +265,15 @@ def test_demo_mode_guards_and_login(admin_client, anon_client, monkeypatch):
     assert dl.status_code == 200
     assert dl.json()["username"] == "demo_clerk"
 
+    # Inspector role is scoped to permits/complaints/licensing only
+    insp = anon_client.post("/api/demo-login", json={"role": "inspector"})
+    assert insp.status_code == 200
+    me_insp = anon_client.get("/api/me").json()
+    assert "permits.manage" in me_insp["permissions"]
+    assert "complaints.manage" in me_insp["permissions"]
+    assert "settings.manage" not in me_insp["permissions"]
+    assert "agendas.manage" not in me_insp["permissions"]
+
     # Destructive / external actions are blocked
     assert admin_client.put("/api/backup/policy", json={"enabled": True}).status_code == 403
     assert admin_client.post("/api/payments/checkout", json={"item_type": "bill", "item_id": 1}).status_code == 403
