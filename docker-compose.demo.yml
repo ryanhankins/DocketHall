@@ -1,0 +1,64 @@
+# DocketHall single-VM public demo compose (tuned for GCP e2-micro 1 GB RAM)
+services:
+  web:
+    build:
+      context: ./web
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - ./web/nginx.demo.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./api
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: civicdesk
+      POSTGRES_USER: civicdesk
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      LOCAL_RECORDS_DIR: /data/records
+      STORAGE_BACKEND: local
+      DEMO_MODE: "true"
+      COOKIE_SECURE: "${COOKIE_SECURE:-true}"
+      APP_BASE_URL: "${APP_BASE_URL:-https://demo.dockethall.com}"
+      SEED_CITY_PROFILE: "${SEED_CITY_PROFILE:-millbrook}"
+    volumes:
+      - ./secrets/postgres_password:/run/secrets/postgres_password:ro
+      - records_data:/data/records
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "max_connections=20", "-c", "work_mem=2MB"]
+    environment:
+      POSTGRES_DB: civicdesk
+      POSTGRES_USER: civicdesk
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    volumes:
+      - ./secrets/postgres_password:/run/secrets/postgres_password:ro
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U civicdesk -d civicdesk"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  records_data:

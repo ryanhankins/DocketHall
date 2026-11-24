@@ -37,7 +37,7 @@ from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer
 
 from .agenda_pdf import apply_pdf_accessibility_metadata
 from .agendas import _bucket, _storage, _remove_storage_objects
-from .auth import require_permission
+from .auth import require_not_demo_mode, require_permission
 from .codification_parser import (
     clean_pdf_pages,
     count_subsections,
@@ -1827,6 +1827,7 @@ async def import_code_urls(
     body: ImportUrlsIn,
     user: dict = Depends(require_permission("codification.manage")),
 ):
+    require_not_demo_mode("External URL import")
     if not body.items:
         raise HTTPException(status_code=400, detail="Select at least one PDF URL")
     return await run_in_threadpool(_import_urls_worker, body, user)

@@ -21,7 +21,7 @@ import '../app.css';
 import { ROLE_LABELS, formatDate, formatSize, formatTime12h } from './core/api.js';
 import ServiceIcon from './core/ServiceIcon.jsx';
 import CustomFieldsRenderer from './core/CustomFieldsRenderer.jsx';
-import { DocketHallLogo, DirectoryHeaderLink, PublicFooter, PublicHeader, UrgentAlertBanner } from './core/PublicChrome.jsx';
+import { DemoBanner, DocketHallLogo, DirectoryHeaderLink, PublicFooter, PublicHeader, UrgentAlertBanner } from './core/PublicChrome.jsx';
 import { applyTheme } from './core/theme.js';
 import RichTextContent from './core/RichTextContent.jsx';
 import RichTextEditor from './core/RichTextEditor.jsx';
@@ -974,7 +974,7 @@ function NoticesPublicTab({ features = {}, initialItemId = '', onItemChange }) {
   );
 }
 
-function AuthModal({ open, initialRegister, initialResetToken, nextUrl, reason, onClose }) {
+function AuthModal({ open, initialRegister, initialResetToken, nextUrl, reason, demoMode, onClose }) {
   const dlgRef = useRef(null);
   const [mode, setMode] = useState(initialResetToken ? 'reset' : (initialRegister ? 'register' : 'login'));
   const [username, setUsername] = useState('');
@@ -1197,6 +1197,53 @@ function AuthModal({ open, initialRegister, initialResetToken, nextUrl, reason, 
                     : 'Sign In'}
           </button>
         </div>
+        {demoMode && mode === 'login' && (
+          <div style={{ marginTop: '.9rem', paddingTop: '.85rem', borderTop: '1px solid #e2e8f0' }}>
+            <div style={{ fontSize: '.82rem', fontWeight: 700, color: '#334155', marginBottom: '.45rem' }}>
+              One-Click Demo Sign In
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.4rem' }}>
+              {[
+                ['clerk', 'Try as City Clerk'],
+                ['inspector', 'Try as Inspector'],
+                ['resident', 'Try as Resident'],
+                ['admin', 'Try as Admin'],
+              ].map(([role, label]) => (
+                <button
+                  key={role}
+                  type="button"
+                  className="btn sm"
+                  disabled={busy}
+                  onClick={async () => {
+                    setError('');
+                    setInfo('');
+                    setBusy(true);
+                    try {
+                      const r = await fetch('/api/demo-login', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ role }),
+                      });
+                      if (r.ok) {
+                        location.replace(role === 'resident' && (!nextUrl || nextUrl === '/app') ? '/' : safeNext);
+                        return;
+                      }
+                      const data = await r.json().catch(() => ({}));
+                      setError(data.detail || 'Demo sign in failed.');
+                    } catch {
+                      setError('Unable to reach the server.');
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </form>
       <div style={{ marginTop: '.75rem', textAlign: 'center', fontSize: '.88rem', display: 'flex', flexDirection: 'column', gap: '.35rem' }}>
         {mode === 'login' && (
@@ -3853,6 +3900,7 @@ function PublicHomePage() {
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
+      <DemoBanner demoMode={Boolean(branding.demo_mode)} />
       <UrgentAlertBanner branding={branding} />
       <PublicHeader
         branding={branding}
@@ -4135,6 +4183,7 @@ function PublicHomePage() {
         initialResetToken={authModal.resetToken}
         nextUrl={authModal.nextUrl}
         reason={authModal.reason}
+        demoMode={Boolean(branding.demo_mode)}
         onClose={() => setAuthModal((prev) => ({ ...prev, open: false, resetToken: '' }))}
       />
       {homeEditOpen && (

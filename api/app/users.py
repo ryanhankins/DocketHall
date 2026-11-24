@@ -24,7 +24,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
 from .audit import record_audit
-from .auth import effective_permissions, hash_password, require_admin
+from .auth import effective_permissions, hash_password, require_admin, require_not_demo_mode
 from .db import pool
 
 UserRole = Literal["council_member", "admin_staff", "non_admin_staff", "applicant", "read_only"]
@@ -123,6 +123,7 @@ def create_user(body: CreateUserIn, admin: dict = Depends(require_admin)):
 
 @router.patch("/{user_id}")
 def update_user(user_id: int, body: UpdateUserIn, admin: dict = Depends(require_admin)):
+    require_not_demo_mode("Updating user accounts")
     if body.is_active is None and body.role is None and body.email is None and body.permissions is None:
         raise HTTPException(status_code=400, detail="No fields to update")
     if user_id == admin["id"]:
@@ -164,6 +165,7 @@ def update_user(user_id: int, body: UpdateUserIn, admin: dict = Depends(require_
 
 @router.post("/{user_id}/reset-password")
 def reset_password(user_id: int, admin: dict = Depends(require_admin)):
+    require_not_demo_mode("Resetting user passwords")
     password = generate_password()
     with pool.connection() as conn:
         row = conn.execute(
@@ -179,6 +181,7 @@ def reset_password(user_id: int, admin: dict = Depends(require_admin)):
 
 @router.delete("/{user_id}")
 def delete_user(user_id: int, admin: dict = Depends(require_admin)):
+    require_not_demo_mode("Deleting user accounts")
     if user_id == admin["id"]:
         raise HTTPException(status_code=400, detail="Cannot remove your own account")
     with pool.connection() as conn:

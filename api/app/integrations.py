@@ -95,6 +95,9 @@ def get_google_cloud_api_key() -> str | None:
 
 def _validate_google_api_key(api_key: str) -> tuple[bool, str]:
     """Validate a Google Cloud API key by calling Google's Discovery API."""
+    from .auth import is_demo_mode
+    if is_demo_mode():
+        return False, "External API key validation is disabled in the public demo."
     key = (api_key or "").strip()
     if not key:
         return False, "API key cannot be empty."
@@ -346,6 +349,9 @@ def _send_smtp_mail(
     subject: str,
     body: str,
 ) -> None:
+    from .auth import is_demo_mode
+    if is_demo_mode():
+        return
     msg = EmailMessage()
     msg["From"] = sender_email
     msg["To"] = ", ".join(to_emails)

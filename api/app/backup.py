@@ -32,7 +32,7 @@ from starlette.background import BackgroundTask
 
 from .agendas import _bucket, _storage, get_staff_user
 from .audit import record_audit
-from .auth import require_permission
+from .auth import require_not_demo_mode, require_permission
 from .db import pool
 from .registry import get_module_backup_tables
 from .storage import BotoS3StorageClient
@@ -669,6 +669,7 @@ def update_backup_policy(
     body: BackupPolicyIn,
     user: dict = Depends(require_permission("settings.manage")),
 ):
+    require_not_demo_mode("Modifying offsite backup policy")
     freq = body.schedule_frequency if body.schedule_frequency in ("daily", "weekly") else "daily"
     ttype = body.target_type if body.target_type in ("local_s3", "s3_compatible") else "local_s3"
     with pool.connection() as conn:

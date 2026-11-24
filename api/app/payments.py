@@ -32,7 +32,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
 from .audit import record_audit
-from .auth import current_user, has_permission, require_admin, require_permission
+from .auth import current_user, has_permission, require_admin, require_not_demo_mode, require_permission
 from .db import pool
 from .registry import is_public_card_enabled, require_public_card_enabled
 from .integrations import _mask_key, get_app_base_url
@@ -311,6 +311,7 @@ def create_checkout_session(
     body: CheckoutIn,
     request: Request,
 ):
+    require_not_demo_mode("Online payments")
     user = current_user(request)
     secrets = _get_active_stripe_secrets()
     if not secrets:

@@ -19,7 +19,7 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { ROLE_LABELS, api, downloadBackupArchive, hasPermission, todayIso } from './api.js';
 import { loadEnabledFrontendModules } from './registry.js';
 import ServiceIcon from './ServiceIcon.jsx';
-import { DocketHallLogo } from './PublicChrome.jsx';
+import { DemoBanner, DocketHallLogo } from './PublicChrome.jsx';
 import { applyTheme } from './theme.js';
 import { useToast } from './toast.jsx';
 
@@ -48,7 +48,7 @@ export default function CoreShell() {
   const [modulesMeta, setModulesMeta] = useState([]);
   const [permissionsCatalog, setPermissionsCatalog] = useState([]);
   const [frontendMods, setFrontendMods] = useState({});
-  const [branding, setBranding] = useState({ cityTitle: '', hasLogo: false, logoVer: Date.now() });
+  const [branding, setBranding] = useState({ cityTitle: '', hasLogo: false, logoVer: Date.now(), demoMode: false });
   const [backupStatus, setBackupStatus] = useState({ overdue: false, reminder_days: 0, days_since_backup: 0, last_backup_at: null });
   const [backlogDueCount, setBacklogDueCount] = useState(0);
   const [hash, setHash] = useState(() => getWorkspaceRoute());
@@ -97,12 +97,13 @@ export default function CoreShell() {
   const pwDlgRef = useRef(null);
   const showToast = useToast();
 
-  const applyBranding = useCallback(({ cityTitle, hasLogo, logoVer }) => {
+  const applyBranding = useCallback(({ cityTitle, hasLogo, logoVer, demoMode }) => {
     const t = (cityTitle || '').trim();
     setBranding(prev => ({
       cityTitle: t,
       hasLogo: hasLogo ?? prev.hasLogo,
       logoVer: logoVer ?? prev.logoVer,
+      demoMode: demoMode ?? prev.demoMode,
     }));
     document.title = t ? `${t} - DocketHall` : 'DocketHall';
   }, []);
@@ -165,6 +166,7 @@ export default function CoreShell() {
         cityTitle: brand.city_title || '',
         hasLogo: !!brand.has_city_logo,
         logoVer: Date.now(),
+        demoMode: !!brand.demo_mode,
       });
       applyTheme(brand);
 
@@ -352,6 +354,7 @@ export default function CoreShell() {
   return (
     <>
       <a className="skip-link" href="#main-content">Skip to main content</a>
+      <DemoBanner demoMode={branding.demoMode} />
       <header>
         <a
           href="/"

@@ -249,3 +249,23 @@ def test_hidden_home_cards_block_public_endpoints(admin_client, anon_client):
     reset = admin_client.put("/api/branding", json={"city_title": "Test City", "home_hidden_cards": []})
     assert reset.status_code == 200
     assert anon_client.get("/api/complaints/public-log").status_code == 200
+
+
+def test_demo_mode_guards_and_login(admin_client, anon_client, monkeypatch):
+    """DEMO_MODE=true exposes demo_mode in branding, enables /api/demo-login, and blocks password/backup/payment mutations."""
+    # Disabled by default
+    assert anon_client.post("/api/demo-login", json={"role": "clerk"}).status_code == 404
+    assert anon_client.get("/api/branding").json()["demo_mode"] is False
+
+    monkeypatch.setenv("DEMO_MODE", "true")
+    assert anon_client.get("/api/branding").json()["demo_mode"] is True
+
+    # One-click demo login works
+    dl = anon_client.post("/api/demo-login", json={"role": "clerk"})
+    assert dl.status_code == 200
+    assert dl.json()["username"] == "demo_clerk"
+
+    # Destructive / external actions are blocked
+    assert admin_client.put("/api/backup/policy", json={"enabled": True}).status_code == 403
+    assert admin_client.post("/api/payments/checkout", json={"item_type": "bill", "item_id": 1}).status_code == 403
+    assert admin_client.post("/api/codification/import-urls", json={"items": []}).status_code == 403

@@ -31,6 +31,17 @@ SESSION_TTL = timedelta(hours=int(os.environ.get("SESSION_TTL_HOURS", "8")))
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "false").lower() == "true"
 PBKDF2_ITERATIONS = 600_000
 
+
+def is_demo_mode() -> bool:
+    """Return True when the server is running in public demo mode."""
+    return os.environ.get("DEMO_MODE", "").strip().lower() in ("1", "true", "yes")
+
+
+def require_not_demo_mode(action: str = "This action") -> None:
+    """Raise 403 when DEMO_MODE is active for destructive or external actions."""
+    if is_demo_mode():
+        raise HTTPException(status_code=403, detail=f"{action} is disabled in the public demo.")
+
 ROLE_PRESET_PERMISSIONS: dict[str, list[str]] = {
     "admin": ["*"],
     "admin_staff": [
@@ -243,6 +254,55 @@ def login(body: LoginIn, response: Response):
     return {"username": body.username}
 
 
+class DemoLoginIn(BaseModel):
+    role: str = "clerk"
+
+
+_DEMO_ACCOUNTS: dict[str, tuple[str, str, str]] = {
+    "admin": ("demo_admin", "admin", "admin@millbrook.example"),
+    "clerk": ("demo_clerk", "admin_staff", "clerk@millbrook.example"),
+    "inspector": ("demo_inspector", "admin_staff", "inspector@millbrook.example"),
+    "resident": ("demo_resident", "applicant", "resident@millbrook.example"),
+}
+
+
+@router.post("/demo-login")
+def demo_login(body: DemoLoginIn, response: Response):
+    """One-click role login enabled only when DEMO_MODE=true."""
+    if not is_demo_mode():
+        raise HTTPException(status_code=404, detail="Not found")
+    key = (body.role or "clerk").strip().lower()
+    if key not in _DEMO_ACCOUNTS:
+        raise HTTPException(status_code=400, detail="Invalid demo role")
+    uname, db_role, email = _DEMO_ACCOUNTS[key]
+    token = secrets.token_urlsafe(32)
+    with pool.connection() as conn:
+        row = conn.execute("SELECT id FROM users WHERE username = %s", (uname,)).fetchone()
+        if row:
+            uid = row[0]
+            conn.execute(
+                "UPDATE users SET is_active = TRUE, role = %s, last_login_at = now() WHERE id = %s",
+                (db_role, uid),
+            )
+        else:
+            pw_hash = hash_password(secrets.token_urlsafe(24))
+            uid = conn.execute(
+                "INSERT INTO users (username, password_hash, role, email, is_active, is_default_password, last_login_at) "
+                "VALUES (%s, %s, %s, %s, TRUE, FALSE, now()) RETURNING id",
+                (uname, pw_hash, db_role, email),
+            ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (%s, %s, now() + %s)",
+            (_token_hash(token), uid, SESSION_TTL),
+        )
+    response.set_cookie(
+        SESSION_COOKIE, token,
+        max_age=int(SESSION_TTL.total_seconds()),
+        httponly=True, secure=COOKIE_SECURE, samesite="strict", path="/",
+    )
+    return {"username": uname, "role": db_role}
+
+
 @router.post("/register", status_code=201)
 def register(body: RegisterIn, response: Response):
     """Self-service registration for citizen/contractor permit applicants."""
@@ -304,6 +364,7 @@ def me(request: Request):
 @router.post("/change-password")
 def change_password(body: ChangePasswordIn, request: Request):
     """Allow any logged-in user to change only their own password."""
+    require_not_demo_mode("Changing passwords")
     user = current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -350,6 +411,7 @@ PASSWORD_RESET_TTL = timedelta(minutes=30)
 
 @router.post("/password-reset/request")
 def request_password_reset(body: PasswordResetRequestIn, request: Request):
+    require_not_demo_mode("Password reset")
     """Email a one-time password reset link to an active user with a configured email."""
     ident = (body.identifier or "").strip()
     generic = {

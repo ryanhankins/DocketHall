@@ -178,3 +178,22 @@ export function PublicHeader({
     </header>
   );
 }
+
+export function DemoBanner({ demoMode }) {
+  if (!demoMode) return null;
+  return (
+    <div
+      role="status"
+      style={{
+        background: '#0f2942',
+        color: '#f8fafc',
+        borderBottom: '2px solid #f59e0b',
+        padding: '.45rem 1.25rem',
+        fontSize: '.85rem',
+        textAlign: 'center',
+      }}
+    >
+      <strong>Public Demo</strong> — resets every 2 hours. Do not enter real personal information.
+    </div>
+  );
+}
