@@ -4010,6 +4010,48 @@ function PublicHomePage() {
               )}
             </div>
 
+            {branding.demo_mode && (
+              <div
+                role="region"
+                aria-label="Interactive Demo Guide"
+                style={{
+                  background: 'linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%)',
+                  border: '2px solid #2563eb',
+                  borderRadius: '12px',
+                  padding: '1rem 1.25rem',
+                  marginBottom: '1.1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  flexWrap: 'wrap',
+                  boxShadow: '0 4px 14px rgba(37, 99, 235, 0.10)',
+                }}
+              >
+                <div style={{ flex: '1 1 320px' }}>
+                  <div style={{ fontWeight: 800, fontSize: '1.02rem', color: '#0f2942', marginBottom: '.25rem' }}>
+                    Explore the Full Staff &amp; Resident Experience
+                  </div>
+                  <div style={{ fontSize: '.92rem', color: '#334155', lineHeight: 1.5 }}>
+                    Want to see behind the scenes? Click <strong>Sign In</strong> in the top-right corner to try DocketHall with one click as a <strong>City Clerk</strong>, <strong>Field Inspector</strong>, <strong>Resident</strong>, or <strong>Administrator</strong>—no credentials required.
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '.5rem', flexShrink: 0 }}>
+                  {me ? (
+                    <a className="btn primary" href="/app">Go to Workspace</a>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn primary"
+                      onClick={() => openAuthModal('/app', false, 'Choose any role below to explore DocketHall instantly—no credentials required.')}
+                    >
+                      Try One-Click Sign In
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
             <GlobalSearchBar onSelectTab={selectTab} />
 
             {branding.home_blog_position === 'above_services' && (
