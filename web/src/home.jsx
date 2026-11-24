@@ -1102,6 +1102,53 @@ function AuthModal({ open, initialRegister, initialResetToken, nextUrl, reason, 
       {reason && mode === 'login' && (
         <p className="muted" style={{ marginTop: 0, fontSize: '.9rem' }}>{reason}</p>
       )}
+      {demoMode && mode === 'login' && (
+        <div style={{ marginBottom: '.9rem', paddingBottom: '.85rem', borderBottom: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: '.82rem', fontWeight: 700, color: '#334155', marginBottom: '.45rem' }}>
+            One-Click Demo Sign In
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.4rem' }}>
+            {[
+              ['clerk', 'Try as City Clerk'],
+              ['inspector', 'Try as Inspector'],
+              ['resident', 'Try as Resident'],
+              ['admin', 'Try as Admin'],
+            ].map(([role, label]) => (
+              <button
+                key={role}
+                type="button"
+                className="btn sm"
+                disabled={busy}
+                onClick={async () => {
+                  setError('');
+                  setInfo('');
+                  setBusy(true);
+                  try {
+                    const r = await fetch('/api/demo-login', {
+                      method: 'POST',
+                      credentials: 'same-origin',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ role }),
+                    });
+                    if (r.ok) {
+                      location.replace(role === 'resident' && (!nextUrl || nextUrl === '/app') ? '/' : safeNext);
+                      return;
+                    }
+                    const data = await r.json().catch(() => ({}));
+                    setError(data.detail || 'Demo sign in failed.');
+                  } catch {
+                    setError('Unable to reach the server.');
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <form onSubmit={handleSubmit}>
         {mode === 'forgot' ? (
           <div className="field">
@@ -1197,53 +1244,6 @@ function AuthModal({ open, initialRegister, initialResetToken, nextUrl, reason, 
                     : 'Sign In'}
           </button>
         </div>
-        {demoMode && mode === 'login' && (
-          <div style={{ marginTop: '.9rem', paddingTop: '.85rem', borderTop: '1px solid #e2e8f0' }}>
-            <div style={{ fontSize: '.82rem', fontWeight: 700, color: '#334155', marginBottom: '.45rem' }}>
-              One-Click Demo Sign In
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.4rem' }}>
-              {[
-                ['clerk', 'Try as City Clerk'],
-                ['inspector', 'Try as Inspector'],
-                ['resident', 'Try as Resident'],
-                ['admin', 'Try as Admin'],
-              ].map(([role, label]) => (
-                <button
-                  key={role}
-                  type="button"
-                  className="btn sm"
-                  disabled={busy}
-                  onClick={async () => {
-                    setError('');
-                    setInfo('');
-                    setBusy(true);
-                    try {
-                      const r = await fetch('/api/demo-login', {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ role }),
-                      });
-                      if (r.ok) {
-                        location.replace(role === 'resident' && (!nextUrl || nextUrl === '/app') ? '/' : safeNext);
-                        return;
-                      }
-                      const data = await r.json().catch(() => ({}));
-                      setError(data.detail || 'Demo sign in failed.');
-                    } catch {
-                      setError('Unable to reach the server.');
-                    } finally {
-                      setBusy(false);
-                    }
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </form>
       <div style={{ marginTop: '.75rem', textAlign: 'center', fontSize: '.88rem', display: 'flex', flexDirection: 'column', gap: '.35rem' }}>
         {mode === 'login' && (
