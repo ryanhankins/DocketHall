@@ -77,7 +77,7 @@ nav button.active { background: var(--cd-tint); color: var(--cd-primary); font-w
 .nav-submenu button { font-size: .84rem; padding: .36rem .6rem; color: #475569; }
 .nav-filter { width: 100%; box-sizing: border-box; padding: .38rem .55rem; font-size: .82rem; border: 1px solid #cbd5e1; border-radius: 6px; margin-bottom: .5rem; background: #f8fafc; }
 .nav-filter:focus { background: #fff; border-color: var(--cd-primary); outline: none; }
-main { flex: 1; padding: 1.75rem 2rem; max-width: 1040px; }
+main { flex: 1; min-width: 0; padding: 1.75rem 2rem; max-width: 1040px; }
 h1 { margin: 0 0 1.25rem; font-size: 1.35rem; }
 .card {
   background: var(--cd-surface); border: 1px solid var(--cd-border); border-radius: 8px;
