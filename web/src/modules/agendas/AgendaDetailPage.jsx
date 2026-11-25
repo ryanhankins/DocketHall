@@ -290,6 +290,50 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
           <a className="btn primary" href={`/api/agendas/${agenda.id}/packet.pdf`} target="_blank" rel="noreferrer">View Packet PDF</a>
           <PdfComplianceButton url={`/api/agendas/${agenda.id}/packet.pdf/compliance`} title="Packet PDF" label="Check Packet" className="btn" />
           <a className="btn" href={`/api/agendas/${agenda.id}/packet.pdf?download=1`} target="_blank" rel="noreferrer">Download PDF</a>
+          <label className="btn" style={{ cursor: 'pointer', margin: 0 }}>
+            {agenda.has_uploaded_packet ? 'Replace Uploaded PDF' : 'Upload Existing PDF'}
+            <input
+              type="file"
+              accept=".pdf,application/pdf"
+              style={{ display: 'none' }}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (!file) return;
+                const fd = new FormData();
+                fd.append('file', file);
+                try {
+                  const res = await fetch(`/api/agendas/${agenda.id}/packet-pdf`, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    body: fd,
+                  });
+                  if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.detail || 'Upload failed');
+                  }
+                  setSaveMsg({ text: `Uploaded standalone agenda PDF (${file.name}).`, isError: false });
+                  await loadAll();
+                } catch (err) {
+                  setSaveMsg({ text: err.message || 'Upload failed', isError: true });
+                }
+              }}
+            />
+          </label>
+          {agenda.has_uploaded_packet && (
+            <button
+              type="button"
+              className="btn danger"
+              onClick={async () => {
+                if (!confirm('Remove the uploaded PDF and revert to assembled packet generation?')) return;
+                await api(`/api/agendas/${agenda.id}/packet-pdf`, { method: 'DELETE' });
+                setSaveMsg({ text: 'Reverted to assembled agenda packet.', isError: false });
+                await loadAll();
+              }}
+            >
+              Revert to Assembled ({agenda.uploaded_packet_name || 'PDF'})
+            </button>
+          )}
           <a className="btn" href={`/api/agendas/${agenda.id}/minutes.pdf`} target="_blank" rel="noreferrer">Minutes PDF</a>
           <PdfComplianceButton url={`/api/agendas/${agenda.id}/minutes.pdf/compliance`} title="Minutes PDF" label="Check Minutes" className="btn" />
           <a className="btn" href={`/api/agendas/${agenda.id}/minutes.pdf?download=1`} target="_blank" rel="noreferrer">Download Minutes</a>

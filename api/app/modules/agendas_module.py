@@ -25,6 +25,7 @@ AGENDAS_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
             "finalized_at", "created_by", "created_at", "updated_at",
             "minutes_attendance", "minutes_notes", "minutes_status",
             "media_url", "media_type", "amended_at",
+            "uploaded_packet_key", "uploaded_packet_name",
         ],
         set(),
         True,

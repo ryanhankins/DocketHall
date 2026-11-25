@@ -145,3 +145,40 @@ def test_multi_tenant_isolation_when_enabled(admin_client):
         json={"slug": slug, "name": f"City of {slug}"},
     )
     assert res.status_code in (201, 403)
+
+
+def test_uploaded_standalone_agenda_packet_pdf(admin_client, anon_client):
+    """Uploading an existing agenda PDF serves it directly until reverted."""
+    created = admin_client.post(
+        "/api/agendas",
+        json={"title": "Standalone Upload Agenda", "body": "City Council", "meeting_date": "2026-08-01"},
+    )
+    assert created.status_code == 201
+    aid = created.json()["id"]
+    admin_client.patch(f"/api/agendas/{aid}", json={"status": "Finalized Agendas"})
+
+    sample_pdf = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
+    up = admin_client.post(
+        f"/api/agendas/{aid}/packet-pdf",
+        files={"file": ("existing_council_agenda.pdf", sample_pdf, "application/pdf")},
+    )
+    assert up.status_code == 200
+    assert up.json()["has_uploaded_packet"] is True
+    assert up.json()["uploaded_packet_name"] == "existing_council_agenda.pdf"
+
+    # Both staff and public packet.pdf return the exact uploaded PDF bytes
+    staff_pdf = admin_client.get(f"/api/agendas/{aid}/packet.pdf")
+    assert staff_pdf.status_code == 200
+    assert staff_pdf.content == sample_pdf
+
+    pub_pdf = anon_client.get(f"/api/agendas/public/{aid}/packet.pdf")
+    assert pub_pdf.status_code == 200
+    assert pub_pdf.content == sample_pdf
+
+    # Reverting restores assembled PDF generation
+    rev = admin_client.delete(f"/api/agendas/{aid}/packet-pdf")
+    assert rev.status_code == 200
+    assert rev.json()["has_uploaded_packet"] is False
+    assembled = admin_client.get(f"/api/agendas/{aid}/packet.pdf")
+    assert assembled.status_code == 200
+    assert assembled.content != sample_pdf

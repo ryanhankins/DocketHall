@@ -97,6 +97,8 @@ ALTER TABLE agendas ADD COLUMN IF NOT EXISTS media_url TEXT NOT NULL DEFAULT '';
 ALTER TABLE agendas ADD COLUMN IF NOT EXISTS media_type TEXT NOT NULL DEFAULT '';
 ALTER TABLE agendas ADD COLUMN IF NOT EXISTS minutes_status TEXT NOT NULL DEFAULT 'draft';
 ALTER TABLE agendas ADD COLUMN IF NOT EXISTS amended_at TIMESTAMPTZ;
+ALTER TABLE agendas ADD COLUMN IF NOT EXISTS uploaded_packet_key TEXT NOT NULL DEFAULT '';
+ALTER TABLE agendas ADD COLUMN IF NOT EXISTS uploaded_packet_name TEXT NOT NULL DEFAULT '';
 CREATE TABLE IF NOT EXISTS agenda_items (
     id                  BIGSERIAL PRIMARY KEY,
     agenda_id           BIGINT REFERENCES agendas(id) ON DELETE CASCADE,
@@ -537,7 +539,8 @@ def _load_agenda(conn, agenda_id: int) -> dict | None:
     row = conn.execute(
         "SELECT id, title, body, meeting_date, meeting_time, status, finalized_at, "
         "       created_at, updated_at, minutes_attendance, minutes_notes, "
-        "       media_url, media_type, minutes_status, amended_at "
+        "       media_url, media_type, minutes_status, amended_at, "
+        "       uploaded_packet_key, uploaded_packet_name "
         "FROM agendas WHERE id = %s",
         (agenda_id,),
     ).fetchone()
@@ -638,6 +641,9 @@ def _load_agenda(conn, agenda_id: int) -> dict | None:
         "media_type": row[12],
         "minutes_status": row[13],
         "amended_at": row[14].isoformat() if row[14] else None,
+        "has_uploaded_packet": bool(row[15]),
+        "uploaded_packet_key": row[15] or "",
+        "uploaded_packet_name": row[16] or "",
         "items": items,
         "activity_log": [
             {
@@ -3813,14 +3819,18 @@ def _build_packet_response(agenda: dict, prefs: dict, agenda_id: int, summary: b
             obj.close()
             obj.release_conn()
 
-    pdf_bytes = build_agenda_packet_pdf(
-        agenda,
-        fetch_doc,
-        include_item_cover_sheets=prefs["include_item_cover_sheets"],
-        include_page_numbers=prefs["include_page_numbers"],
-        preferences=prefs,
-        summary_only=summary,
-    )
+    uploaded_key = (agenda.get("uploaded_packet_key") or "").strip()
+    if not summary and uploaded_key:
+        pdf_bytes = fetch_doc(uploaded_key)
+    else:
+        pdf_bytes = build_agenda_packet_pdf(
+            agenda,
+            fetch_doc,
+            include_item_cover_sheets=prefs["include_item_cover_sheets"],
+            include_page_numbers=prefs["include_page_numbers"],
+            preferences=prefs,
+            summary_only=summary,
+        )
     safe_title = _SAFE_NAME_RE.sub("_", agenda["title"]).strip("._") or f"agenda_{agenda_id}"
     suffix = "_agenda_only" if summary else "_packet"
     disp = "attachment" if download else "inline"
@@ -3854,6 +3864,80 @@ def _build_minutes_response(agenda: dict, prefs: dict, agenda_id: int, download:
         media_type="application/pdf",
         headers={"Content-Disposition": f'{disp}; filename="{safe_title}_minutes.pdf"'},
     )
+
+
+@router.post("/{agenda_id}/packet-pdf")
+def upload_existing_agenda_packet_pdf(
+    agenda_id: int,
+    file: UploadFile = File(...),
+    user: dict = Depends(get_staff_user),
+):
+    """Upload a single pre-built agenda PDF to serve directly without assembling items."""
+    raw = file.file.read(100 * 1024 * 1024 + 1)
+    if not raw:
+        raise HTTPException(status_code=400, detail="Uploaded PDF is empty")
+    if len(raw) > 100 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Uploaded PDF exceeds 100 MB limit")
+    if not raw.lstrip().startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="Uploaded file must be a valid PDF")
+
+    orig_name = _SAFE_NAME_RE.sub("_", os.path.basename(file.filename or "agenda_packet.pdf")).strip("._") or "agenda_packet.pdf"
+    if not orig_name.lower().endswith(".pdf"):
+        orig_name = f"{orig_name}.pdf"
+
+    new_key = tenant_object_key(f"agendas/{agenda_id}/uploaded_packet_{uuid.uuid4().hex[:10]}.pdf")
+    _storage().put_object(_bucket(), new_key, io.BytesIO(raw), length=len(raw), content_type="application/pdf")
+
+    old_key = ""
+    with pool.connection() as conn:
+        row = conn.execute("SELECT uploaded_packet_key FROM agendas WHERE id = %s", (agenda_id,)).fetchone()
+        if not row:
+            try:
+                _storage().remove_object(_bucket(), new_key)
+            except Exception:
+                pass
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        old_key = row[0] or ""
+        conn.execute(
+            "UPDATE agendas SET uploaded_packet_key = %s, uploaded_packet_name = %s, updated_at = now() WHERE id = %s",
+            (new_key, orig_name, agenda_id),
+        )
+        _log_agenda_event(conn, agenda_id, "packet_uploaded", user["username"], f"Uploaded standalone agenda PDF '{orig_name}'")
+
+    if old_key and old_key != new_key:
+        try:
+            _storage().remove_object(_bucket(), old_key)
+        except Exception:
+            pass
+    record_audit(user["username"], "agenda.packet_uploaded", "agendas", agenda_id, f"Uploaded standalone agenda PDF '{orig_name}'")
+    return {"has_uploaded_packet": True, "uploaded_packet_name": orig_name}
+
+
+@router.delete("/{agenda_id}/packet-pdf")
+def clear_uploaded_agenda_packet_pdf(
+    agenda_id: int,
+    user: dict = Depends(get_staff_user),
+):
+    """Remove the standalone uploaded packet PDF and revert to assembled packet generation."""
+    with pool.connection() as conn:
+        row = conn.execute("SELECT uploaded_packet_key FROM agendas WHERE id = %s", (agenda_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Agenda not found")
+        old_key = row[0] or ""
+        conn.execute(
+            "UPDATE agendas SET uploaded_packet_key = '', uploaded_packet_name = '', updated_at = now() WHERE id = %s",
+            (agenda_id,),
+        )
+        if old_key:
+            _log_agenda_event(conn, agenda_id, "packet_reverted", user["username"], "Reverted to assembled agenda packet")
+
+    if old_key:
+        try:
+            _storage().remove_object(_bucket(), old_key)
+        except Exception:
+            pass
+    record_audit(user["username"], "agenda.packet_reverted", "agendas", agenda_id, "Reverted to assembled agenda packet")
+    return {"has_uploaded_packet": False, "uploaded_packet_name": ""}
 
 
 @router.get("/public/{agenda_id}/packet.pdf", dependencies=[Depends(require_public_card_enabled("agendas"))])
