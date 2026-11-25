@@ -193,7 +193,17 @@ export function DemoBanner({ demoMode }) {
         textAlign: 'center',
       }}
     >
-      <strong>Public Demo</strong> — resets every 2 hours. Do not enter real personal information.
+      <strong>Public Demo</strong> — resets every 2 hours. Do not enter real personal information.{' '}
+      <span style={{ opacity: 0.9 }}>·</span>{' '}
+      Want this for your city?{' '}
+      <a
+        href="https://www.dockethall.com/"
+        target="_blank"
+        rel="noreferrer"
+        style={{ color: '#fcd34d', fontWeight: 600, textDecoration: 'underline' }}
+      >
+        Managed hosting &amp; pricing at www.dockethall.com &rarr;
+      </a>
     </div>
   );
 }
