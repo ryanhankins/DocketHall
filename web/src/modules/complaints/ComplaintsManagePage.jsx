@@ -541,14 +541,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
         </select>
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: selected ? '1.15fr 1fr' : '1fr',
-          gap: 16,
-          alignItems: 'start',
-        }}
-      >
+      <div className={`complaints-split-layout${selected ? '' : ' single'}`}>
         <div className="card" style={{ overflowX: 'auto' }}>
           {loading ? (
             <p className="muted">Loading complaints...</p>
@@ -595,7 +588,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
         </div>
 
         {selected && editForm && (
-          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}>{selected.complaint_number}</h3>
               <button type="button" className="btn sm" onClick={() => setSelected(null)}>
@@ -633,7 +626,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
             </div>
 
             <form onSubmit={handleSaveCase} style={{ display: 'grid', gap: 10 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
                 <label>
                   <div className="muted" style={{ fontSize: 12 }}>Status</div>
                   <select
@@ -835,7 +828,7 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
                 }}
               >
                 <strong>Issue Notice of Violation</strong>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
                   <label>
                     <div className="muted" style={{ fontSize: 12 }}>Issuing Official *</div>
                     <input

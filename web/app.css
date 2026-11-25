@@ -452,6 +452,21 @@ dialog .dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; m
   .code-lib-reader { padding: 1rem; }
 }
 
+.complaints-split-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.complaints-split-layout.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (max-width: 900px) {
+  .complaints-split-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media print {
   header, footer, .code-lib-topbar, .code-lib-toc, .code-lib-no-print, .code-lib-anchor-btn, .code-lib-breadcrumbs {
     display: none !important;
