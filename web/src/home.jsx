@@ -3702,9 +3702,7 @@ const PUBLIC_I18N = {
 
 function PublicHomePage() {
   const params = useMemo(() => new URLSearchParams(location.search), []);
-  const [lang, setLang] = useState(() => {
-    try { return localStorage.getItem('dockethall.lang') || 'en'; } catch { return 'en'; }
-  });
+  const lang = 'en';
   const t = useCallback((key) => (PUBLIC_I18N[lang]?.[key]) || key, [lang]);
   const [branding, setBranding] = useState({ city_title: '', has_city_logo: false });
   const [enabledModules, setEnabledModules] = useState(null);
@@ -3915,22 +3913,6 @@ function PublicHomePage() {
         subtitle="DocketHall"
         logoHeight={52}
       >
-        <select
-          aria-label="Portal Language"
-          value={lang}
-          onChange={(e) => {
-            const next = e.target.value;
-            setLang(next);
-            try { localStorage.setItem('dockethall.lang', next); } catch { /* ignore */ }
-          }}
-          style={{ width: 'auto', fontSize: '.82rem', padding: '.25rem .45rem' }}
-        >
-          <option value="en">English</option>
-          <option value="es">Español</option>
-          <option value="fr">Français</option>
-          <option value="so">Soomaali</option>
-          <option value="hmn">Hmoob</option>
-        </select>
         {me ? (
           <>
             <span>{me.username} ({ROLE_LABELS[me.role] || me.role})</span>
