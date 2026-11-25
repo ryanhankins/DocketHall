@@ -106,7 +106,7 @@ function CustomFieldsEditor({ permitType, onSave }) {
           {fields.map((f, idx) => (
             <div key={`${f.key}-${idx}`} style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 4, padding: '4px 8px', fontSize: '.78rem' }}>
               {editIdx === idx && editDraft ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.3rem', alignItems: 'center' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '.3rem', alignItems: 'center' }}>
                   <input
                     placeholder="Section"
                     value={editDraft.section || ''}
@@ -195,7 +195,7 @@ function CustomFieldsEditor({ permitType, onSave }) {
           ))}
         </div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.3rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '.3rem' }}>
         <input
           placeholder="Section (e.g. G. City Code)"
           value={section}

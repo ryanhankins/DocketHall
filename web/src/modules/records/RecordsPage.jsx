@@ -635,14 +635,7 @@ export default function RecordsPage({ me }) {
         </label>
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: selected ? '1.3fr 1fr' : '1fr',
-          gap: 16,
-          alignItems: 'start',
-        }}
-      >
+      <div className={`split-detail-layout${selected ? '' : ' single'}`}>
         <div className="card" style={{ overflowX: 'auto' }}>
           {loading ? (
             <p className="muted">Loading repository records...</p>
@@ -720,7 +713,7 @@ export default function RecordsPage({ me }) {
             </div>
 
             <form onSubmit={handleSaveEdit} style={{ display: 'grid', gap: 10 }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8 }}>
                 <label>
                   <div className="muted" style={{ fontSize: 12 }}>Doc #</div>
                   <input

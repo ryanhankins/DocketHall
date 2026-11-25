@@ -452,17 +452,27 @@ dialog .dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; m
   .code-lib-reader { padding: 1rem; }
 }
 
+.split-detail-layout,
 .complaints-split-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
+.split-detail-layout.single,
 .complaints-split-layout.single {
   grid-template-columns: minmax(0, 1fr);
 }
+.help-split-layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
 @media (max-width: 900px) {
-  .complaints-split-layout {
+  .split-detail-layout,
+  .complaints-split-layout,
+  .help-split-layout {
     grid-template-columns: minmax(0, 1fr);
   }
 }

@@ -320,7 +320,7 @@ export default function IntegrationsPage() {
           }}
           style={{ display: 'grid', gap: '.9rem', maxWidth: 560 }}
         >
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', gap: '.75rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '.75rem' }}>
             <div className="field">
               <label htmlFor="em-host">SMTP Host</label>
               <input

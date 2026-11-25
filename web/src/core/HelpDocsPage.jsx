@@ -245,7 +245,7 @@ export default function HelpDocsPage({ me }) {
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(230px, 280px) minmax(0, 1fr)', gap: '1rem', alignItems: 'start' }}>
+      <div className="help-split-layout">
         <div className="card" style={{ marginBottom: 0 }}>
           <div className="field" style={{ marginBottom: '.65rem' }}>
             <input

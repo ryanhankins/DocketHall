@@ -81,14 +81,7 @@ export default function ComplaintLogPage() {
         </select>
       </div>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: selected ? '1.3fr 1fr' : '1fr',
-          gap: 16,
-          alignItems: 'start',
-        }}
-      >
+      <div className={`split-detail-layout${selected ? '' : ' single'}`}>
         <div className="card" style={{ overflowX: 'auto' }}>
           {loading ? (
             <p className="muted">Loading complaint log...</p>

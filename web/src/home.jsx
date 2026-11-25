@@ -2331,8 +2331,8 @@ function ComplaintsPublicTab({ me, onRequireAuth, features = {}, initialItemId =
               {COMPLAINT_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: selected ? '1.3fr 1fr' : '1fr', gap: 16, alignItems: 'start' }}>
-            <div>
+          <div className={`split-detail-layout${selected ? '' : ' single'}`}>
+            <div style={{ overflowX: 'auto' }}>
               {loading ? (
                 <p className="muted">Loading complaint log…</p>
               ) : !items.length ? (

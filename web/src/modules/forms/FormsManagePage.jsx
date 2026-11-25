@@ -212,7 +212,7 @@ export default function FormsManagePage() {
               </div>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.45rem', marginTop: '.45rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '.45rem', marginTop: '.45rem' }}>
               <input placeholder="Section (e.g. Application Details)" value={fSection} onChange={(e) => setFSection(e.target.value)} />
               <select value={fType} onChange={(e) => setFType(e.target.value)}>
                 <option value="text">Short Text</option>
