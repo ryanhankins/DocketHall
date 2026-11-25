@@ -1787,8 +1787,8 @@ function PermitsPublicTab({ me, onRequireAuth }) {
   );
 }
 
-function CodePublicTab({ branding = {} }) {
-  return <CodeLibraryViewer branding={branding} standalone={false} />;
+function CodePublicTab({ branding = {}, initialSection = '' }) {
+  return <CodeLibraryViewer branding={branding} standalone={false} initialSection={initialSection} />;
 }
 
 function RecordsPublicTab({ features = {} }) {
@@ -4157,7 +4157,7 @@ function PublicHomePage() {
               />
             )}
             {activeTab === 'permits' && <PermitsPublicTab me={me} onRequireAuth={openAuth} />}
-            {activeTab === 'codification' && <CodePublicTab branding={branding} />}
+            {activeTab === 'codification' && <CodePublicTab branding={branding} initialSection={activeItemSlug} />}
             {activeTab === 'records' && <RecordsPublicTab features={publicFeatures.records || {}} />}
             {activeTab === 'complaints' && (
               <ComplaintsPublicTab

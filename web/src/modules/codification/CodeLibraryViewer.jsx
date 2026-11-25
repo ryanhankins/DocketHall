@@ -194,7 +194,7 @@ function renderContinuousSection(sec, chapter, allSectionsMap, q, copiedKey, cop
   );
 }
 
-export default function CodeLibraryViewer({ branding = {}, standalone = false }) {
+export default function CodeLibraryViewer({ branding = {}, standalone = false, initialSection = '' }) {
   const [fullChapters, setFullChapters] = useState([]);
   const [searchResults, setSearchResults] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -277,31 +277,36 @@ export default function CodeLibraryViewer({ branding = {}, standalone = false })
         const list = Array.isArray(data?.chapters) ? data.chapters : [];
         setFullChapters(list);
 
-        if (standalone) {
-          const params = new URLSearchParams(window.location.search);
-          const secParam = (params.get('sec') || '').trim().toLowerCase();
-          const chParam = (params.get('ch') || '').trim().toLowerCase();
-          const hashAnchor = window.location.hash ? window.location.hash.replace(/^#/, '') : '';
+        const targetSec = (
+          (standalone ? new URLSearchParams(window.location.search).get('sec') : '') ||
+          initialSection ||
+          ''
+        ).trim().toLowerCase();
+        const hashAnchor = standalone && window.location.hash ? window.location.hash.replace(/^#/, '') : '';
 
-          if (secParam) {
-            for (const ch of list) {
-              const flat = flattenTreeSections(ch.sections || [], ch, []);
-              const found = flat.find(
-                (s) => String(s.section_number || '').trim().toLowerCase() === secParam || String(s.id) === secParam,
-              );
-              if (found) {
-                setViewMode('section');
-                setActiveChapterId(ch.id);
-                setActiveSectionId(found.id);
-                setExpandedChapters((prev) => ({ ...prev, [ch.id]: true }));
-                const expandMap = { [found.id]: true };
-                for (const anc of found.ancestors || []) expandMap[anc.id] = true;
-                setExpandedSections((prev) => ({ ...prev, ...expandMap }));
-                if (hashAnchor) scrollToAnchor(hashAnchor);
-                return;
-              }
+        if (targetSec) {
+          for (const ch of list) {
+            const flat = flattenTreeSections(ch.sections || [], ch, []);
+            const found = flat.find(
+              (s) => String(s.section_number || '').trim().toLowerCase() === targetSec || String(s.id) === targetSec,
+            );
+            if (found) {
+              setViewMode('section');
+              setActiveChapterId(ch.id);
+              setActiveSectionId(found.id);
+              setExpandedChapters((prev) => ({ ...prev, [ch.id]: true }));
+              const expandMap = { [found.id]: true };
+              for (const anc of found.ancestors || []) expandMap[anc.id] = true;
+              setExpandedSections((prev) => ({ ...prev, ...expandMap }));
+              if (hashAnchor) scrollToAnchor(hashAnchor);
+              return;
             }
           }
+        }
+
+        if (standalone) {
+          const params = new URLSearchParams(window.location.search);
+          const chParam = (params.get('ch') || '').trim().toLowerCase();
           if (chParam) {
             const foundCh = list.find(
               (c) => String(c.code_prefix || '').trim().toLowerCase() === chParam || String(c.id) === chParam,

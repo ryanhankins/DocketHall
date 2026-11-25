@@ -193,6 +193,7 @@ def global_public_search(q: str = ""):
                     "title": f"§ {r[0]} — {r[1]}",
                     "subtitle": "Municipal Code Section",
                     "tab": "codification",
+                    "slug": str(r[0]),
                 })
 
         if "records" in enabled:
