@@ -54,7 +54,7 @@ export default function PermitApplyPage({ initialTypeId = null, initialUseId = n
   const showToast = useToast();
 
   useEffect(() => {
-    api('/api/permits/public/catalog')
+    api('/api/permits/catalog')
       .then((data) => {
         setCatalog(data);
         const types = data.types || [];

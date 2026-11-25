@@ -1501,7 +1501,13 @@ def _check_permit_access(permit: dict, user: dict) -> None:
     raise HTTPException(status_code=403, detail="Access denied")
 
 
-# ------------------------------------------------------------------ public catalog
+# ------------------------------------------------------------------ catalog
+@router.get("/catalog")
+def get_authenticated_catalog(_: dict = Depends(require_permission("permits.submit", "permits.manage"))):
+    with pool.connection() as conn:
+        return _load_catalog(conn, active_only=True)
+
+
 @router.get("/public/catalog", dependencies=[Depends(require_public_card_enabled("permits"))])
 def get_public_catalog():
     with pool.connection() as conn:
