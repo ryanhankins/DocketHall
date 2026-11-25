@@ -540,6 +540,13 @@ function ItemCard({
             </summary>
             <AdoptToCodeForm agenda={agenda} item={item} onCodified={onAgendaUpdated} />
           </details>
+
+          <details style={{ marginTop: '.4rem' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '.85rem', color: '#1e40af', fontWeight: 600 }}>
+              Archive to Public Records &amp; Contracts
+            </summary>
+            <ArchiveToRecordsForm agenda={agenda} item={item} onArchived={onAgendaUpdated} />
+          </details>
         </>
       )}
     </div>
@@ -822,6 +829,100 @@ function AdoptToCodeForm({ agenda, item, onCodified }) {
         <textarea rows={4} value={body} onChange={(e) => setBody(e.target.value)} />
       </div>
       <button type="submit" className="btn sm primary">Adopt &amp; Tag City Code</button>
+      {statusMsg && <div className="ok-msg" style={{ marginTop: '.4rem' }}>{statusMsg}</div>}
+      {err && <div className="error-msg" style={{ marginTop: '.4rem' }}>{err}</div>}
+    </form>
+  );
+}
+
+function ArchiveToRecordsForm({ agenda, item, onArchived }) {
+  const [category, setCategory] = useState('Resolution');
+  const [docNumber, setDocNumber] = useState(item.ordinance_number || '');
+  const [title, setTitle] = useState(item.title || '');
+  const [counterparty, setCounterparty] = useState('');
+  const [effectiveDate, setEffectiveDate] = useState(agenda.meeting_date || '');
+  const [expirationDate, setExpirationDate] = useState('');
+  const [isPublic, setIsPublic] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [statusMsg, setStatusMsg] = useState('');
+  const [err, setErr] = useState('');
+
+  return (
+    <form
+      style={{ marginTop: '.5rem', padding: '.6rem', background: '#eff6ff', borderRadius: 6, border: '1px solid #bfdbfe' }}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setErr('');
+        setStatusMsg('');
+        setBusy(true);
+        try {
+          const res = await api(`/api/agendas/${agenda.id}/items/${item.id}/archive-to-records`, {
+            method: 'POST',
+            body: JSON.stringify({
+              category,
+              doc_number: docNumber.trim(),
+              title: title.trim(),
+              counterparty: counterparty.trim(),
+              effective_date: effectiveDate.trim(),
+              expiration_date: expirationDate.trim(),
+              is_public: isPublic,
+            }),
+          });
+          setStatusMsg(`Archived "${res.title}" to Public Records (${res.category}, ${res.copied_files} attached file(s) copied).`);
+          onArchived(await api(`/api/agendas/${agenda.id}`));
+        } catch (error) {
+          setErr(error.message);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <div className="row" style={{ gap: '.5rem', marginBottom: '.5rem' }}>
+        <div className="field" style={{ flex: 1 }}>
+          <label>Record Category</label>
+          <select value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="Resolution">Resolution</option>
+            <option value="Contract">Contract</option>
+            <option value="Agreement">Agreement</option>
+            <option value="Ordinance">Ordinance</option>
+            <option value="Policy">Policy</option>
+            <option value="Financial">Financial</option>
+            <option value="Deed / Easement">Deed / Easement</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label>Document Number</label>
+          <input placeholder="e.g. RES-2026-09 or CTR-2026-04" value={docNumber} onChange={(e) => setDocNumber(e.target.value)} />
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label>Counterparty / Vendor (optional)</label>
+          <input placeholder="e.g. Heartland Electric" value={counterparty} onChange={(e) => setCounterparty(e.target.value)} />
+        </div>
+      </div>
+      <div className="row" style={{ gap: '.5rem', marginBottom: '.5rem' }}>
+        <div className="field" style={{ flex: 2 }}>
+          <label>Record Title</label>
+          <input required value={title} onChange={(e) => setTitle(e.target.value)} />
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label>Effective Date</label>
+          <input type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
+        </div>
+        <div className="field" style={{ flex: 1 }}>
+          <label>Expiration Date (optional)</label>
+          <input type="date" value={expirationDate} onChange={(e) => setExpirationDate(e.target.value)} />
+        </div>
+      </div>
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: '.5rem' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem', fontSize: '.85rem', cursor: 'pointer' }}>
+          <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} style={{ width: 'auto' }} />
+          <span>Publish to Public Records portal</span>
+        </label>
+        <button type="submit" className="btn sm primary" disabled={busy}>
+          {busy ? 'Archiving…' : 'Archive to Public Records'}
+        </button>
+      </div>
       {statusMsg && <div className="ok-msg" style={{ marginTop: '.4rem' }}>{statusMsg}</div>}
       {err && <div className="error-msg" style={{ marginTop: '.4rem' }}>{err}</div>}
     </form>

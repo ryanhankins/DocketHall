@@ -3627,6 +3627,109 @@ def adopt_ordinance_to_code(
         }
 
 
+class ArchiveToRecordsIn(BaseModel):
+    doc_number: str = ""
+    category: str = "Resolution"
+    title: str = ""
+    counterparty: str = ""
+    effective_date: str = ""
+    expiration_date: str = ""
+    is_public: bool = True
+    notes: str = ""
+
+
+@router.post("/{agenda_id}/items/{item_id}/archive-to-records", status_code=201)
+def archive_agenda_item_to_records(
+    agenda_id: int,
+    item_id: int,
+    body: ArchiveToRecordsIn,
+    user: dict = Depends(get_staff_user),
+):
+    """Archive an agenda item (contract, resolution, etc.) and its attached files into Public Records."""
+    from .registry import is_module_enabled
+    if not is_module_enabled("records"):
+        raise HTTPException(status_code=404, detail='Module "records" is disabled')
+
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT i.title, i.description, i.ordinance_number, a.meeting_date "
+            "FROM agenda_items i JOIN agendas a ON a.id = i.agenda_id "
+            "WHERE i.id = %s AND i.agenda_id = %s",
+            (item_id, agenda_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Agenda item not found")
+
+        item_title, item_desc, item_ord_num, meeting_date = row
+        rec_title = body.title.strip() or item_title
+        rec_cat = body.category.strip() or "Resolution"
+        rec_doc_num = body.doc_number.strip() or (item_ord_num or "").strip()
+        eff_date = body.effective_date.strip() or (meeting_date.isoformat() if meeting_date else "")
+        notes = body.notes.strip() or (item_desc or "").strip()
+
+        rec = conn.execute(
+            "INSERT INTO repository_documents "
+            "(doc_number, category, title, counterparty, effective_date, expiration_date, "
+            " status, notes, is_public, created_by) "
+            "VALUES (%s, %s, %s, %s, %s, %s, 'active', %s, %s, %s) RETURNING id",
+            (
+                rec_doc_num,
+                rec_cat,
+                rec_title,
+                body.counterparty.strip(),
+                eff_date,
+                body.expiration_date.strip(),
+                notes,
+                body.is_public,
+                user["username"],
+            ),
+        ).fetchone()
+        rec_id = rec[0]
+
+        doc_rows = conn.execute(
+            "SELECT id, title, filename, content_type, size_bytes, sha256, object_key "
+            "FROM agenda_documents WHERE agenda_item_id = %s ORDER BY position, id",
+            (item_id,),
+        ).fetchall()
+
+        copied = 0
+        for _, d_title, fname, ctype, sz, sha, src_key in doc_rows:
+            obj = _storage().get_object(_bucket(), src_key)
+            try:
+                raw = obj.read()
+            finally:
+                obj.close()
+                obj.release_conn()
+            safe_name = _SAFE_NAME_RE.sub("_", fname or "document").strip("._") or "document"
+            dest_key = tenant_object_key(f"records/{rec_id}/{uuid.uuid4().hex[:12]}_{safe_name}")
+            _storage().put_object(_bucket(), dest_key, io.BytesIO(raw), length=len(raw), content_type=ctype or "application/octet-stream")
+            conn.execute(
+                "INSERT INTO repository_files "
+                "(document_id, title, filename, content_type, size_bytes, sha256, object_key, uploaded_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                (rec_id, d_title or fname, fname, ctype or "application/octet-stream", len(raw), sha or hashlib.sha256(raw).hexdigest(), dest_key, user["username"]),
+            )
+            copied += 1
+
+        _log_agenda_event(
+            conn,
+            agenda_id,
+            "item_archived_to_records",
+            user["username"],
+            f"Archived '{rec_title}' to Public Records ({rec_cat}, {copied} file(s))",
+        )
+        _touch_agenda(conn, agenda_id)
+
+    record_audit(user["username"], "agenda.archived_to_records", "agendas", agenda_id, f"Archived item #{item_id} to record #{rec_id} ({copied} files)")
+    return {
+        "record_id": rec_id,
+        "doc_number": rec_doc_num,
+        "category": rec_cat,
+        "title": rec_title,
+        "copied_files": copied,
+    }
+
+
 @router.patch("/{agenda_id}/items/{item_id}/documents/{doc_id}")
 def update_document(
     agenda_id: int,

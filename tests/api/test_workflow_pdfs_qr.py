@@ -182,3 +182,47 @@ def test_uploaded_standalone_agenda_packet_pdf(admin_client, anon_client):
     assembled = admin_client.get(f"/api/agendas/{aid}/packet.pdf")
     assert assembled.status_code == 200
     assert assembled.content != sample_pdf
+
+
+def test_archive_agenda_item_to_records(admin_client, anon_client):
+    """Archiving an agenda item copies the record and its attached PDFs into Public Records."""
+    ag = admin_client.post(
+        "/api/agendas",
+        json={"title": "Contract Approval Meeting", "body": "City Council", "meeting_date": "2026-08-15"},
+    )
+    assert ag.status_code == 201
+    aid = ag.json()["id"]
+
+    it = admin_client.post(
+        f"/api/agendas/{aid}/items",
+        json={"title": "Approve Paving Contract", "section": "New Business", "description": "2026 street paving."},
+    )
+    assert it.status_code == 201
+    iid = it.json()["items"][0]["id"]
+
+    sample_pdf = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
+    doc = admin_client.post(
+        f"/api/agendas/{aid}/items/{iid}/documents",
+        files={"file": ("paving_contract.pdf", sample_pdf, "application/pdf")},
+        data={"title": "Signed Paving Contract"},
+    )
+    assert doc.status_code == 201
+
+    arch = admin_client.post(
+        f"/api/agendas/{aid}/items/{iid}/archive-to-records",
+        json={"category": "Contract", "doc_number": "CTR-2026-99", "counterparty": "Midwest Paving", "is_public": True},
+    )
+    assert arch.status_code == 201
+    data = arch.json()
+    assert data["copied_files"] == 1
+    assert data["category"] == "Contract"
+
+    pub_recs = anon_client.get("/api/records/public").json()
+    matched = [r for r in pub_recs if r["id"] == data["record_id"]]
+    assert len(matched) == 1
+    assert matched[0]["doc_number"] == "CTR-2026-99"
+    assert len(matched[0]["files"]) == 1
+    fid = matched[0]["files"][0]["id"]
+    dl = anon_client.get(f"/api/records/public/files/{fid}/download")
+    assert dl.status_code == 200
+    assert dl.content == sample_pdf
