@@ -51,7 +51,7 @@ header {
 }
 .brand { font-weight: 700; font-size: 1.1rem; }
 .user-bar { display: flex; align-items: center; gap: .75rem; font-size: .9rem; color: var(--cd-header-muted); }
-.mobile-menu-toggle { display: none; }
+button.btn.mobile-menu-toggle, .mobile-menu-toggle { display: none; }
 .shell { display: flex; flex: 1; min-height: 0; }
 nav {
   width: 252px; flex-shrink: 0; background: var(--cd-surface); border-right: 1px solid var(--cd-border); padding: .85rem .7rem;
@@ -235,7 +235,7 @@ dialog .dialog-actions { display: flex; justify-content: flex-end; gap: .5rem; m
   .brand { max-width: 100%; flex-wrap: wrap; }
   #brand-logo { max-height: 40px; }
   .user-bar { width: 100%; flex-wrap: wrap; gap: .45rem; }
-  .mobile-menu-toggle { display: inline-flex; align-items: center; gap: .3rem; }
+  button.btn.mobile-menu-toggle, .mobile-menu-toggle { display: inline-flex; align-items: center; gap: .3rem; }
   .shell { flex-direction: column; }
   nav {
     display: none; width: 100%; border-right: 0; border-bottom: 1px solid var(--cd-border);
