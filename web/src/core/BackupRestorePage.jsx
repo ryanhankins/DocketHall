@@ -16,7 +16,7 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { api, downloadBackupArchive } from './api.js';
+import { api, downloadBackupArchive, downloadOffsiteSnapshot } from './api.js';
 import { useToast } from './toast.jsx';
 
 export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner, onRestored }) {
@@ -45,6 +45,7 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
   const [snapshots, setSnapshots] = useState([]);
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [runningOffsite, setRunningOffsite] = useState(false);
+  const [downloadingKey, setDownloadingKey] = useState('');
   const [runningRetention, setRunningRetention] = useState(false);
   const [readiness, setReadiness] = useState(null);
   const [readinessErr, setReadinessErr] = useState('');
@@ -409,7 +410,7 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
             <h3 style={{ fontSize: '.95rem', marginBottom: '.4rem' }}>Recent Offsite Snapshots ({snapshots.length})</h3>
             <table>
               <thead>
-                <tr><th>Object Key</th><th>Size</th><th>Timestamp</th></tr>
+                <tr><th>Object Key</th><th>Size</th><th>Timestamp</th><th>Action</th></tr>
               </thead>
               <tbody>
                 {snapshots.map((s) => (
@@ -417,6 +418,25 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
                     <td><code>{s.object_key}</code></td>
                     <td>{((s.size_bytes || 0) / 1024).toFixed(1)} KB</td>
                     <td>{s.last_modified || '—'}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn sm"
+                        disabled={downloadingKey === s.object_key}
+                        onClick={async () => {
+                          setDownloadingKey(s.object_key);
+                          try {
+                            await downloadOffsiteSnapshot(s.object_key, showToast);
+                          } catch (err) {
+                            showToast(err.message || 'Download failed', 'error');
+                          } finally {
+                            setDownloadingKey('');
+                          }
+                        }}
+                      >
+                        {downloadingKey === s.object_key ? 'Downloading…' : 'Download'}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

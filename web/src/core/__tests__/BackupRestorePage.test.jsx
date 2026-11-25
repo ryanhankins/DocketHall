@@ -5,10 +5,12 @@ import BackupRestorePage from '../BackupRestorePage.jsx';
 
 const mockApi = vi.fn();
 const mockShowToast = vi.fn();
+const mockDownloadOffsiteSnapshot = vi.fn();
 
 vi.mock('../api.js', () => ({
   api: (...args) => mockApi(...args),
   downloadBackupArchive: vi.fn(),
+  downloadOffsiteSnapshot: (...args) => mockDownloadOffsiteSnapshot(...args),
 }));
 
 vi.mock('../toast.jsx', () => ({
@@ -19,6 +21,7 @@ describe('BackupRestorePage', () => {
   beforeEach(() => {
     mockApi.mockReset();
     mockShowToast.mockReset();
+    mockDownloadOffsiteSnapshot.mockReset();
   });
 
   it('loads City Launch Readiness Checklist cleanly on Launch & Demo Setup tab', async () => {
@@ -62,6 +65,40 @@ describe('BackupRestorePage', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Database timeout/i)).toBeInTheDocument();
+    });
+  });
+
+  it('renders a Download button for each offsite snapshot', async () => {
+    mockDownloadOffsiteSnapshot.mockResolvedValueOnce();
+    mockApi.mockImplementation(async (path) => {
+      if (path === '/api/backup/policy') {
+        return {
+          policy: { enabled: true, s3_prefix: 'backups/' },
+          snapshots: [
+            {
+              object_key: 'backups/default/dockethall_backup_20261120_215018.zip',
+              size_bytes: 2048,
+              last_modified: '2026-11-20T21:50:18+00:00',
+            },
+          ],
+        };
+      }
+      return {};
+    });
+
+    render(<BackupRestorePage reminderDays={0} onRefreshBackupBanner={vi.fn()} onRestored={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Scheduled Offsite (S3)' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('backups/default/dockethall_backup_20261120_215018.zip')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    await waitFor(() => {
+      expect(mockDownloadOffsiteSnapshot).toHaveBeenCalledWith(
+        'backups/default/dockethall_backup_20261120_215018.zip',
+        mockShowToast,
+      );
     });
   });
 });

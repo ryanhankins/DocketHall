@@ -93,19 +93,18 @@ export function categoryBadgeClass(catName, configuredCategories = []) {
     : 'badge draft';
 }
 
-export async function downloadBackupArchive(onAfter, showToast) {
-  const res = await fetch('/api/backup/export', { credentials: 'same-origin' });
+async function _downloadZipResponse(res, fallbackFilename, errorPrefix) {
   if (res.status === 401) {
     location.replace('/');
-    return;
+    return false;
   }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Backup export failed (${res.status})`);
+    throw new Error(err.detail || `${errorPrefix} (${res.status})`);
   }
   const cd = res.headers.get('Content-Disposition') || '';
   const m = cd.match(/filename="?([^"]+)"?/i);
-  const filename = m ? m[1] : 'civicdesk_backup.zip';
+  const filename = m ? m[1] : fallbackFilename;
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -115,6 +114,23 @@ export async function downloadBackupArchive(onAfter, showToast) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+  return true;
+}
+
+export async function downloadBackupArchive(onAfter, showToast) {
+  const res = await fetch('/api/backup/export', { credentials: 'same-origin' });
+  const downloaded = await _downloadZipResponse(res, 'civicdesk_backup.zip', 'Backup export failed');
+  if (!downloaded) return;
   if (onAfter) await onAfter();
   if (showToast) showToast('Backup archive downloaded', 'ok');
+}
+
+export async function downloadOffsiteSnapshot(objectKey, showToast) {
+  const res = await fetch(`/api/backup/snapshots/download?key=${encodeURIComponent(objectKey)}`, {
+    credentials: 'same-origin',
+  });
+  const fallback = String(objectKey || '').split('/').pop() || 'dockethall_backup.zip';
+  const downloaded = await _downloadZipResponse(res, fallback, 'Snapshot download failed');
+  if (!downloaded) return;
+  if (showToast) showToast('Snapshot downloaded', 'ok');
 }

@@ -24,8 +24,8 @@ import tempfile
 import zipfile
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from psycopg.types.json import Jsonb
 from starlette.background import BackgroundTask
@@ -662,6 +662,46 @@ def get_backup_policy(_: dict = Depends(require_permission("settings.manage"))):
     except Exception:
         pass
     return {"policy": cfg, "snapshots": snapshots}
+
+
+@router.get("/snapshots/download")
+def download_offsite_snapshot(
+    key: str = Query(..., min_length=1),
+    user: dict = Depends(require_permission("settings.manage")),
+):
+    """Download an offsite backup snapshot .zip by object key."""
+    with pool.connection() as conn:
+        cfg, secret = _load_backup_policy(conn)
+    client, bucket, full_prefix = _get_offsite_s3_client(cfg, secret)
+    clean_key = key.strip().lstrip("/")
+    if (
+        not clean_key.startswith(full_prefix)
+        or ".." in clean_key.split("/")
+        or not clean_key.lower().endswith(".zip")
+    ):
+        raise HTTPException(status_code=400, detail="Invalid snapshot key")
+    try:
+        obj = client.get_object(bucket, clean_key)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    filename = _SLUG_RE.sub("_", os.path.basename(clean_key)) or "dockethall_backup.zip"
+    record_audit(user["username"], "backup.download_snapshot", f"Downloaded {clean_key}")
+
+    def _iter_chunks():
+        try:
+            yield from obj.stream(64 * 1024)
+        finally:
+            obj.close()
+            obj.release_conn()
+
+    return StreamingResponse(
+        _iter_chunks(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.put("/policy")
