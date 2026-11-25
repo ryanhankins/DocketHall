@@ -283,6 +283,7 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
             </select>
           </div>
         </div>
+        <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
         <table>
           <thead>
             <tr>
@@ -444,6 +445,7 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
             })}
           </tbody>
         </table>
+        </div>
       </div>
       )}
 
