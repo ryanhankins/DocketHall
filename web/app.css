@@ -82,6 +82,7 @@ h1 { margin: 0 0 1.25rem; font-size: 1.35rem; }
 .card {
   background: var(--cd-surface); border: 1px solid var(--cd-border); border-radius: 8px;
   padding: 1.15rem 1.25rem; margin-bottom: 1.25rem; overflow-wrap: anywhere;
+  overflow-x: auto; max-width: 100%;
 }
 .card.service-tile {
   border: 2px solid var(--cd-secondary);
