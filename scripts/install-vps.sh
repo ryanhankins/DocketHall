@@ -53,10 +53,28 @@ fi
 export S3_REPLICAS
 export CIVICDESK_PORT="${CIVICDESK_PORT:-8080}"
 
-echo "==> Installing system packages (Docker, Caddy, restic, unattended-upgrades, git)"
+echo "==> Installing system packages (Docker, Caddy, restic, unattended-upgrades, fail2ban, git)"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl git gnupg restic unattended-upgrades >/dev/null
+apt-get install -y -qq ca-certificates curl git gnupg restic unattended-upgrades fail2ban >/dev/null
+systemctl enable --now fail2ban || true
+
+if [ ! -f /swapfile ] && [ -z "$(swapon --show --noheadings)" ]; then
+  fallocate -l 2G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
+if grep -qE '^ssh-' /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys 2>/dev/null; then
+  mkdir -p /etc/ssh/sshd_config.d
+  cat >/etc/ssh/sshd_config.d/99-dockethall.conf <<'SSH'
+PermitRootLogin prohibit-password
+PasswordAuthentication no
+SSH
+  systemctl reload ssh || systemctl reload sshd || true
+fi
 
 if [ ! -f /etc/docker/daemon.json ]; then
   mkdir -p /etc/docker
@@ -88,6 +106,7 @@ if command -v ufw >/dev/null 2>&1; then
   ufw allow 22/tcp >/dev/null 2>&1 || true
   ufw allow 80/tcp >/dev/null 2>&1 || true
   ufw allow 443/tcp >/dev/null 2>&1 || true
+  ufw --force enable >/dev/null 2>&1 || true
 fi
 
 echo "==> Syncing CivicDesk repository to ${INSTALL_DIR}"
