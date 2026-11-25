@@ -354,6 +354,9 @@ def _build_backup_zip(include_users: bool, exported_by: str) -> str:
             # 4. Binary files from object storage (documents + logo)
             object_keys: list[str] = [d["object_key"] for d in table_data.get("agenda_documents", []) if d.get("object_key")]
             object_keys.extend(
+                ag["uploaded_packet_key"] for ag in table_data.get("agendas", []) if ag.get("uploaded_packet_key")
+            )
+            object_keys.extend(
                 sd["object_key"] for sd in table_data.get("council_submission_documents", []) if sd.get("object_key")
             )
             object_keys.extend(
