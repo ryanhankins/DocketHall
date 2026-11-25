@@ -53,10 +53,23 @@ fi
 export S3_REPLICAS
 export CIVICDESK_PORT="${CIVICDESK_PORT:-8080}"
 
-echo "==> Installing system packages (Docker, Caddy, restic, git)"
+echo "==> Installing system packages (Docker, Caddy, restic, unattended-upgrades, git)"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq ca-certificates curl git gnupg restic >/dev/null
+apt-get install -y -qq ca-certificates curl git gnupg restic unattended-upgrades >/dev/null
+
+if [ ! -f /etc/docker/daemon.json ]; then
+  mkdir -p /etc/docker
+  cat >/etc/docker/daemon.json <<'JSON'
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  }
+}
+JSON
+fi
 
 if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sh
@@ -160,6 +173,61 @@ EOF
 
 systemctl daemon-reload
 systemctl enable --now civicdesk-upgrade.path
+
+cat >/etc/apt/apt.conf.d/20auto-upgrades <<'APT'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+APT
+cat >/etc/apt/apt.conf.d/51dockethall-unattended <<'APT'
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "03:30";
+APT
+
+mkdir -p /etc/systemd/journald.conf.d
+cat >/etc/systemd/journald.conf.d/99-dockethall.conf <<'JRN'
+[Journal]
+SystemMaxUse=200M
+JRN
+systemctl restart systemd-journald || true
+
+cat >/usr/local/sbin/dockethall-weekly-maintenance.sh <<'MAINT'
+#!/usr/bin/env bash
+set -euo pipefail
+for img in postgres:16-alpine chrislusf/seaweedfs:latest python:3.12-slim nginx:1.27-alpine; do
+  docker pull -q "$img" || true
+done
+docker image prune -af --filter "until=168h" || true
+MAINT
+chmod +x /usr/local/sbin/dockethall-weekly-maintenance.sh
+
+cat >/etc/systemd/system/dockethall-maintenance.service <<'UNIT'
+[Unit]
+Description=DocketHall weekly Docker image & cleanup maintenance
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dockethall-weekly-maintenance.sh
+UNIT
+
+cat >/etc/systemd/system/dockethall-maintenance.timer <<'UNIT'
+[Unit]
+Description=Run DocketHall weekly maintenance every Sunday at 03:00
+
+[Timer]
+OnCalendar=Sun *-*-* 03:00:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now dockethall-maintenance.timer
 
 cat >/etc/civicdesk/backup.env <<EOF
 STACK_NAME=${STACK_NAME:-civicdesk}
