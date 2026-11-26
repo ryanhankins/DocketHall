@@ -3113,7 +3113,7 @@ class AiPendingActionIn(BaseModel):
 
 
 class AiConfirmIn(BaseModel):
-    pending_actions: list[AiPendingActionIn] = Field(..., min_length=1, max_length=10)
+    pending_actions: list[AiPendingActionIn] = Field(..., min_length=1, max_length=50)
 
 
 def _execute_confirmed_actions(pending: list[AiPendingActionIn], user: dict) -> dict:
