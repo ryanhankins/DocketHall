@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, categoryBadgeClass, toTimeInputValue } from '../../core/api.js';
 import { InlineEditable } from '../../core/InlineEditable.jsx';
 import PdfComplianceButton from '../../core/PdfComplianceButton.jsx';
@@ -133,6 +133,26 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
   const [editMediaType, setEditMediaType] = useState('');
   const [saveMsg, setSaveMsg] = useState({ text: '', isError: false });
   const [importOpen, setImportOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreMenuRef = useRef(null);
+
+  useEffect(() => {
+    if (!moreOpen) return undefined;
+    const onDocClick = (e) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target)) {
+        setMoreOpen(false);
+      }
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') setMoreOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [moreOpen]);
   const showToast = useToast();
 
   const applyAgendaState = useCallback((ag, defTime = defaultMeetingTime) => {
@@ -268,82 +288,133 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
             <option value="">(No Category)</option>
             {catNames.map(cn => <option key={cn} value={cn}>{cn}</option>)}
           </select>
-          <button
-            type="button"
-            className="btn"
-            onClick={async () => {
-              const cloned = await api(`/api/agendas/${agenda.id}/clone`, { method: 'POST' });
-              onNavigate(`#agendas/${cloned.id}`);
-            }}
-          >
-            Clone
-          </button>
-          <button
-            type="button"
-            className="btn"
-            onClick={async () => {
-              const name = prompt('Template name:', `${agenda.body || 'Meeting'} Template`);
-              if (!name || !name.trim()) return;
-              await api(`/api/agendas/${agenda.id}/save-template`, {
-                method: 'POST', body: JSON.stringify({ name: name.trim() }),
-              });
-              setSaveMsg({ text: 'Template saved.', isError: false });
-            }}
-          >
-            Save as Template
-          </button>
-          <a className="btn" href={`/api/agendas/${agenda.id}/packet.pdf?summary=1`} target="_blank" rel="noreferrer">View Summary PDF</a>
-          <PdfComplianceButton url={`/api/agendas/${agenda.id}/packet.pdf/compliance?summary=1`} title="Summary PDF" label="Check Summary" className="btn" />
-          <a className="btn primary" href={`/api/agendas/${agenda.id}/packet.pdf`} target="_blank" rel="noreferrer">View Packet PDF</a>
-          <PdfComplianceButton url={`/api/agendas/${agenda.id}/packet.pdf/compliance`} title="Packet PDF" label="Check Packet" className="btn" />
-          <a className="btn" href={`/api/agendas/${agenda.id}/packet.pdf?download=1`} target="_blank" rel="noreferrer">Download PDF</a>
-          <label className="btn" style={{ cursor: 'pointer', margin: 0 }}>
-            {agenda.has_uploaded_packet ? 'Replace Uploaded PDF' : 'Upload Existing PDF'}
-            <input
-              type="file"
-              accept=".pdf,application/pdf"
-              style={{ display: 'none' }}
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                e.target.value = '';
-                if (!file) return;
-                const fd = new FormData();
-                fd.append('file', file);
-                try {
-                  const res = await fetch(`/api/agendas/${agenda.id}/packet-pdf`, {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    body: fd,
-                  });
-                  if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err.detail || 'Upload failed');
-                  }
-                  setSaveMsg({ text: `Uploaded standalone agenda PDF (${file.name}).`, isError: false });
-                  await loadAll();
-                } catch (err) {
-                  setSaveMsg({ text: err.message || 'Upload failed', isError: true });
-                }
-              }}
-            />
-          </label>
-          {agenda.has_uploaded_packet && (
+          {activeTab === 'minutes' ? (
+            <a className="btn primary" href={`/api/agendas/${agenda.id}/minutes.pdf`} target="_blank" rel="noreferrer">View Minutes PDF</a>
+          ) : (
+            <a className="btn primary" href={`/api/agendas/${agenda.id}/packet.pdf`} target="_blank" rel="noreferrer">View Packet PDF</a>
+          )}
+          <div ref={moreMenuRef} style={{ position: 'relative' }}>
             <button
               type="button"
-              className="btn danger"
-              onClick={async () => {
-                if (!confirm('Remove the uploaded PDF and revert to assembled packet generation?')) return;
-                await api(`/api/agendas/${agenda.id}/packet-pdf`, { method: 'DELETE' });
-                setSaveMsg({ text: 'Reverted to assembled agenda packet.', isError: false });
-                await loadAll();
-              }}
+              className="btn"
+              aria-expanded={moreOpen}
+              aria-haspopup="menu"
+              onClick={() => setMoreOpen(v => !v)}
             >
-              Revert to Assembled ({agenda.uploaded_packet_name || 'PDF'})
+              More Actions ▾
             </button>
-          )}
-          <a className="btn" href={`/api/agendas/${agenda.id}/minutes.pdf`} target="_blank" rel="noreferrer">Minutes PDF</a>
-          <PdfComplianceButton url={`/api/agendas/${agenda.id}/minutes.pdf/compliance`} title="Minutes PDF" label="Check Minutes" className="btn" />
-          <a className="btn" href={`/api/agendas/${agenda.id}/minutes.pdf?download=1`} target="_blank" rel="noreferrer">Download Minutes</a>
+            {moreOpen && (
+              <div
+                role="menu"
+                style={{
+                  position: 'absolute',
+                  right: 0,
+                  top: 'calc(100% + 4px)',
+                  minWidth: '230px',
+                  background: '#fff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: '8px',
+                  boxShadow: '0 10px 25px rgba(15, 23, 42, 0.14)',
+                  padding: '.35rem',
+                  zIndex: 40,
+                  display: 'grid',
+                  gap: '.2rem',
+                }}
+              >
+                <div style={{ fontSize: '.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: '#64748b', padding: '.25rem .45rem .1rem' }}>
+                  PDFs &amp; Accessibility
+                </div>
+                <a className="btn sm" style={{ justifyContent: 'flex-start', textAlign: 'left' }} href={`/api/agendas/${agenda.id}/packet.pdf?summary=1`} target="_blank" rel="noreferrer" onClick={() => setMoreOpen(false)}>View Summary PDF</a>
+                <a className="btn sm" style={{ justifyContent: 'flex-start', textAlign: 'left' }} href={`/api/agendas/${agenda.id}/packet.pdf?download=1`} target="_blank" rel="noreferrer" onClick={() => setMoreOpen(false)}>Download Packet PDF</a>
+                {activeTab !== 'minutes' && (
+                  <a className="btn sm" style={{ justifyContent: 'flex-start', textAlign: 'left' }} href={`/api/agendas/${agenda.id}/minutes.pdf`} target="_blank" rel="noreferrer" onClick={() => setMoreOpen(false)}>View Minutes PDF</a>
+                )}
+                <a className="btn sm" style={{ justifyContent: 'flex-start', textAlign: 'left' }} href={`/api/agendas/${agenda.id}/minutes.pdf?download=1`} target="_blank" rel="noreferrer" onClick={() => setMoreOpen(false)}>Download Minutes PDF</a>
+                <PdfComplianceButton url={`/api/agendas/${agenda.id}/packet.pdf/compliance`} title="Packet PDF" label="Check Packet Accessibility" className="btn sm" />
+                <PdfComplianceButton url={`/api/agendas/${agenda.id}/packet.pdf/compliance?summary=1`} title="Summary PDF" label="Check Summary Accessibility" className="btn sm" />
+                <PdfComplianceButton url={`/api/agendas/${agenda.id}/minutes.pdf/compliance`} title="Minutes PDF" label="Check Minutes Accessibility" className="btn sm" />
+                <label className="btn sm" style={{ cursor: 'pointer', margin: 0, justifyContent: 'flex-start', textAlign: 'left' }}>
+                  {agenda.has_uploaded_packet ? 'Replace Uploaded PDF' : 'Upload Existing PDF'}
+                  <input
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    style={{ display: 'none' }}
+                    onChange={async (e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = '';
+                      setMoreOpen(false);
+                      if (!file) return;
+                      const fd = new FormData();
+                      fd.append('file', file);
+                      try {
+                        const res = await fetch(`/api/agendas/${agenda.id}/packet-pdf`, {
+                          method: 'POST',
+                          credentials: 'same-origin',
+                          body: fd,
+                        });
+                        if (!res.ok) {
+                          const err = await res.json().catch(() => ({}));
+                          throw new Error(err.detail || 'Upload failed');
+                        }
+                        setSaveMsg({ text: `Uploaded standalone agenda PDF (${file.name}).`, isError: false });
+                        await loadAll();
+                      } catch (err) {
+                        setSaveMsg({ text: err.message || 'Upload failed', isError: true });
+                      }
+                    }}
+                  />
+                </label>
+                {agenda.has_uploaded_packet && (
+                  <button
+                    type="button"
+                    className="btn sm danger"
+                    style={{ justifyContent: 'flex-start', textAlign: 'left' }}
+                    onClick={async () => {
+                      setMoreOpen(false);
+                      if (!confirm('Remove the uploaded PDF and revert to assembled packet generation?')) return;
+                      await api(`/api/agendas/${agenda.id}/packet-pdf`, { method: 'DELETE' });
+                      setSaveMsg({ text: 'Reverted to assembled agenda packet.', isError: false });
+                      await loadAll();
+                    }}
+                  >
+                    Revert to Assembled ({agenda.uploaded_packet_name || 'PDF'})
+                  </button>
+                )}
+                <div style={{ borderTop: '1px solid #e2e8f0', margin: '.2rem 0' }} />
+                <div style={{ fontSize: '.7rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: '#64748b', padding: '.15rem .45rem .1rem' }}>
+                  Reuse &amp; Templates
+                </div>
+                <button
+                  type="button"
+                  className="btn sm"
+                  style={{ justifyContent: 'flex-start', textAlign: 'left' }}
+                  onClick={async () => {
+                    setMoreOpen(false);
+                    const cloned = await api(`/api/agendas/${agenda.id}/clone`, { method: 'POST' });
+                    onNavigate(`#agendas/${cloned.id}`);
+                  }}
+                >
+                  Clone Agenda
+                </button>
+                <button
+                  type="button"
+                  className="btn sm"
+                  style={{ justifyContent: 'flex-start', textAlign: 'left' }}
+                  onClick={async () => {
+                    setMoreOpen(false);
+                    const name = prompt('Template name:', `${agenda.body || 'Meeting'} Template`);
+                    if (!name || !name.trim()) return;
+                    await api(`/api/agendas/${agenda.id}/save-template`, {
+                      method: 'POST', body: JSON.stringify({ name: name.trim() }),
+                    });
+                    setSaveMsg({ text: 'Template saved.', isError: false });
+                  }}
+                >
+                  Save as Template
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

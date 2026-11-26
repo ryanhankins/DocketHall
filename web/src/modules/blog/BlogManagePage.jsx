@@ -438,7 +438,7 @@ export default function BlogManagePage({ initialTab = 'posts' }) {
           className={`btn sm${tab === 'settings' ? ' active' : ''}`}
           onClick={() => setTab('settings')}
         >
-          Main Page Display &amp; Settings
+          Blog Settings &amp; Feed
         </button>
       </div>
 

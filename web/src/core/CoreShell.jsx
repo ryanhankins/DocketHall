@@ -36,6 +36,21 @@ const BillingManagePage = React.lazy(() => import('./BillingManagePage.jsx'));
 const SlaEscalationPage = React.lazy(() => import('./SlaEscalationPage.jsx'));
 const BlogManagePage = React.lazy(() => import('../modules/blog/BlogManagePage.jsx'));
 
+const ADVANCED_SECTIONS = new Set([
+  'preferences-agenda',
+  'field-inspector',
+  'properties',
+  'permits-reports',
+  'preferences-permits',
+  'preferences-complaints',
+  'preferences-calendar',
+  'compliance-programs',
+  'renewals',
+  'integrations',
+  'audit',
+  'sla-rules',
+]);
+
 function getWorkspaceRoute() {
   const p = location.pathname || '';
   if (p.startsWith('/app/')) {
@@ -61,6 +76,13 @@ export default function CoreShell() {
     } catch { /* ignore storage errors */ }
     return 'staff';
   });
+  const [uiMode, setUiMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem('dockethall.uiMode');
+      if (saved === 'simple' || saved === 'full') return saved;
+    } catch { /* ignore storage errors */ }
+    return 'simple';
+  });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [openSubmenus, setOpenSubmenus] = useState(() => {
     try {
@@ -84,6 +106,12 @@ export default function CoreShell() {
       localStorage.setItem('dockethall.navView', navView);
     } catch { /* ignore storage errors */ }
   }, [navView]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('dockethall.uiMode', uiMode);
+    } catch { /* ignore storage errors */ }
+  }, [uiMode]);
 
   const { staffModuleMenus, memberModuleMenus } = useMemo(() => {
     const buildMenus = (predicate) => modulesMeta
@@ -273,7 +301,7 @@ export default function CoreShell() {
       return {
         component: BlogManagePage,
         props: { initialTab: 'settings' },
-        activeSection: 'blog-admin',
+        activeSection: 'blog-manage',
       };
     }
     if (routePath === 'sla-rules' && canManageSettings) {
@@ -526,6 +554,64 @@ export default function CoreShell() {
                 </button>
               </div>
             )}
+            {hasStaffView && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '.4rem',
+                  marginBottom: '.55rem',
+                  padding: '.25rem .4rem',
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px',
+                  fontSize: '.76rem',
+                }}
+              >
+                <span style={{ color: '#475569', fontWeight: 600 }}>Menu</span>
+                <div style={{ display: 'inline-flex', gap: '.2rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setUiMode('simple')}
+                    aria-pressed={uiMode === 'simple'}
+                    style={{
+                      margin: 0,
+                      width: 'auto',
+                      padding: '.2rem .45rem',
+                      fontSize: '.74rem',
+                      fontWeight: uiMode === 'simple' ? 700 : 500,
+                      borderRadius: '5px',
+                      border: 'none',
+                      background: uiMode === 'simple' ? '#0f172a' : 'transparent',
+                      color: uiMode === 'simple' ? '#fff' : '#475569',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Simple
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUiMode('full')}
+                    aria-pressed={uiMode === 'full'}
+                    style={{
+                      margin: 0,
+                      width: 'auto',
+                      padding: '.2rem .45rem',
+                      fontSize: '.74rem',
+                      fontWeight: uiMode === 'full' ? 700 : 500,
+                      borderRadius: '5px',
+                      border: 'none',
+                      background: uiMode === 'full' ? '#0f172a' : 'transparent',
+                      color: uiMode === 'full' ? '#fff' : '#475569',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Full
+                  </button>
+                </div>
+              </div>
+            )}
             {(effectiveNavView === 'member' || !hasStaffView) && (
               <div style={{ marginBottom: '.45rem', paddingBottom: '.45rem', borderBottom: '1px solid #e2e8f0' }}>
                 <button
@@ -580,13 +666,17 @@ export default function CoreShell() {
             )}
             {moduleMenus.map(mod => {
               const q = menuFilter.trim().toLowerCase();
+              const modeItems = (effectiveNavView === 'staff' && uiMode === 'simple' && !q)
+                ? mod.items.filter(it => !ADVANCED_SECTIONS.has(it.section) || it.section === activeSection)
+                : mod.items;
+              if (modeItems.length === 0) return null;
               const modMatches = !q || mod.name.toLowerCase().includes(q);
               const visibleItems = q
-                ? (modMatches ? mod.items : mod.items.filter(it => it.label.toLowerCase().includes(q)))
-                : mod.items;
+                ? (modMatches ? modeItems : modeItems.filter(it => it.label.toLowerCase().includes(q)))
+                : modeItems;
               if (visibleItems.length === 0) return null;
 
-              if (mod.items.length === 1) {
+              if (modeItems.length === 1) {
                 const it = visibleItems[0];
                 return (
                   <button
@@ -651,9 +741,12 @@ export default function CoreShell() {
                 canManageSettings && { section: 'preferences-backup', label: 'Backup & Restore' },
               ].filter(Boolean);
               const q = menuFilter.trim().toLowerCase();
-              const visibleAdmin = q
-                ? ('administration'.includes(q) ? adminItems : adminItems.filter(it => it.label.toLowerCase().includes(q)))
+              const modeAdmin = (uiMode === 'simple' && !q)
+                ? adminItems.filter(it => !ADVANCED_SECTIONS.has(it.section) || it.section === activeSection)
                 : adminItems;
+              const visibleAdmin = q
+                ? ('administration'.includes(q) ? modeAdmin : modeAdmin.filter(it => it.label.toLowerCase().includes(q)))
+                : modeAdmin;
               if (visibleAdmin.length === 0) return null;
               const adminActive = adminItems.some(it => it.section === activeSection);
               const adminOpen = q ? true : (openSubmenus['admin-section'] !== undefined ? !!openSubmenus['admin-section'] : adminActive);
