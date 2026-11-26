@@ -217,6 +217,9 @@ export default function AiAssistantBar({ onNavigate }) {
     loading: true,
   });
   const [minimized, setMinimized] = useState(false);
+  const [pos, setPos] = useState(null);
+  const [dragging, setDragging] = useState(false);
+  const asideRef = useRef(null);
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -343,6 +346,35 @@ export default function AiAssistantBar({ onNavigate }) {
     ]);
   }
 
+  function handleTitleBarPointerDown(e) {
+    if (e.button !== 0 || e.target.closest('button')) return;
+    const box = asideRef.current?.getBoundingClientRect();
+    if (!box) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const origX = box.left;
+    const origY = box.top;
+    setDragging(true);
+
+    const onMove = (ev) => {
+      const maxX = Math.max(8, window.innerWidth - box.width - 8);
+      const maxY = Math.max(8, window.innerHeight - box.height - 8);
+      const nx = Math.min(Math.max(8, origX + (ev.clientX - startX)), maxX);
+      const ny = Math.min(Math.max(8, origY + (ev.clientY - startY)), maxY);
+      setPos({ x: nx, y: ny });
+    };
+
+    const onUp = () => {
+      setDragging(false);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
   if (status.loading) return null;
 
   if (minimized) {
@@ -375,11 +407,11 @@ export default function AiAssistantBar({ onNavigate }) {
 
   return (
     <aside
+      ref={asideRef}
       aria-label="AI Admin Assistant"
       style={{
         position: 'fixed',
-        right: '1rem',
-        bottom: '1rem',
+        ...(pos ? { left: `${pos.x}px`, top: `${pos.y}px` } : { right: '1rem', bottom: '1rem' }),
         width: 'min(420px, calc(100vw - 1.5rem))',
         maxHeight: 'min(560px, calc(100vh - 2rem))',
         zIndex: 950,
@@ -393,6 +425,7 @@ export default function AiAssistantBar({ onNavigate }) {
       }}
     >
       <div
+        onPointerDown={handleTitleBarPointerDown}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -401,6 +434,9 @@ export default function AiAssistantBar({ onNavigate }) {
           padding: '.55rem .8rem',
           background: '#0f2942',
           color: '#ffffff',
+          cursor: dragging ? 'grabbing' : 'grab',
+          userSelect: 'none',
+          touchAction: 'none',
         }}
       >
         <div style={{ minWidth: 0 }}>
