@@ -3046,7 +3046,6 @@ def _execute_confirmed_actions(pending: list[AiPendingActionIn], user: dict) -> 
 @router.post("/command")
 async def run_ai_command(body: AiCommandIn, user: dict = Depends(_require_ai_user)):
     _require_ai_module_enabled()
-    require_not_demo_mode("AI Assistant")
     hist = [{"role": m.role, "text": m.text} for m in body.history]
     return await run_in_threadpool(_run_ai_command, body.prompt.strip(), hist, user)
 
@@ -3054,7 +3053,6 @@ async def run_ai_command(body: AiCommandIn, user: dict = Depends(_require_ai_use
 @router.post("/confirm")
 async def confirm_ai_actions(body: AiConfirmIn, user: dict = Depends(_require_ai_user)):
     _require_ai_module_enabled()
-    require_not_demo_mode("AI Assistant")
     return await run_in_threadpool(_execute_confirmed_actions, body.pending_actions, user)
 
 
@@ -3209,5 +3207,4 @@ async def evaluate_permit_ai(
     user: dict = Depends(require_permission("permits.manage")),
 ):
     _require_ai_module_enabled()
-    require_not_demo_mode("AI Permit Evaluation")
     return await run_in_threadpool(_run_and_save_permit_evaluation, permit_id, body.check_type, user)

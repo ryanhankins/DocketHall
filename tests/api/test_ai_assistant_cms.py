@@ -137,3 +137,30 @@ def test_ai_configurable_daily_spend_cap(admin_client, monkeypatch):
     cfg2 = admin_client.put("/api/ai/config", json={"model": "gemini-3.8-flash", "daily_spend_limit_usd": 0})
     assert cfg2.status_code == 200
     ai_assistant._enforce_daily_budget()
+
+
+def test_ai_allowed_in_demo_mode_while_config_blocked(admin_client, monkeypatch):
+    from app import ai_assistant
+
+    admin_client.put("/api/modules/admin/ai_assistant", json={"enabled": True})
+    monkeypatch.setenv("DEMO_MODE", "true")
+
+    # Config changes remain blocked in demo mode
+    r_put = admin_client.put("/api/ai/config", json={"model": "gemini-3.8-flash", "daily_spend_limit_usd": 100})
+    assert r_put.status_code == 403
+    r_del = admin_client.delete("/api/ai/config")
+    assert r_del.status_code == 403
+
+    # /api/ai/command is allowed in demo mode and still enforces daily budget
+    monkeypatch.setattr(
+        ai_assistant,
+        "_call_gemini",
+        lambda key, model, payload, **kw: (
+            ai_assistant._enforce_daily_budget() if kw.get("enforce_budget", True) else None,
+            {"candidates": [{"content": {"parts": [{"text": "Ready in demo."}]}}]},
+        )[1],
+    )
+    monkeypatch.setattr(ai_assistant, "_load_gemini_config", lambda: ("test-key-12345", "gemini-3.5-flash-lite", "integrations"))
+    r_cmd = admin_client.post("/api/ai/command", json={"prompt": "Summarize today's agenda", "history": []})
+    assert r_cmd.status_code == 200, r_cmd.text
+    assert r_cmd.json()["reply"] == "Ready in demo."
