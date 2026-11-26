@@ -15,6 +15,7 @@
 
 """Available DocketHall feature modules."""
 from .agendas_module import MODULE as AGENDAS_MODULE
+from .ai_assistant_module import MODULE as AI_ASSISTANT_MODULE
 from .calendar_module import MODULE as CALENDAR_MODULE
 from .citations_module import MODULE as CITATIONS_MODULE
 from .codification_module import MODULE as CODIFICATION_MODULE
@@ -38,3 +39,4 @@ def register_builtin_modules() -> None:
     register_module(COMMUNICATIONS_MODULE)
     register_module(UTILITIES_MODULE)
     register_module(CITATIONS_MODULE)
+    register_module(AI_ASSISTANT_MODULE)

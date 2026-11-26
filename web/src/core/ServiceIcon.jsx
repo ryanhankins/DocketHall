@@ -35,6 +35,7 @@ const SERVICE_STYLES = {
   utilities: { color: '#0284c7', bg: '#f0f9ff', border: '#bae6fd' },
   citations: { color: '#b45309', bg: '#fffbeb', border: '#fde68a' },
   alerts: { color: '#4f46e5', bg: '#eef2ff', border: '#c7d2fe' },
+  ai_assistant: { color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe' },
 };
 
 function renderGlyph(id, size) {
@@ -186,6 +187,14 @@ function renderGlyph(id, size) {
         <svg {...props}>
           <circle cx="12" cy="12" r="10" />
           <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+        </svg>
+      );
+    case 'ai_assistant':
+      // AI sparkles
+      return (
+        <svg {...props}>
+          <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z" />
+          <path d="M5 3v4M3 5h4M19 17v4M17 19h4" />
         </svg>
       );
     default:

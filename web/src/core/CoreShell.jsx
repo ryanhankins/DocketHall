@@ -20,6 +20,7 @@ import { ROLE_LABELS, api, downloadBackupArchive, hasPermission, todayIso } from
 import { loadEnabledFrontendModules } from './registry.js';
 import ServiceIcon from './ServiceIcon.jsx';
 import { DemoBanner, DocketHallLogo } from './PublicChrome.jsx';
+import AiAssistantBar from './AiAssistantBar.jsx';
 import { applyTheme } from './theme.js';
 import { useToast } from './toast.jsx';
 
@@ -646,6 +647,8 @@ export default function CoreShell() {
               </button>
             </div>
           )}
+
+          {me && me.role !== 'read_only' && modulesMeta.some(m => m.id === 'ai_assistant') && <AiAssistantBar onNavigate={navigate} />}
 
           {ActiveComponent ? (
             <Suspense fallback={<div className="muted">Loading…</div>}>

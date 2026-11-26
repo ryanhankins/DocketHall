@@ -22,7 +22,7 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
-from . import audit, auth, backup, branding, docs, integrations, my_account, payments, pdf_check, permits, registry, search, sla, subscriptions, tenancy, updates, users
+from . import ai_assistant, audit, auth, backup, branding, docs, integrations, my_account, payments, pdf_check, permits, registry, search, sla, subscriptions, tenancy, updates, users
 from .db import open_pool, pool
 from .modules import register_builtin_modules
 
@@ -122,6 +122,7 @@ app.include_router(backup.router)
 app.include_router(registry.router)
 app.include_router(search.router)
 app.include_router(updates.router)
+app.include_router(ai_assistant.router)
 
 for mod in registry.get_all_registered_modules():
     for r in mod.routers:

@@ -1,0 +1,1442 @@
+# Copyright 2026 Ryan Hankins
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+"""Admin AI Assistant powered by Google Gemini Function Calling."""
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+import json
+import os
+import re
+import urllib.error
+import urllib.parse
+import urllib.request
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel, Field
+from psycopg.types.json import Jsonb
+
+from .audit import record_audit
+from .auth import current_user, has_permission, require_admin, require_not_demo_mode
+from .db import pool
+from .registry import is_module_enabled
+
+router = APIRouter(prefix="/api/ai", tags=["ai"])
+
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+_ALLOWED_MODELS = (
+    "gemini-3.8-flash-lite",
+    "gemini-3.8-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.8-pro",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-flash",
+)
+_SLUG_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _slugify(text: str, fallback: str = "item") -> str:
+    s = _SLUG_RE.sub("-", (text or "").strip().lower()).strip("-")
+    return s[:80] or fallback
+
+
+def _load_gemini_config() -> tuple[str, str, str]:
+    """Return (api_key, model, source)."""
+    with pool.connection() as conn:
+        row = conn.execute(
+            "SELECT enabled, api_key, config FROM core_integrations WHERE provider = 'gemini_ai'"
+        ).fetchone()
+    if row and row[0] and (row[1] or "").strip():
+        cfg = row[2] if isinstance(row[2], dict) else {}
+        model = (cfg.get("model") or DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
+        return row[1].strip(), model, "integrations"
+    env_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+    if env_key:
+        env_model = (os.environ.get("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
+        return env_key, env_model, "env"
+    return "", DEFAULT_GEMINI_MODEL, "none"
+
+
+def _call_gemini(api_key: str, model: str, payload: dict) -> dict:
+    safe_model = urllib.parse.quote(model, safe=".-")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{safe_model}:generateContent?key={urllib.parse.quote(api_key, safe='')}"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            detail = json.loads(raw).get("error", {}).get("message") or raw
+        except Exception:
+            detail = raw
+        raise HTTPException(status_code=502, detail=f"Gemini API error ({exc.code}): {detail[:240]}")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Gemini API request failed: {exc}")
+
+
+_TOOL_DECLARATIONS = [
+    {
+        "name": "create_agenda",
+        "description": "Create a new meeting agenda (draft) in DocketHall.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "title": {"type": "STRING", "description": "Agenda title, e.g. 'Special Meeting' or 'Regular City Council Meeting'"},
+                "body": {"type": "STRING", "description": "Governing body name, e.g. 'City Council', 'Planning Commission'. Defaults to 'City Council'."},
+                "meeting_date": {"type": "STRING", "description": "ISO date YYYY-MM-DD (e.g. '2026-12-01')"},
+                "meeting_time": {"type": "STRING", "description": "Time string, e.g. '6:00 PM'"},
+            },
+            "required": ["title", "meeting_date"],
+        },
+    },
+    {
+        "name": "add_agenda_item",
+        "description": "Add an agenda item to an existing agenda by agenda_id.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "agenda_id": {"type": "INTEGER", "description": "Numeric ID of the target agenda"},
+                "title": {"type": "STRING", "description": "Agenda item title"},
+                "section_name": {"type": "STRING", "description": "Agenda section (e.g. 'New Business', 'Consent Agenda', 'Public Hearings')"},
+                "description": {"type": "STRING", "description": "Optional summary/notes for the item"},
+            },
+            "required": ["agenda_id", "title"],
+        },
+    },
+    {
+        "name": "create_todo",
+        "description": "Create an item in Agenda Todos & Item Backlog for future meetings.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "title": {"type": "STRING", "description": "Todo / backlog item title"},
+                "due_date": {"type": "STRING", "description": "Optional due date YYYY-MM-DD"},
+                "notes": {"type": "STRING", "description": "Optional notes"},
+            },
+            "required": ["title"],
+        },
+    },
+    {
+        "name": "create_notice",
+        "description": "Create a public notice, news item, bid, or job posting.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "title": {"type": "STRING", "description": "Notice title"},
+                "category": {"type": "STRING", "description": "One of: 'Notice', 'News', 'Bid / RFP', 'Job Posting'"},
+                "summary": {"type": "STRING", "description": "Short summary"},
+                "body": {"type": "STRING", "description": "Full notice text"},
+                "is_public": {"type": "BOOLEAN", "description": "Whether to publish immediately (default true)"},
+            },
+            "required": ["title", "body"],
+        },
+    },
+    {
+        "name": "create_blog_post",
+        "description": "Create a City Blog article (draft or published).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "title": {"type": "STRING", "description": "Blog post title"},
+                "summary": {"type": "STRING", "description": "Short excerpt"},
+                "body": {"type": "STRING", "description": "Article body text"},
+                "is_published": {"type": "BOOLEAN", "description": "Publish immediately (default false = draft)"},
+            },
+            "required": ["title", "body"],
+        },
+    },
+    {
+        "name": "create_calendar_event",
+        "description": "Add an event or meeting to the municipal calendar.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "title": {"type": "STRING", "description": "Event title"},
+                "event_date": {"type": "STRING", "description": "Date YYYY-MM-DD"},
+                "start_time": {"type": "STRING", "description": "Start time, e.g. '6:00 PM'"},
+                "location": {"type": "STRING", "description": "Event location"},
+                "description": {"type": "STRING", "description": "Event details"},
+            },
+            "required": ["title", "event_date"],
+        },
+    },
+    {
+        "name": "update_urgent_alert",
+        "description": "Enable, update, or clear the site-wide urgent alert banner on the public portal.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "enabled": {"type": "BOOLEAN", "description": "True to show the banner, False to hide it"},
+                "message": {"type": "STRING", "description": "Banner message text"},
+            },
+            "required": ["enabled"],
+        },
+    },
+    {
+        "name": "list_agendas",
+        "description": "List recent or upcoming agendas in DocketHall.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "limit": {"type": "INTEGER", "description": "Max agendas to return (default 8)"},
+            },
+        },
+    },
+    {
+        "name": "finalize_agenda",
+        "description": "Finalize and publish an agenda by agenda_id so it appears on the public portal.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "agenda_id": {"type": "INTEGER", "description": "Numeric ID of the agenda to finalize"},
+            },
+            "required": ["agenda_id"],
+        },
+    },
+    {
+        "name": "create_permit",
+        "description": "Create a permit or land-use application (e.g., Variance Application, Building Permit, Zoning Permit, Conditional Use Permit, Mechanical/Plumbing Permit, Small Craft Permit).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "permit_type_name": {"type": "STRING", "description": "Permit type (e.g. 'Variance Application', 'Building Permit', 'Zoning Permit', 'Conditional Use Permit')"},
+                "permit_use_name": {"type": "STRING", "description": "Optional specific use (e.g. 'New Home', 'Reroof', 'Fence (over 7 feet)')"},
+                "property_address": {"type": "STRING", "description": "Street address for the permit/variance"},
+                "applicant_name": {"type": "STRING", "description": "Applicant name (defaults to 'Admin Intake' if not specified)"},
+                "applicant_email": {"type": "STRING", "description": "Optional applicant email"},
+                "applicant_phone": {"type": "STRING", "description": "Optional applicant phone"},
+                "description": {"type": "STRING", "description": "Project or variance description"},
+            },
+            "required": ["permit_type_name", "property_address"],
+        },
+    },
+    {
+        "name": "update_permit_status",
+        "description": "Update the status of an existing permit by permit_number (e.g. PRM-2026-0001).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "permit_number": {"type": "STRING", "description": "Permit number"},
+                "status": {"type": "STRING", "description": "New status: submitted, in_review, approved, issued, denied, closed"},
+                "notes": {"type": "STRING", "description": "Optional review notes"},
+            },
+            "required": ["permit_number", "status"],
+        },
+    },
+    {
+        "name": "schedule_inspection",
+        "description": "Schedule an inspection for an existing permit by permit_number.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "permit_number": {"type": "STRING", "description": "Permit number"},
+                "inspection_type": {"type": "STRING", "description": "Inspection type (e.g. 'Framing', 'Final', 'Footing', 'Plumbing', 'Site')"},
+                "scheduled_date": {"type": "STRING", "description": "Date YYYY-MM-DD"},
+                "inspector": {"type": "STRING", "description": "Optional inspector name"},
+                "notes": {"type": "STRING", "description": "Optional notes"},
+            },
+            "required": ["permit_number", "inspection_type", "scheduled_date"],
+        },
+    },
+    {
+        "name": "list_permits",
+        "description": "List or search existing permits and variance applications.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional search by address, permit number, or type"},
+                "status": {"type": "STRING", "description": "Optional status filter"},
+            },
+        },
+    },
+    {
+        "name": "create_complaint",
+        "description": "Log a code-enforcement or administrative complaint.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "property_address": {"type": "STRING", "description": "Subject property address"},
+                "description": {"type": "STRING", "description": "Complaint / conduct description"},
+                "ordinance_section": {"type": "STRING", "description": "Optional city code section (e.g. '605.020')"},
+                "complainant_name": {"type": "STRING", "description": "Optional complainant name"},
+                "is_anonymous": {"type": "BOOLEAN", "description": "True if anonymous"},
+            },
+            "required": ["description"],
+        },
+    },
+    {
+        "name": "create_work_order",
+        "description": "Create a 311 / Public Works work order (e.g. pothole, streetlight, snowplow, tree, water leak).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "category": {"type": "STRING", "description": "Category (e.g. 'Pothole / Street', 'Snow / Ice', 'Tree / Parks', 'Water / Sewer', 'Streetlight')"},
+                "location": {"type": "STRING", "description": "Street address or intersection"},
+                "description": {"type": "STRING", "description": "Work order description"},
+                "priority": {"type": "STRING", "description": "low, normal, high, or urgent"},
+            },
+            "required": ["location", "description"],
+        },
+    },
+    {
+        "name": "create_public_record",
+        "description": "Add a document to the Public Records repository (Policy, Contract, Resolution, Ordinance, Agreement, Guide).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "title": {"type": "STRING", "description": "Document title"},
+                "category": {"type": "STRING", "description": "Policy, Contract, Resolution, Ordinance, Agreement, or Guide"},
+                "counterparty": {"type": "STRING", "description": "Optional counterparty or department"},
+                "notes": {"type": "STRING", "description": "Optional summary/notes"},
+                "is_public": {"type": "BOOLEAN", "description": "Publish publicly (default true)"},
+            },
+            "required": ["title", "category"],
+        },
+    },
+    {
+        "name": "search_records",
+        "description": "Search Public Records / City Documents (policies, guides, ordinances, forms) by keyword and list their attached files.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Search keyword(s)"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "read_record_file",
+        "description": "Extract and read the text content of an attached file (PDF, DOCX, TXT, etc.) from Public Records using its file_id from search_records.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "file_id": {"type": "INTEGER", "description": "File ID returned by search_records"},
+            },
+            "required": ["file_id"],
+        },
+    },
+    {
+        "name": "search_city_code",
+        "description": "Search the Municipal City Code by keyword(s) or section number. Returns matching sections with their text.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Keyword(s) or section number (e.g. '605.020', 'dogs', 'fence')"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "get_city_code_section",
+        "description": "Fetch the full text of a specific Municipal City Code section by section_number.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "section_number": {"type": "STRING", "description": "Exact section number (e.g. '605.020')"},
+            },
+            "required": ["section_number"],
+        },
+    },
+    {
+        "name": "search_portal_info",
+        "description": "Search City Info Pages, FAQs, Public Notices, Blog Posts, and Forms for answers to resident or admin questions.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Search keyword(s)"},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "create_directory_entry",
+        "description": "Add a staff member, department, or elected official to the City Directory.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "name": {"type": "STRING", "description": "Full name or office name"},
+                "title_role": {"type": "STRING", "description": "Title or role (e.g. 'City Clerk', 'Councilmember')"},
+                "department": {"type": "STRING", "description": "Department"},
+                "email": {"type": "STRING", "description": "Email address"},
+                "phone": {"type": "STRING", "description": "Phone number"},
+                "is_elected": {"type": "BOOLEAN", "description": "True for elected officials"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "create_faq",
+        "description": "Add a Frequently Asked Question to the City Directory / FAQ section.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "question": {"type": "STRING", "description": "FAQ question"},
+                "answer": {"type": "STRING", "description": "FAQ answer"},
+                "category": {"type": "STRING", "description": "Category (e.g. 'General', 'Permits', 'Utilities')"},
+            },
+            "required": ["question", "answer"],
+        },
+    },
+    {
+        "name": "create_page",
+        "description": "Create a custom City Information Page.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "title": {"type": "STRING", "description": "Page title"},
+                "summary": {"type": "STRING", "description": "Short summary"},
+                "body": {"type": "STRING", "description": "Page content"},
+                "is_public": {"type": "BOOLEAN", "description": "Publish publicly (default true)"},
+            },
+            "required": ["title", "body"],
+        },
+    },
+    {
+        "name": "add_contractor_license",
+        "description": "Add a contractor license record.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "business_name": {"type": "STRING", "description": "Contractor business name"},
+                "license_number": {"type": "STRING", "description": "License number"},
+                "license_type": {"type": "STRING", "description": "e.g. 'General Contractor', 'Plumbing', 'Mechanical', 'Electrical'"},
+                "email": {"type": "STRING", "description": "Contact email"},
+                "phone": {"type": "STRING", "description": "Contact phone"},
+            },
+            "required": ["business_name", "license_number"],
+        },
+    },
+    {
+        "name": "create_utility_bill",
+        "description": "Create a municipal utility bill (water/sewer/trash).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "account_number": {"type": "STRING", "description": "Utility account number"},
+                "payer_name": {"type": "STRING", "description": "Resident / customer name"},
+                "service_address": {"type": "STRING", "description": "Service address"},
+                "amount_due": {"type": "STRING", "description": "Amount due (e.g. '85.50')"},
+                "due_date": {"type": "STRING", "description": "Due date YYYY-MM-DD"},
+                "description": {"type": "STRING", "description": "Optional billing period description"},
+            },
+            "required": ["payer_name", "service_address", "amount_due"],
+        },
+    },
+    {
+        "name": "create_citation",
+        "description": "Create a municipal code or parking citation.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "payer_name": {"type": "STRING", "description": "Respondent name"},
+                "service_address": {"type": "STRING", "description": "Property or location"},
+                "description": {"type": "STRING", "description": "Violation description"},
+                "amount_due": {"type": "STRING", "description": "Fine amount (e.g. '100.00')"},
+                "due_date": {"type": "STRING", "description": "Due date YYYY-MM-DD"},
+            },
+            "required": ["payer_name", "description", "amount_due"],
+        },
+    },
+    {
+        "name": "toggle_module",
+        "description": "Enable or disable a DocketHall module (agendas, permits, codification, records, complaints, calendar, communications, licensing, citations, utilities).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "module_id": {"type": "STRING", "description": "Module ID"},
+                "enabled": {"type": "BOOLEAN", "description": "True to enable, False to disable"},
+            },
+            "required": ["module_id", "enabled"],
+        },
+    },
+    {
+        "name": "update_branding",
+        "description": "Update general city preferences (city title, default meeting time, meeting location, footer text).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "city_title": {"type": "STRING", "description": "City title"},
+                "meeting_time": {"type": "STRING", "description": "Default meeting time"},
+                "meeting_location": {"type": "STRING", "description": "Default meeting location"},
+                "footer_text": {"type": "STRING", "description": "Footer contact/hours text"},
+            },
+        },
+    },
+]
+
+
+_TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
+    "create_agenda": ("agendas", ("agendas.manage",)),
+    "add_agenda_item": ("agendas", ("agendas.manage", "agendas.submit")),
+    "create_todo": ("agendas", ("agendas.manage",)),
+    "list_agendas": ("agendas", ("agendas.manage", "agendas.submit")),
+    "finalize_agenda": ("agendas", ("agendas.manage",)),
+    "create_notice": ("communications", ("notices.manage",)),
+    "create_blog_post": ("communications", ("blog.manage",)),
+    "update_urgent_alert": ("communications", ("notices.manage", "pages.manage")),
+    "create_directory_entry": ("communications", ("directory.manage",)),
+    "create_faq": ("communications", ("directory.manage",)),
+    "create_page": ("communications", ("pages.manage",)),
+    "search_portal_info": ("communications", ()),
+    "create_calendar_event": ("calendar", ("calendar.manage",)),
+    "create_permit": ("permits", ("permits.manage", "permits.submit")),
+    "update_permit_status": ("permits", ("permits.manage",)),
+    "schedule_inspection": ("permits", ("permits.manage",)),
+    "list_permits": ("permits", ("permits.manage",)),
+    "create_complaint": ("complaints", ("complaints.manage", "complaints.submit")),
+    "create_work_order": ("complaints", ("complaints.manage",)),
+    "create_public_record": ("records", ("records.manage",)),
+    "search_records": ("records", ("records.manage", "records.view")),
+    "read_record_file": ("records", ("records.manage", "records.view")),
+    "search_city_code": ("codification", ()),
+    "get_city_code_section": ("codification", ()),
+    "add_contractor_license": ("licensing", ("licensing.manage",)),
+    "create_utility_bill": ("utilities", ("utilities.manage",)),
+    "create_citation": ("citations", ("citations.manage",)),
+    "toggle_module": (None, ("__admin__",)),
+    "update_branding": (None, ("__admin__",)),
+}
+
+
+def _check_tool_access(name: str, user: dict) -> str | None:
+    """Return None if user may run tool `name`, otherwise a human-readable denial reason."""
+    policy = _TOOL_ACCESS.get(name)
+    if policy is None:
+        return f"Unknown or unauthorized tool: {name}"
+    mod_id, perms = policy
+    if mod_id and not is_module_enabled(mod_id):
+        return f"The '{mod_id}' module is currently disabled."
+    if "__admin__" in perms:
+        if user.get("role") != "admin":
+            return "Administrator access is required for this action."
+        return None
+    if perms and not any(has_permission(user, p) for p in perms):
+        return f"Insufficient permissions for '{name}' (requires one of: {', '.join(perms)})."
+    return None
+
+
+def _allowed_tools_for_user(user: dict) -> list[dict]:
+    return [decl for decl in _TOOL_DECLARATIONS if _check_tool_access(decl["name"], user) is None]
+
+
+def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]:
+    """Execute a validated tool call after enforcing module and permission checks."""
+    denied = _check_tool_access(name, user)
+    if denied:
+        return {"ok": False, "error": denied}, None
+    username = user["username"]
+    with pool.connection() as conn:
+        if name == "create_agenda":
+            title = str(args.get("title") or "").strip() or "Meeting Agenda"
+            body = str(args.get("body") or "City Council").strip() or "City Council"
+            mdate = date.fromisoformat(str(args["meeting_date"]).strip())
+            mtime = str(args.get("meeting_time") or "6:30 PM").strip()
+            cat_row = conn.execute("SELECT categories FROM agenda_preferences WHERE id = 1").fetchone()
+            default_status = "In Progress"
+            if cat_row and isinstance(cat_row[0], list) and cat_row[0]:
+                first_cat = cat_row[0][0]
+                if isinstance(first_cat, dict) and first_cat.get("name"):
+                    default_status = first_cat["name"]
+            row = conn.execute(
+                "INSERT INTO agendas (title, body, meeting_date, meeting_time, status) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING id, title, body, meeting_date, meeting_time, status",
+                (title, body, mdate, mtime, default_status),
+            ).fetchone()
+            ag_id = row[0]
+            route = f"/app/agendas/{ag_id}"
+            return (
+                {"ok": True, "agenda_id": ag_id, "title": row[1], "body": row[2], "meeting_date": row[3].isoformat(), "meeting_time": row[4], "status": row[5]},
+                {"tool": name, "summary": f"Created agenda #{ag_id}: {row[1]} ({row[2]}, {row[3].isoformat()} at {row[4]})", "route": route},
+            )
+
+        if name == "add_agenda_item":
+            ag_id = int(args["agenda_id"])
+            ag_exists = conn.execute("SELECT id, title FROM agendas WHERE id = %s", (ag_id,)).fetchone()
+            if not ag_exists:
+                return {"ok": False, "error": f"Agenda #{ag_id} not found"}, None
+            max_pos = conn.execute("SELECT COALESCE(MAX(position), 0) FROM agenda_items WHERE agenda_id = %s", (ag_id,)).fetchone()[0]
+            title = str(args.get("title") or "").strip()
+            section_name = str(args.get("section_name") or "New Business").strip()
+            desc = str(args.get("description") or "").strip()
+            row = conn.execute(
+                "INSERT INTO agenda_items (agenda_id, position, title, section_name, description) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (ag_id, max_pos + 1, title, section_name, desc),
+            ).fetchone()
+            return (
+                {"ok": True, "item_id": row[0], "agenda_id": ag_id, "title": title, "section_name": section_name},
+                {"tool": name, "summary": f"Added item '{title}' to {ag_exists[1]}", "route": f"/app/agendas/{ag_id}"},
+            )
+
+        if name == "create_todo":
+            title = str(args.get("title") or "").strip()
+            due_raw = str(args.get("due_date") or "").strip()
+            due_val = date.fromisoformat(due_raw) if due_raw else None
+            notes = str(args.get("notes") or "").strip()
+            max_pos = conn.execute("SELECT COALESCE(MAX(position), 0) FROM agenda_items WHERE agenda_id IS NULL").fetchone()[0]
+            row = conn.execute(
+                "INSERT INTO agenda_items (agenda_id, position, title, description, todo_due_date, todo_status) "
+                "VALUES (NULL, %s, %s, %s, %s, 'open') RETURNING id",
+                (max_pos + 1, title, notes, due_val),
+            ).fetchone()
+            return (
+                {"ok": True, "todo_id": row[0], "title": title, "due_date": due_val.isoformat() if due_val else None},
+                {"tool": name, "summary": f"Added backlog todo: {title}", "route": "/app/backlog"},
+            )
+
+        if name == "create_notice":
+            title = str(args.get("title") or "").strip()
+            raw_cat = str(args.get("category") or "notice").strip().lower()
+            cat_map = {"notice": "notice", "news": "news", "bid": "bid", "bid / rfp": "bid", "rfp": "bid", "job": "job", "job posting": "job"}
+            cat = cat_map.get(raw_cat, "notice")
+            summary = str(args.get("summary") or "").strip()
+            body_txt = str(args.get("body") or summary or title).strip()
+            is_pub = bool(args.get("is_public", True))
+            row = conn.execute(
+                "INSERT INTO city_notices (title, category, summary, body, is_published, created_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                (title, cat, summary, body_txt, is_pub, username),
+            ).fetchone()
+            return (
+                {"ok": True, "notice_id": row[0], "title": title, "category": cat, "is_published": is_pub},
+                {"tool": name, "summary": f"Created {cat}: {title}", "route": "/app/notices-manage"},
+            )
+
+        if name == "create_blog_post":
+            title = str(args.get("title") or "").strip()
+            summary = str(args.get("summary") or "").strip()
+            body_txt = str(args.get("body") or "").strip()
+            is_pub = bool(args.get("is_published", False))
+            slug = _slugify(title, "post")
+            exists = conn.execute("SELECT 1 FROM blog_posts WHERE slug = %s", (slug,)).fetchone()
+            if exists:
+                slug = f"{slug}-{int(datetime.now(timezone.utc).timestamp()) % 10000}"
+            cat_row = conn.execute("SELECT id FROM blog_categories ORDER BY id ASC LIMIT 1").fetchone()
+            if not cat_row:
+                cat_row = conn.execute(
+                    "INSERT INTO blog_categories (name, slug) VALUES ('City News', 'city-news') RETURNING id"
+                ).fetchone()
+            row = conn.execute(
+                "INSERT INTO blog_posts (category_id, slug, title, lead_in, body, is_published, author_name) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id, slug",
+                (cat_row[0], slug, title, summary, f"<p>{body_txt}</p>", is_pub, username),
+            ).fetchone()
+            return (
+                {"ok": True, "post_id": row[0], "slug": row[1], "title": title, "is_published": is_pub},
+                {"tool": name, "summary": f"Created blog post ({'published' if is_pub else 'draft'}): {title}", "route": "/app/blog-manage"},
+            )
+
+        if name == "create_calendar_event":
+            title = str(args.get("title") or "").strip()
+            ev_date = date.fromisoformat(str(args["event_date"]).strip())
+            start_time = str(args.get("start_time") or "").strip()
+            location = str(args.get("location") or "").strip()
+            desc = str(args.get("description") or "").strip()
+            row = conn.execute(
+                "INSERT INTO calendar_events (title, event_date, start_time, location, description, is_public, created_by) "
+                "VALUES (%s, %s, %s, %s, %s, TRUE, %s) RETURNING id",
+                (title, ev_date, start_time, location, desc, username),
+            ).fetchone()
+            return (
+                {"ok": True, "event_id": row[0], "title": title, "event_date": ev_date.isoformat()},
+                {"tool": name, "summary": f"Created calendar event: {title} ({ev_date.isoformat()})", "route": "/app/calendar-manage"},
+            )
+
+        if name == "update_urgent_alert":
+            enabled = bool(args.get("enabled", False))
+            msg = str(args.get("message") or "").strip()
+            conn.execute(
+                "UPDATE agenda_preferences SET urgent_alert_enabled = %s, urgent_alert_message = %s, updated_at = now() WHERE id = 1",
+                (enabled, msg if enabled else ""),
+            )
+            return (
+                {"ok": True, "urgent_alert_enabled": enabled, "message": msg},
+                {"tool": name, "summary": f"{'Enabled' if enabled else 'Cleared'} urgent alert banner", "route": "/app/preferences-general"},
+            )
+
+        if name == "list_agendas":
+            lim = max(1, min(int(args.get("limit") or 8), 20))
+            rows = conn.execute(
+                "SELECT id, title, body, meeting_date, meeting_time, status FROM agendas ORDER BY meeting_date DESC NULLS LAST, id DESC LIMIT %s",
+                (lim,),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "agendas": [
+                        {
+                            "id": r[0],
+                            "title": r[1],
+                            "body": r[2],
+                            "meeting_date": r[3].isoformat() if r[3] else None,
+                            "meeting_time": r[4],
+                            "status": r[5],
+                        }
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "finalize_agenda":
+            ag_id = int(args["agenda_id"])
+            cat_row = conn.execute("SELECT categories FROM agenda_preferences WHERE id = 1").fetchone()
+            fin_status = "Finalized Agendas"
+            if cat_row and isinstance(cat_row[0], list):
+                for c in cat_row[0]:
+                    if isinstance(c, dict) and (c.get("warn_on_leave") or str(c.get("name", "")).lower().startswith("finalized")):
+                        fin_status = c["name"]
+                        break
+            row = conn.execute(
+                "UPDATE agendas SET status = %s, finalized_at = COALESCE(finalized_at, now()), updated_at = now() "
+                "WHERE id = %s RETURNING id, title, status",
+                (fin_status, ag_id),
+            ).fetchone()
+            if not row:
+                return {"ok": False, "error": f"Agenda #{ag_id} not found"}, None
+            return (
+                {"ok": True, "agenda_id": row[0], "title": row[1], "status": row[2]},
+                {"tool": name, "summary": f"Finalized agenda #{row[0]}: {row[1]}", "route": f"/app/agendas/{row[0]}"},
+            )
+
+        if name == "create_permit":
+            req_type = str(args.get("permit_type_name") or "").strip()
+            req_use = str(args.get("permit_use_name") or "").strip()
+            prop_addr = str(args.get("property_address") or "").strip()
+            app_name = str(args.get("applicant_name") or username or "Admin Intake").strip()
+            app_email = str(args.get("applicant_email") or "").strip()
+            app_phone = str(args.get("applicant_phone") or "").strip()
+            desc = str(args.get("description") or "").strip()
+
+            t_row = conn.execute(
+                "SELECT id, name, kind FROM permit_types WHERE LOWER(name) = LOWER(%s) "
+                "UNION ALL SELECT id, name, kind FROM permit_types WHERE name ILIKE %s LIMIT 1",
+                (req_type, f"%{req_type}%"),
+            ).fetchone()
+            if not t_row:
+                return {"ok": False, "error": f"Permit type '{req_type}' not found"}, None
+            t_id, t_name, t_kind = t_row
+
+            u_row = None
+            if req_use:
+                u_row = conn.execute(
+                    "SELECT id, name, fee_amount FROM permit_uses WHERE permit_type_id = %s AND (LOWER(name) = LOWER(%s) OR name ILIKE %s) LIMIT 1",
+                    (t_id, req_use, f"%{req_use}%"),
+                ).fetchone()
+            if not u_row:
+                u_row = conn.execute(
+                    "SELECT id, name, fee_amount FROM permit_uses WHERE permit_type_id = %s ORDER BY sort_order ASC, id ASC LIMIT 1",
+                    (t_id,),
+                ).fetchone()
+            u_id = u_row[0] if u_row else None
+            u_name = u_row[1] if u_row else t_name
+            fee_amt = u_row[2] if u_row else ""
+
+            year = datetime.now(timezone.utc).year
+            row = conn.execute(
+                "INSERT INTO permits "
+                "(permit_number, applicant_username, permit_type_id, permit_use_id, permit_type_name, permit_use_name, "
+                " applicant_name, applicant_email, applicant_phone, property_address, project_description, fee_amount, accepted_terms, permit_kind, status) "
+                "VALUES ('TEMP', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s, 'submitted') RETURNING id",
+                (username, t_id, u_id, t_name, u_name, app_name, app_email, app_phone, prop_addr, desc, fee_amt, t_kind or "construction"),
+            ).fetchone()
+            pid = row[0]
+            pnum = f"PRM-{year}-{pid:04d}"
+            conn.execute("UPDATE permits SET permit_number = %s WHERE id = %s", (pnum, pid))
+            return (
+                {"ok": True, "permit_id": pid, "permit_number": pnum, "permit_type": t_name, "permit_use": u_name, "property_address": prop_addr, "fee_amount": fee_amt},
+                {"tool": name, "summary": f"Created {t_name} ({pnum}) for {prop_addr}", "route": "/app/permits-review"},
+            )
+
+        if name == "update_permit_status":
+            pnum = str(args.get("permit_number") or "").strip()
+            status = str(args.get("status") or "").strip().lower()
+            notes = str(args.get("notes") or "").strip()
+            row = conn.execute(
+                "UPDATE permits SET status = %s, review_notes = CASE WHEN %s <> '' THEN %s ELSE review_notes END, "
+                "reviewed_by = %s, updated_at = now() WHERE UPPER(permit_number) = UPPER(%s) RETURNING id, permit_number, status",
+                (status, notes, notes, username, pnum),
+            ).fetchone()
+            if not row:
+                return {"ok": False, "error": f"Permit '{pnum}' not found"}, None
+            return (
+                {"ok": True, "permit_number": row[1], "status": row[2]},
+                {"tool": name, "summary": f"Updated {row[1]} status to {row[2]}", "route": "/app/permits-review"},
+            )
+
+        if name == "schedule_inspection":
+            pnum = str(args.get("permit_number") or "").strip()
+            itype = str(args.get("inspection_type") or "Site Inspection").strip()
+            sdate = str(args.get("scheduled_date") or "").strip()
+            insp = str(args.get("inspector") or "").strip()
+            notes = str(args.get("notes") or "").strip()
+            p_row = conn.execute("SELECT id, permit_number FROM permits WHERE UPPER(permit_number) = UPPER(%s)", (pnum,)).fetchone()
+            if not p_row:
+                return {"ok": False, "error": f"Permit '{pnum}' not found"}, None
+            row = conn.execute(
+                "INSERT INTO permit_inspections (permit_id, inspection_type, scheduled_date, inspector, result, notes) "
+                "VALUES (%s, %s, %s, %s, 'scheduled', %s) RETURNING id",
+                (p_row[0], itype, sdate, insp, notes),
+            ).fetchone()
+            return (
+                {"ok": True, "inspection_id": row[0], "permit_number": p_row[1], "inspection_type": itype, "scheduled_date": sdate},
+                {"tool": name, "summary": f"Scheduled {itype} on {p_row[1]} for {sdate}", "route": "/app/field-inspector"},
+            )
+
+        if name == "list_permits":
+            q = str(args.get("query") or "").strip()
+            st_f = str(args.get("status") or "").strip().lower()
+            like = f"%{q}%"
+            rows = conn.execute(
+                "SELECT permit_number, permit_type_name, permit_use_name, property_address, status, fee_amount "
+                "FROM permits WHERE (%s = '' OR property_address ILIKE %s OR permit_number ILIKE %s OR permit_type_name ILIKE %s) "
+                "AND (%s = '' OR status = %s) ORDER BY id DESC LIMIT 12",
+                (q, like, like, like, st_f, st_f),
+            ).fetchall()
+            return (
+                {"ok": True, "permits": [{"permit_number": r[0], "type": r[1], "use": r[2], "address": r[3], "status": r[4], "fee": r[5]} for r in rows]},
+                None,
+            )
+
+        if name == "create_complaint":
+            addr = str(args.get("property_address") or "").strip()
+            desc = str(args.get("description") or "").strip()
+            ord_sec = str(args.get("ordinance_section") or "").strip()
+            cname = str(args.get("complainant_name") or "").strip()
+            anon = bool(args.get("is_anonymous", not bool(cname)))
+            year = datetime.now(timezone.utc).year
+            row = conn.execute(
+                "INSERT INTO complaints (complaint_number, intake_channel, is_anonymous, complainant_name, subject_property_address, ordinance_section, conduct_description) "
+                "VALUES ('TEMP', 'staff_oral', %s, %s, %s, %s, %s) RETURNING id",
+                (anon, cname, addr, ord_sec, desc),
+            ).fetchone()
+            cid = row[0]
+            cnum = f"CMP-{year}-{cid:04d}"
+            conn.execute("UPDATE complaints SET complaint_number = %s WHERE id = %s", (cnum, cid))
+            return (
+                {"ok": True, "complaint_id": cid, "complaint_number": cnum, "property_address": addr},
+                {"tool": name, "summary": f"Logged complaint {cnum}" + (f" ({addr})" if addr else ""), "route": "/app/complaints-manage"},
+            )
+
+        if name == "create_work_order":
+            cat = str(args.get("category") or "Pothole / Street").strip()
+            loc = str(args.get("location") or "").strip()
+            desc = str(args.get("description") or "").strip()
+            prio = str(args.get("priority") or "normal").strip().lower()
+            if prio not in ("low", "normal", "high", "urgent"):
+                prio = "normal"
+            year = datetime.now(timezone.utc).year
+            row = conn.execute(
+                "INSERT INTO public_works_orders (work_order_number, category, location, description, priority) "
+                "VALUES ('TEMP', %s, %s, %s, %s) RETURNING id",
+                (cat, loc, desc, prio),
+            ).fetchone()
+            wid = row[0]
+            wnum = f"WO-{year}-{wid:04d}"
+            conn.execute("UPDATE public_works_orders SET work_order_number = %s WHERE id = %s", (wnum, wid))
+            return (
+                {"ok": True, "work_order_id": wid, "work_order_number": wnum, "location": loc},
+                {"tool": name, "summary": f"Created work order {wnum} ({loc})", "route": "/app/complaints-manage"},
+            )
+
+        if name == "create_public_record":
+            title = str(args.get("title") or "").strip()
+            cat = str(args.get("category") or "Policy").strip()
+            cp = str(args.get("counterparty") or "").strip()
+            notes = str(args.get("notes") or "").strip()
+            is_pub = bool(args.get("is_public", True))
+            year = datetime.now(timezone.utc).year
+            row = conn.execute(
+                "INSERT INTO repository_documents (doc_number, category, title, counterparty, notes, is_public, created_by) "
+                "VALUES ('TEMP', %s, %s, %s, %s, %s, %s) RETURNING id",
+                (cat, title, cp, notes, is_pub, username),
+            ).fetchone()
+            did = row[0]
+            dnum = f"REC-{year}-{did:04d}"
+            conn.execute("UPDATE repository_documents SET doc_number = %s WHERE id = %s", (dnum, did))
+            return (
+                {"ok": True, "record_id": did, "doc_number": dnum, "title": title, "category": cat},
+                {"tool": name, "summary": f"Created {cat} {dnum}: {title}", "route": "/app/records-repo"},
+            )
+
+        if name == "search_records":
+            q = str(args.get("query") or "").strip()
+            terms = _extract_search_terms(q)
+            if not terms:
+                rows = conn.execute(
+                    "SELECT id, doc_number, category, title, notes, tags, is_public FROM repository_documents "
+                    "ORDER BY id DESC LIMIT 10"
+                ).fetchall()
+            else:
+                conds = " OR ".join(
+                    "(d.title ILIKE %s OR d.notes ILIKE %s OR d.tags ILIKE %s OR d.doc_number ILIKE %s OR f.filename ILIKE %s)"
+                    for _ in terms
+                )
+                params: list = []
+                for t in terms:
+                    like = f"%{t}%"
+                    params.extend([like, like, like, like, like])
+                rows = conn.execute(
+                    f"SELECT DISTINCT d.id, d.doc_number, d.category, d.title, d.notes, d.tags, d.is_public "
+                    f"FROM repository_documents d LEFT JOIN repository_files f ON f.document_id = d.id "
+                    f"WHERE {conds} ORDER BY d.id DESC LIMIT 10",
+                    tuple(params),
+                ).fetchall()
+            records = []
+            for r in rows:
+                files = conn.execute(
+                    "SELECT id, filename, content_type, size_bytes FROM repository_files WHERE document_id = %s ORDER BY id ASC",
+                    (r[0],),
+                ).fetchall()
+                records.append({
+                    "id": r[0],
+                    "doc_number": r[1],
+                    "category": r[2],
+                    "title": r[3],
+                    "notes": (r[4] or "")[:500],
+                    "tags": r[5] or "",
+                    "is_public": r[6],
+                    "files": [
+                        {"file_id": f[0], "filename": f[1], "content_type": f[2], "size_bytes": f[3]}
+                        for f in files
+                    ],
+                })
+            return ({"ok": True, "records": records}, None)
+
+        if name == "read_record_file":
+            fid = int(args.get("file_id"))
+            frow = conn.execute(
+                "SELECT filename, content_type, object_key FROM repository_files WHERE id = %s",
+                (fid,),
+            ).fetchone()
+            if not frow:
+                return ({"ok": False, "error": f"File id {fid} not found"}, None)
+            fname_doc, ctype, obj_key = frow[0], frow[1] or "", frow[2]
+            from .storage import get_storage_client
+            bucket = (os.environ.get("S3_BUCKET") or "civicdesk-records").strip()
+            obj = get_storage_client().get_object(bucket, obj_key)
+            try:
+                data = obj.read()
+            finally:
+                obj.close()
+                obj.release_conn()
+            text, truncated = _extract_document_text(fname_doc, ctype, data)
+            return (
+                {"ok": True, "file_id": fid, "filename": fname_doc, "text": text, "truncated": truncated},
+                None,
+            )
+
+        if name == "search_city_code":
+            q = str(args.get("query") or "").strip()
+            terms = _extract_search_terms(q)
+            if not terms:
+                rows = conn.execute(
+                    "SELECT section_number, title, body FROM code_sections ORDER BY sort_order ASC, id ASC LIMIT 10"
+                ).fetchall()
+                index_rows = [(r[0], r[1]) for r in rows]
+            else:
+                # Score title/section matches higher than body-only matches
+                score_parts = []
+                score_params: list = []
+                where_parts = []
+                where_params: list = []
+                for t in terms:
+                    like = f"%{t}%"
+                    where_parts.append("(section_number ILIKE %s OR title ILIKE %s OR body ILIKE %s)")
+                    where_params.extend([like, like, like])
+                    score_parts.append("(CASE WHEN section_number ILIKE %s THEN 5 WHEN title ILIKE %s THEN 3 WHEN body ILIKE %s THEN 1 ELSE 0 END)")
+                    score_params.extend([like, like, like])
+                score_expr = " + ".join(score_parts)
+                where_expr = " OR ".join(where_parts)
+                rows = conn.execute(
+                    f"SELECT section_number, title, body, ({score_expr}) AS score "
+                    f"FROM code_sections WHERE {where_expr} "
+                    f"ORDER BY score DESC, sort_order ASC, id ASC LIMIT 12",
+                    tuple(score_params + where_params),
+                ).fetchall()
+                index_rows = conn.execute(
+                    f"SELECT section_number, title FROM code_sections WHERE {where_expr} "
+                    f"ORDER BY sort_order ASC, id ASC LIMIT 30",
+                    tuple(where_params),
+                ).fetchall()
+            sections = []
+            for r in rows:
+                body_txt = (r[2] or "").strip()
+                sections.append({
+                    "section_number": r[0],
+                    "title": r[1],
+                    "body": body_txt[:4500],
+                    "truncated": len(body_txt) > 4500,
+                })
+            return (
+                {
+                    "ok": True,
+                    "sections": sections,
+                    "matching_index": [{"section_number": ir[0], "title": ir[1]} for ir in index_rows],
+                },
+                None,
+            )
+
+        if name == "get_city_code_section":
+            sec = str(args.get("section_number") or "").strip()
+            row = conn.execute(
+                "SELECT section_number, title, body FROM code_sections WHERE section_number = %s",
+                (sec,),
+            ).fetchone()
+            if not row:
+                row = conn.execute(
+                    "SELECT section_number, title, body FROM code_sections WHERE section_number ILIKE %s ORDER BY id ASC LIMIT 1",
+                    (f"%{sec}%",),
+                ).fetchone()
+            if not row:
+                return ({"ok": False, "error": f"Code section '{sec}' not found"}, None)
+            body_txt = (row[2] or "").strip()
+            return (
+                {
+                    "ok": True,
+                    "section_number": row[0],
+                    "title": row[1],
+                    "body": body_txt[:16000],
+                    "truncated": len(body_txt) > 16000,
+                },
+                None,
+            )
+
+        if name == "search_portal_info":
+            q = str(args.get("query") or "").strip()
+            terms = _extract_search_terms(q) or [q]
+            like_clauses_pages = " OR ".join("(title ILIKE %s OR summary ILIKE %s OR body ILIKE %s)" for _ in terms)
+            p_params = [f"%{t}%" for t in terms for _ in range(3)]
+            pages = conn.execute(
+                f"SELECT title, summary, body FROM city_pages WHERE {like_clauses_pages} ORDER BY sort_order ASC LIMIT 5",
+                tuple(p_params),
+            ).fetchall()
+            like_clauses_faqs = " OR ".join("(question ILIKE %s OR answer ILIKE %s)" for _ in terms)
+            f_params = [f"%{t}%" for t in terms for _ in range(2)]
+            faqs = conn.execute(
+                f"SELECT question, answer FROM city_faqs WHERE {like_clauses_faqs} ORDER BY sort_order ASC LIMIT 5",
+                tuple(f_params),
+            ).fetchall()
+            like_clauses_notices = " OR ".join("(title ILIKE %s OR summary ILIKE %s OR body ILIKE %s)" for _ in terms)
+            notices = conn.execute(
+                f"SELECT title, summary, body FROM city_notices WHERE {like_clauses_notices} ORDER BY id DESC LIMIT 5",
+                tuple(p_params),
+            ).fetchall()
+            like_clauses_blog = " OR ".join("(title ILIKE %s OR lead_in ILIKE %s OR body ILIKE %s)" for _ in terms)
+            posts = conn.execute(
+                f"SELECT title, lead_in, body FROM blog_posts WHERE {like_clauses_blog} ORDER BY id DESC LIMIT 5",
+                tuple(p_params),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "pages": [{"title": r[0], "summary": r[1], "body": (r[2] or "")[:1500]} for r in pages],
+                    "faqs": [{"question": r[0], "answer": (r[1] or "")[:1000]} for r in faqs],
+                    "notices": [{"title": r[0], "summary": r[1], "body": (r[2] or "")[:1000]} for r in notices],
+                    "blog_posts": [{"title": r[0], "lead_in": r[1], "body": (r[2] or "")[:1000]} for r in posts],
+                },
+                None,
+            )
+
+        if name == "create_directory_entry":
+            entry_name = str(args.get("name") or "").strip()
+            role = str(args.get("title_role") or "").strip()
+            dept = str(args.get("department") or "").strip()
+            email = str(args.get("email") or "").strip()
+            phone = str(args.get("phone") or "").strip()
+            elected = bool(args.get("is_elected", False))
+            row = conn.execute(
+                "INSERT INTO city_directory_entries (name, title_role, department, email, phone, is_elected) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                (entry_name, role, dept, email, phone, elected),
+            ).fetchone()
+            return (
+                {"ok": True, "entry_id": row[0], "name": entry_name},
+                {"tool": name, "summary": f"Added directory contact: {entry_name}", "route": "/app/directory-manage"},
+            )
+
+        if name == "create_faq":
+            q = str(args.get("question") or "").strip()
+            a = str(args.get("answer") or "").strip()
+            cat = str(args.get("category") or "General").strip()
+            row = conn.execute(
+                "INSERT INTO city_faqs (question, answer, category) VALUES (%s, %s, %s) RETURNING id",
+                (q, a, cat),
+            ).fetchone()
+            return (
+                {"ok": True, "faq_id": row[0], "question": q},
+                {"tool": name, "summary": f"Added FAQ: {q[:60]}", "route": "/app/directory-manage"},
+            )
+
+        if name == "create_page":
+            title = str(args.get("title") or "").strip()
+            summary = str(args.get("summary") or "").strip()
+            body_txt = str(args.get("body") or "").strip()
+            is_pub = bool(args.get("is_public", True))
+            slug = _slugify(title, "page")
+            if conn.execute("SELECT 1 FROM city_pages WHERE slug = %s", (slug,)).fetchone():
+                slug = f"{slug}-{int(datetime.now(timezone.utc).timestamp()) % 10000}"
+            row = conn.execute(
+                "INSERT INTO city_pages (slug, title, summary, body, is_public, updated_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, slug",
+                (slug, title, summary, body_txt, is_pub, username),
+            ).fetchone()
+            return (
+                {"ok": True, "page_id": row[0], "slug": row[1], "title": title},
+                {"tool": name, "summary": f"Created page: {title}", "route": "/app/pages-manage"},
+            )
+
+        if name == "add_contractor_license":
+            bname = str(args.get("business_name") or "").strip()
+            lnum = str(args.get("license_number") or "").strip()
+            ltype = str(args.get("license_type") or "General Contractor").strip()
+            email = str(args.get("email") or "").strip()
+            phone = str(args.get("phone") or "").strip()
+            row = conn.execute(
+                "INSERT INTO contractor_licenses (business_name, license_number, license_type, email, phone) "
+                "VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (bname, lnum, ltype, email, phone),
+            ).fetchone()
+            return (
+                {"ok": True, "contractor_id": row[0], "business_name": bname, "license_number": lnum},
+                {"tool": name, "summary": f"Added contractor: {bname} ({lnum})", "route": "/app/contractors"},
+            )
+
+        if name == "create_utility_bill":
+            acct = str(args.get("account_number") or "").strip()
+            pname = str(args.get("payer_name") or "").strip()
+            addr = str(args.get("service_address") or "").strip()
+            amt = str(args.get("amount_due") or "0.00").strip().lstrip("$")
+            due = str(args.get("due_date") or "").strip()
+            desc = str(args.get("description") or "Quarterly Utility Bill").strip()
+            year = datetime.now(timezone.utc).year
+            row = conn.execute(
+                "INSERT INTO municipal_bills (reference_number, bill_type, account_number, payer_name, service_address, description, amount_due, due_date, created_by) "
+                "VALUES ('TEMP', 'utility', %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+                (acct, pname, addr, desc, amt, due, username),
+            ).fetchone()
+            bid = row[0]
+            ref = f"UTL-{year}-{bid:04d}"
+            conn.execute("UPDATE municipal_bills SET reference_number = %s WHERE id = %s", (ref, bid))
+            return (
+                {"ok": True, "bill_id": bid, "reference_number": ref, "payer_name": pname, "amount_due": amt},
+                {"tool": name, "summary": f"Created utility bill {ref} (${amt}) for {pname}", "route": "/app/utilities-manage"},
+            )
+
+        if name == "create_citation":
+            pname = str(args.get("payer_name") or "").strip()
+            addr = str(args.get("service_address") or "").strip()
+            desc = str(args.get("description") or "").strip()
+            amt = str(args.get("amount_due") or "0.00").strip().lstrip("$")
+            due = str(args.get("due_date") or "").strip()
+            year = datetime.now(timezone.utc).year
+            row = conn.execute(
+                "INSERT INTO municipal_bills (reference_number, bill_type, payer_name, service_address, description, amount_due, due_date, created_by) "
+                "VALUES ('TEMP', 'citation', %s, %s, %s, %s, %s, %s) RETURNING id",
+                (pname, addr, desc, amt, due, username),
+            ).fetchone()
+            cid = row[0]
+            ref = f"CIT-{year}-{cid:04d}"
+            conn.execute("UPDATE municipal_bills SET reference_number = %s WHERE id = %s", (ref, cid))
+            return (
+                {"ok": True, "citation_id": cid, "reference_number": ref, "payer_name": pname, "amount_due": amt},
+                {"tool": name, "summary": f"Issued citation {ref} (${amt}) to {pname}", "route": "/app/citations-manage"},
+            )
+
+        if name == "toggle_module":
+            mid = str(args.get("module_id") or "").strip().lower()
+            en = bool(args.get("enabled", True))
+            conn.execute(
+                "INSERT INTO core_modules (module_id, enabled, updated_by, updated_at) VALUES (%s, %s, %s, now()) "
+                "ON CONFLICT (module_id) DO UPDATE SET enabled = EXCLUDED.enabled, updated_by = EXCLUDED.updated_by, updated_at = now()",
+                (mid, en, username),
+            )
+            return (
+                {"ok": True, "module_id": mid, "enabled": en},
+                {"tool": name, "summary": f"{'Enabled' if en else 'Disabled'} module '{mid}'", "route": "/app/modules"},
+            )
+
+        if name == "update_branding":
+            updates = []
+            params = []
+            for col in ("city_title", "meeting_time", "meeting_location", "footer_text"):
+                if args.get(col) is not None and str(args[col]).strip():
+                    updates.append(f"{col} = %s")
+                    params.append(str(args[col]).strip())
+            if updates:
+                conn.execute(f"UPDATE agenda_preferences SET {', '.join(updates)}, updated_at = now() WHERE id = 1", tuple(params))
+            return (
+                {"ok": True, "updated": list(args.keys())},
+                {"tool": name, "summary": "Updated city branding/preferences", "route": "/app/preferences-general"},
+            )
+
+    return {"ok": False, "error": f"Unknown tool: {name}"}, None
+
+
+class AiConfigIn(BaseModel):
+    api_key: str | None = Field(default=None, max_length=300)
+    model: str = DEFAULT_GEMINI_MODEL
+
+
+class AiHistoryMsg(BaseModel):
+    role: str
+    text: str
+
+
+class AiCommandIn(BaseModel):
+    prompt: str = Field(..., min_length=2, max_length=2000)
+    history: list[AiHistoryMsg] = Field(default_factory=list, max_length=20)
+
+
+def _require_ai_user(request: Request) -> dict:
+    user = current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if user.get("role") == "read_only":
+        raise HTTPException(status_code=403, detail="Staff or administrator access required")
+    return user
+
+
+def _require_ai_module_enabled() -> None:
+    if not is_module_enabled("ai_assistant"):
+        raise HTTPException(status_code=403, detail="AI Admin Assistant module is disabled. Enable it in Manage Modules.")
+
+
+@router.get("/status")
+def get_ai_status(user: dict = Depends(_require_ai_user)):
+    key, model, source = _load_gemini_config()
+    return {
+        "enabled": is_module_enabled("ai_assistant"),
+        "configured": bool(key),
+        "can_configure": user.get("role") == "admin",
+        "allowed_tools_count": len(_allowed_tools_for_user(user)),
+        "model": model,
+        "source": source,
+        "available_models": list(_ALLOWED_MODELS),
+    }
+
+
+@router.put("/config")
+def save_ai_config(body: AiConfigIn, user: dict = Depends(require_admin)):
+    _require_ai_module_enabled()
+    require_not_demo_mode("Configuring Gemini AI key")
+    existing_key, _, existing_source = _load_gemini_config()
+    key = (body.api_key or "").strip() or existing_key
+    if len(key) < 10:
+        raise HTTPException(status_code=400, detail="Gemini API key is required")
+    model = body.model.strip() if body.model.strip() in _ALLOWED_MODELS else DEFAULT_GEMINI_MODEL
+    # Quick verification call to Gemini
+    _call_gemini(
+        key,
+        model,
+        {"contents": [{"role": "user", "parts": [{"text": "Reply with OK"}]}]},
+    )
+    with pool.connection() as conn:
+        conn.execute(
+            "INSERT INTO core_integrations (provider, enabled, api_key, config, validated_at, last_status, updated_by, updated_at) "
+            "VALUES ('gemini_ai', TRUE, %s, %s, now(), 'ok', %s, now()) "
+            "ON CONFLICT (provider) DO UPDATE SET "
+            "enabled = TRUE, api_key = EXCLUDED.api_key, config = EXCLUDED.config, "
+            "validated_at = now(), last_status = 'ok', updated_by = EXCLUDED.updated_by, updated_at = now()",
+            (key, Jsonb({"model": model}), user["username"]),
+        )
+    record_audit(user["username"], "ai.configure", f"Configured Gemini AI ({model})")
+    return {"configured": True, "model": model, "source": existing_source if not (body.api_key or "").strip() else "integrations"}
+
+
+@router.delete("/config")
+def delete_ai_config(user: dict = Depends(require_admin)):
+    _require_ai_module_enabled()
+    require_not_demo_mode("Removing Gemini AI key")
+    with pool.connection() as conn:
+        conn.execute("DELETE FROM core_integrations WHERE provider = 'gemini_ai'")
+    record_audit(user["username"], "ai.clear_config", "Removed Gemini AI key")
+    return {"configured": False, "model": DEFAULT_GEMINI_MODEL, "source": "none"}
+
+
+_SEARCH_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "can", "city", "do", "does",
+    "for", "from", "have", "how", "i", "in", "is", "it", "many", "much", "my",
+    "of", "on", "or", "the", "this", "to", "what", "when", "where", "which",
+    "who", "with", "you", "your",
+}
+
+
+def _extract_search_terms(query: str) -> list[str]:
+    words = [w.strip(".,?!;:\"'()[]{}") for w in (query or "").lower().split()]
+    terms = [w for w in words if len(w) >= 2 and w not in _SEARCH_STOPWORDS]
+    if not terms and (query or "").strip():
+        terms = [(query or "").strip()]
+    return terms[:6]
+
+
+def _extract_document_text(filename: str, content_type: str, data: bytes, max_chars: int = 12000) -> tuple[str, bool]:
+    lower = (filename or "").lower()
+    ctype = (content_type or "").lower()
+    text = ""
+    if lower.endswith(".pdf") or "pdf" in ctype:
+        import fitz
+        doc = fitz.open(stream=data, filetype="pdf")
+        try:
+            chunks = []
+            total = 0
+            for page in doc:
+                t = page.get_text("text") or ""
+                chunks.append(t)
+                total += len(t)
+                if total >= max_chars:
+                    break
+            text = "\n".join(chunks)
+        finally:
+            doc.close()
+    elif lower.endswith(".docx") or "wordprocessingml" in ctype:
+        import io
+        import xml.etree.ElementTree as ET
+        import zipfile
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            xml_bytes = zf.read("word/document.xml")
+        root = ET.fromstring(xml_bytes)
+        text = " ".join(t.strip() for t in root.itertext() if t and t.strip())
+    elif lower.endswith((".txt", ".md", ".csv", ".json", ".html", ".xml")) or ctype.startswith("text/"):
+        text = data.decode("utf-8", errors="replace")
+    else:
+        return (f"[Binary file {filename} ({ctype or 'unknown'}, {len(data)} bytes) cannot be extracted as plain text.]", False)
+    text = text.strip()
+    return (text[:max_chars], len(text) > max_chars)
+
+
+def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
+    username = user["username"]
+    api_key, model, _ = _load_gemini_config()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Gemini API key is not configured. Ask an administrator to add it in the AI Assistant settings.")
+
+    allowed_decls = _allowed_tools_for_user(user)
+    if not allowed_decls:
+        raise HTTPException(status_code=403, detail="Your account does not have permission to use any AI Assistant tools.")
+
+    today_str = date.today().isoformat()
+    sys_instruction = (
+        f"You are the DocketHall municipal admin assistant. Today's date is {today_str}. "
+        "DocketHall is an all-in-one municipal operations platform covering: Agendas & Live Meetings, "
+        "Permits & Land-Use/Variance Applications, Inspections, Contractor Licensing, Municipal City Code, "
+        "Public Records & FOIA, Code-Enforcement Complaints & 311 Work Orders, Public Notices, City Blog, "
+        "Calendar, City Directory & FAQs, Info Pages, Utility Billing, Municipal Citations, and Site Modules/Branding. "
+        "1) When the admin asks a QUESTION about city rules, ordinances, limits, permits, policies, records, or schedules, "
+        "ALWAYS search the relevant data using your read/search tools (search_city_code, get_city_code_section, "
+        "search_records, read_record_file, search_portal_info, list_agendas, list_permits), read the returned text, "
+        "and give a clear, accurate answer citing the specific Code Section or document title. "
+        "2) When the admin asks to CREATE, UPDATE, or DO something, use your action tools directly with clean, properly "
+        "formatted arguments (YYYY-MM-DD dates, '6:00 PM' times; if the year is omitted for a future date like 'December 1', "
+        "choose the next upcoming occurrence relative to today), and summarize concisely what was done."
+    )
+
+    contents = []
+    for h in history[-12:]:
+        role = "model" if h.get("role") == "model" else "user"
+        txt = str(h.get("text") or "").strip()
+        if txt:
+            contents.append({"role": role, "parts": [{"text": txt}]})
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
+    tools = [{"functionDeclarations": allowed_decls}]
+    actions: list[dict] = []
+    final_text = ""
+
+    for _ in range(8):
+        resp = _call_gemini(
+            api_key,
+            model,
+            {
+                "systemInstruction": {"parts": [{"text": sys_instruction}]},
+                "contents": contents,
+                "tools": tools,
+            },
+        )
+        cands = resp.get("candidates") or []
+        if not cands:
+            break
+        model_content = cands[0].get("content") or {}
+        parts = model_content.get("parts") or []
+        contents.append({"role": "model", "parts": parts})
+
+        fn_calls = [p["functionCall"] for p in parts if isinstance(p, dict) and "functionCall" in p]
+        text_parts = [p["text"] for p in parts if isinstance(p, dict) and p.get("text") and not p.get("thought")]
+        if text_parts:
+            final_text = "\n".join(text_parts).strip()
+
+        if not fn_calls:
+            break
+
+        fn_responses = []
+        for fc in fn_calls:
+            fname = fc.get("name", "")
+            fargs = fc.get("args") or {}
+            try:
+                result_obj, action_card = _execute_tool(fname, fargs, user)
+            except Exception as exc:
+                result_obj, action_card = {"ok": False, "error": str(exc)}, None
+            if action_card:
+                actions.append(action_card)
+            fn_resp_obj = {
+                "name": fname,
+                "response": result_obj,
+            }
+            if fc.get("id"):
+                fn_resp_obj["id"] = fc["id"]
+            fn_responses.append({"functionResponse": fn_resp_obj})
+        contents.append({"role": "user", "parts": fn_responses})
+
+    if not final_text and not actions:
+        contents.append({
+            "role": "user",
+            "parts": [{"text": "Based on the search results above, please answer the question directly. If the municipal code or documents do not specify a limit, state that clearly and cite the relevant sections you checked."}],
+        })
+        resp = _call_gemini(
+            api_key,
+            model,
+            {
+                "systemInstruction": {"parts": [{"text": sys_instruction}]},
+                "contents": contents,
+                "tools": tools,
+                "toolConfig": {"functionCallingConfig": {"mode": "NONE"}},
+            },
+        )
+        cands = resp.get("candidates") or []
+        if cands:
+            parts = (cands[0].get("content") or {}).get("parts") or []
+            text_parts = [p["text"] for p in parts if isinstance(p, dict) and p.get("text") and not p.get("thought")]
+            if text_parts:
+                final_text = "\n".join(text_parts).strip()
+
+    if not final_text and actions:
+        final_text = "Done: " + "; ".join(a["summary"] for a in actions)
+    record_audit(username, "ai.command", f"Prompt: {prompt[:120]} | Actions: {len(actions)}")
+    return {"reply": final_text or "I couldn't find an answer or complete an action for that request.", "actions": actions}
+
+
+@router.post("/command")
+async def run_ai_command(body: AiCommandIn, user: dict = Depends(_require_ai_user)):
+    _require_ai_module_enabled()
+    require_not_demo_mode("AI Assistant")
+    hist = [{"role": m.role, "text": m.text} for m in body.history]
+    return await run_in_threadpool(_run_ai_command, body.prompt.strip(), hist, user)
