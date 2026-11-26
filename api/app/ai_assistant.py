@@ -134,6 +134,24 @@ _TOOL_DECLARATIONS = [
         },
     },
     {
+        "name": "update_agenda_item",
+        "description": "Update an existing item on an in-progress agenda (title, description, section, presenter, recommended_motion, fiscal_impact). Use get_agenda_details first to find item_id.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "agenda_id": {"type": "INTEGER", "description": "Agenda ID"},
+                "item_id": {"type": "INTEGER", "description": "Existing agenda item ID from get_agenda_details"},
+                "title": {"type": "STRING", "description": "Optional updated title"},
+                "description": {"type": "STRING", "description": "Optional updated description / background"},
+                "section_name": {"type": "STRING", "description": "Optional updated section"},
+                "presenter": {"type": "STRING", "description": "Optional presenter"},
+                "recommended_motion": {"type": "STRING", "description": "Optional recommended motion"},
+                "fiscal_impact": {"type": "STRING", "description": "Optional fiscal impact"},
+            },
+            "required": ["agenda_id", "item_id"],
+        },
+    },
+    {
         "name": "create_notice",
         "description": "Create a public notice, news item, bid, or job posting.",
         "parameters": {
@@ -699,6 +717,7 @@ _TOOL_DECLARATIONS = [
 _TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "create_agenda": ("agendas", ("agendas.manage",)),
     "add_agenda_item": ("agendas", ("agendas.manage", "agendas.submit")),
+    "update_agenda_item": ("agendas", ("agendas.manage", "agendas.submit")),
     "create_todo": ("agendas", ("agendas.manage",)),
     "list_agendas": ("agendas", ("agendas.manage", "agendas.submit")),
     "finalize_agenda": ("agendas", ("agendas.manage",)),
@@ -863,6 +882,60 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             return (
                 {"ok": True, "item_id": row[0], "agenda_id": ag_id, "title": title, "section_name": section_name},
                 {"tool": name, "summary": f"Added item '{title}' to {ag_exists[1]}", "route": f"/app/agendas/{ag_id}"},
+            )
+
+        if name == "update_agenda_item":
+            ag_id = int(args["agenda_id"])
+            item_id = int(args["item_id"])
+            ag_exists = conn.execute(
+                "SELECT id, title, status, finalized_at FROM agendas WHERE id = %s",
+                (ag_id,),
+            ).fetchone()
+            if not ag_exists:
+                return {"ok": False, "error": f"Agenda #{ag_id} not found"}, None
+            cat_row = conn.execute("SELECT categories FROM agenda_preferences WHERE id = 1").fetchone()
+            final_cats = {
+                c["name"]
+                for c in (cat_row[0] if cat_row and isinstance(cat_row[0], list) else [])
+                if isinstance(c, dict) and c.get("is_final") and c.get("name")
+            }
+            ag_status = str(ag_exists[2] or "")
+            if ag_exists[3] is not None or ag_status.lower().startswith("finalized") or ag_status in final_cats:
+                return {
+                    "ok": False,
+                    "error": f"Agenda #{ag_id} ('{ag_exists[1]}') is finalized and cannot be modified.",
+                }, None
+            it_row = conn.execute(
+                "SELECT id, title FROM agenda_items WHERE id = %s AND agenda_id = %s",
+                (item_id, ag_id),
+            ).fetchone()
+            if not it_row:
+                return {"ok": False, "error": f"Agenda item #{item_id} not found on agenda #{ag_id}"}, None
+            col_map = {
+                "title": "title",
+                "description": "description",
+                "section_name": "section",
+                "presenter": "presenter",
+                "recommended_motion": "recommended_motion",
+                "fiscal_impact": "fiscal_impact",
+            }
+            sets = []
+            params = []
+            for arg_k, db_col in col_map.items():
+                if args.get(arg_k) is not None:
+                    sets.append(f"{db_col} = %s")
+                    params.append(str(args[arg_k]).strip())
+            if not sets:
+                return {"ok": False, "error": "No fields provided to update"}, None
+            params.extend([item_id, ag_id])
+            conn.execute(
+                f"UPDATE agenda_items SET {', '.join(sets)} WHERE id = %s AND agenda_id = %s",
+                tuple(params),
+            )
+            new_title = str(args.get("title") or it_row[1]).strip()
+            return (
+                {"ok": True, "item_id": item_id, "agenda_id": ag_id, "title": new_title},
+                {"tool": name, "summary": f"Updated item #{item_id} ('{new_title}') on {ag_exists[1]}", "route": f"/app/agendas/{ag_id}"},
             )
 
         if name == "create_todo":
@@ -2210,6 +2283,8 @@ def _describe_proposed_action(name: str, args: dict) -> str:
         return f"Create agenda '{a.get('title') or 'Meeting Agenda'}' on {a.get('meeting_date', '')} at {a.get('meeting_time') or '6:30 PM'}"
     if name == "add_agenda_item":
         return f"Add agenda item '{a.get('title', '')}' to agenda #{a.get('agenda_id', '')} ({a.get('section_name') or 'New Business'})"
+    if name == "update_agenda_item":
+        return f"Update agenda item #{a.get('item_id', '')} on agenda #{a.get('agenda_id', '')}" + (f" ('{a['title']}')" if a.get("title") else "")
     if name == "finalize_agenda":
         return f"Finalize agenda #{a.get('agenda_id', '')}"
     if name == "create_todo":
