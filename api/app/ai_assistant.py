@@ -38,13 +38,10 @@ router = APIRouter(prefix="/api/ai", tags=["ai"])
 
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
 _ALLOWED_MODELS = (
-    "gemini-3.8-flash-lite",
-    "gemini-3.8-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
+    "gemini-3.8-flash",
     "gemini-3.8-pro",
-    "gemini-2.5-flash-lite",
-    "gemini-2.5-flash",
 )
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
@@ -571,15 +568,30 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
 
         if name == "add_agenda_item":
             ag_id = int(args["agenda_id"])
-            ag_exists = conn.execute("SELECT id, title FROM agendas WHERE id = %s", (ag_id,)).fetchone()
+            ag_exists = conn.execute(
+                "SELECT id, title, status, finalized_at FROM agendas WHERE id = %s",
+                (ag_id,),
+            ).fetchone()
             if not ag_exists:
                 return {"ok": False, "error": f"Agenda #{ag_id} not found"}, None
+            cat_row = conn.execute("SELECT categories FROM agenda_preferences WHERE id = 1").fetchone()
+            final_cats = {
+                c["name"]
+                for c in (cat_row[0] if cat_row and isinstance(cat_row[0], list) else [])
+                if isinstance(c, dict) and c.get("is_final") and c.get("name")
+            }
+            ag_status = str(ag_exists[2] or "")
+            if ag_exists[3] is not None or ag_status.lower().startswith("finalized") or ag_status in final_cats:
+                return {
+                    "ok": False,
+                    "error": f"Agenda #{ag_id} ('{ag_exists[1]}') is finalized and cannot be modified.",
+                }, None
             max_pos = conn.execute("SELECT COALESCE(MAX(position), 0) FROM agenda_items WHERE agenda_id = %s", (ag_id,)).fetchone()[0]
             title = str(args.get("title") or "").strip()
             section_name = str(args.get("section_name") or "New Business").strip()
             desc = str(args.get("description") or "").strip()
             row = conn.execute(
-                "INSERT INTO agenda_items (agenda_id, position, title, section_name, description) "
+                "INSERT INTO agenda_items (agenda_id, position, title, section, description) "
                 "VALUES (%s, %s, %s, %s, %s) RETURNING id",
                 (ag_id, max_pos + 1, title, section_name, desc),
             ).fetchone()
@@ -593,11 +605,13 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             due_raw = str(args.get("due_date") or "").strip()
             due_val = date.fromisoformat(due_raw) if due_raw else None
             notes = str(args.get("notes") or "").strip()
-            max_pos = conn.execute("SELECT COALESCE(MAX(position), 0) FROM agenda_items WHERE agenda_id IS NULL").fetchone()[0]
+            next_pos = conn.execute(
+                "SELECT COALESCE(MAX(position), 0) + 1 FROM agenda_items WHERE agenda_id IS NULL"
+            ).fetchone()[0]
             row = conn.execute(
-                "INSERT INTO agenda_items (agenda_id, position, title, description, todo_due_date, todo_status) "
-                "VALUES (NULL, %s, %s, %s, %s, 'open') RETURNING id",
-                (max_pos + 1, title, notes, due_val),
+                "INSERT INTO agenda_items (agenda_id, position, title, description, target_date, todo_status, assigned_to, recurrence) "
+                "VALUES (NULL, %s, %s, %s, %s, 'open', %s, 'none') RETURNING id",
+                (next_pos, title, notes, due_val, username),
             ).fetchone()
             return (
                 {"ok": True, "todo_id": row[0], "title": title, "due_date": due_val.isoformat() if due_val else None},
@@ -666,7 +680,7 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             enabled = bool(args.get("enabled", False))
             msg = str(args.get("message") or "").strip()
             conn.execute(
-                "UPDATE agenda_preferences SET urgent_alert_enabled = %s, urgent_alert_message = %s, updated_at = now() WHERE id = 1",
+                "UPDATE agenda_preferences SET alert_enabled = %s, alert_message = %s, updated_at = now() WHERE id = 1",
                 (enabled, msg if enabled else ""),
             )
             return (
@@ -1167,9 +1181,9 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             mid = str(args.get("module_id") or "").strip().lower()
             en = bool(args.get("enabled", True))
             conn.execute(
-                "INSERT INTO core_modules (module_id, enabled, updated_by, updated_at) VALUES (%s, %s, %s, now()) "
-                "ON CONFLICT (module_id) DO UPDATE SET enabled = EXCLUDED.enabled, updated_by = EXCLUDED.updated_by, updated_at = now()",
-                (mid, en, username),
+                "INSERT INTO core_modules (module_id, enabled, updated_at) VALUES (%s, %s, now()) "
+                "ON CONFLICT (module_id) DO UPDATE SET enabled = EXCLUDED.enabled, updated_at = now()",
+                (mid, en),
             )
             return (
                 {"ok": True, "module_id": mid, "enabled": en},

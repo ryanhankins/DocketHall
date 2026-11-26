@@ -20,13 +20,10 @@ import { api } from './api.js';
 import { useToast } from './toast.jsx';
 
 const DEFAULT_MODELS = [
-  'gemini-3.8-flash-lite',
-  'gemini-3.8-flash',
   'gemini-3.5-flash-lite',
   'gemini-3.1-flash-lite',
+  'gemini-3.8-flash',
   'gemini-3.8-pro',
-  'gemini-2.5-flash-lite',
-  'gemini-2.5-flash',
 ];
 
 function renderInlineMarkdown(text) {
@@ -204,6 +201,7 @@ export default function AiAssistantBar({ onNavigate }) {
       ]);
       if (actions.length > 0) {
         showToast(actions[0].summary, 'ok');
+        window.dispatchEvent(new CustomEvent('dockethall:ai-action', { detail: actions }));
         if (actions[0].route) {
           onNavigate?.(actions[0].route);
         }
@@ -214,6 +212,25 @@ export default function AiAssistantBar({ onNavigate }) {
       showToast(msg, 'error');
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleModelChange(nextModel) {
+    setSelectedModel(nextModel);
+    if (!status.configured) return;
+    setSavingKey(true);
+    try {
+      const res = await api('/api/ai/config', {
+        method: 'PUT',
+        body: JSON.stringify({ model: nextModel }),
+      });
+      setStatus((s) => ({ ...s, configured: !!res.configured, model: res.model }));
+      showToast(`Switched Gemini model to ${res.model}`, 'ok');
+    } catch (err) {
+      setSelectedModel(status.model);
+      showToast(err.message || 'Failed to switch Gemini model', 'error');
+    } finally {
+      setSavingKey(false);
     }
   }
 
@@ -322,10 +339,16 @@ export default function AiAssistantBar({ onNavigate }) {
             <button
               type="button"
               className="btn sm"
+              aria-pressed={showSettings}
               onClick={() => setShowSettings((v) => !v)}
-              style={{ padding: '.2rem .45rem', fontSize: '.74rem' }}
+              title={showSettings ? 'Hide AI settings' : 'Open AI settings'}
+              style={{
+                padding: '.2rem .45rem',
+                fontSize: '.74rem',
+                background: showSettings ? '#e2e8f0' : undefined,
+              }}
             >
-              {showSettings ? 'Done' : 'Settings'}
+              Settings
             </button>
           )}
           <button
@@ -356,7 +379,8 @@ export default function AiAssistantBar({ onNavigate }) {
             Gemini Model
             <select
               value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
+              onChange={(e) => handleModelChange(e.target.value)}
+              disabled={savingKey}
               style={{ marginTop: '.2rem', width: '100%' }}
             >
               {status.available_models.map((m) => (
@@ -375,9 +399,19 @@ export default function AiAssistantBar({ onNavigate }) {
               style={{ marginTop: '.2rem', width: '100%' }}
             />
           </label>
-          <button type="submit" className="btn sm primary" disabled={savingKey}>
-            {savingKey ? 'Verifying…' : 'Verify & Save'}
-          </button>
+          <div style={{ display: 'flex', gap: '.45rem', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => setShowSettings(false)}
+              disabled={savingKey}
+            >
+              Close
+            </button>
+            <button type="submit" className="btn sm primary" disabled={savingKey}>
+              {savingKey ? 'Verifying…' : 'Verify & Save'}
+            </button>
+          </div>
         </form>
       )}
 

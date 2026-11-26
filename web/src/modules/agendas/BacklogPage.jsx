@@ -203,6 +203,12 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
     loadAll().catch(e => showToast(e.message, 'error'));
   }, [loadAll, showToast]);
 
+  useEffect(() => {
+    const onAiAction = () => loadAll().catch(() => {});
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadAll]);
+
   const folderOptions = useMemo(() => {
     const set = new Set();
     for (const it of items) {
