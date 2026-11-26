@@ -19,6 +19,7 @@ import os
 import time
 
 import psycopg
+from psycopg import sql
 from psycopg_pool import ConnectionPool
 
 
@@ -62,7 +63,7 @@ class _TenantAwarePool:
 
         schema = get_current_tenant_schema()
         with _raw_pool.connection() as conn:
-            conn.execute(f"SET search_path TO {schema}")
+            conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
             if not conn.autocommit:
                 conn.commit()
             try:

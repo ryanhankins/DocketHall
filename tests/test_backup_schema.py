@@ -25,7 +25,7 @@ API_APP = os.path.join(ROOT, "api", "app")
 
 EXPECTED_MODULES = {
     "agendas", "permits", "licensing", "codification", "records", "complaints",
-    "calendar", "communications", "utilities", "citations",
+    "calendar", "communications", "utilities", "citations", "ai_assistant",
 }
 EPHEMERAL_TABLES = {"sessions", "password_reset_tokens"}
 

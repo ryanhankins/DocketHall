@@ -440,7 +440,9 @@ def request_password_reset(body: PasswordResetRequestIn, request: Request):
 
         from .integrations import get_app_base_url, send_direct_email
 
-        base_url = get_app_base_url(request)
+        base_url = get_app_base_url(request, require_configured=True)
+        if not base_url:
+            return generic
         for uid, uname, uemail in rows:
             raw_token = secrets.token_urlsafe(32)
             conn.execute(

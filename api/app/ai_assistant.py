@@ -70,11 +70,11 @@ def _load_gemini_config() -> tuple[str, str, str]:
 
 def _call_gemini(api_key: str, model: str, payload: dict) -> dict:
     safe_model = urllib.parse.quote(model, safe=".-")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{safe_model}:generateContent?key={urllib.parse.quote(api_key, safe='')}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{safe_model}:generateContent"
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
         method="POST",
     )
     try:
@@ -2559,6 +2559,12 @@ def _ensure_permit_ai_reviews_table(conn) -> None:
         CREATE INDEX IF NOT EXISTS permit_ai_reviews_permit_idx ON permit_ai_reviews (permit_id, id DESC);
         """
     )
+
+
+def ensure_ai_assistant_schema() -> None:
+    """Ensure AI assistant database tables exist."""
+    with pool.connection() as conn:
+        _ensure_permit_ai_reviews_table(conn)
 
 
 class PermitEvaluateIn(BaseModel):

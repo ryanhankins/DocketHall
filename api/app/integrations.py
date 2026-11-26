@@ -398,11 +398,18 @@ def _resolve_event_recipients(conn, event_key: str) -> list[str]:
     return recipients
 
 
-def get_app_base_url(request: Request | None = None) -> str:
+def get_app_base_url(request: Request | None = None, *, require_configured: bool = False) -> str:
     """Resolve the public base URL for links in notification emails."""
     env_url = os.environ.get("APP_BASE_URL", "").strip().rstrip("/")
     if env_url:
         return env_url
+    if require_configured:
+        # Only trust localhost when APP_BASE_URL is unset so Origin/Host cannot poison reset links.
+        if request is not None:
+            host = (request.headers.get("host") or "").split(":")[0].strip().lower()
+            if host in ("localhost", "127.0.0.1"):
+                return f"http://{request.headers.get('host')}"
+        return ""
     if request is not None:
         origin = (request.headers.get("origin") or "").strip().rstrip("/")
         if origin.startswith(("http://", "https://")):

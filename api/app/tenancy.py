@@ -22,6 +22,7 @@ import re
 from typing import Callable
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from psycopg import sql
 from pydantic import BaseModel
 
 from .db import raw_connection
@@ -283,7 +284,7 @@ def create_tenant(body: TenantCreateIn):
     if display_name:
         with tenant_context(slug, schema):
             with raw_connection() as conn:
-                conn.execute(f"SET search_path TO {schema}")
+                conn.execute(sql.SQL("SET search_path TO {}").format(sql.Identifier(schema)))
                 try:
                     conn.execute(
                         "INSERT INTO agenda_preferences (id, city_title) VALUES (1, %s) "

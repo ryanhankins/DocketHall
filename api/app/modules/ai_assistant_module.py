@@ -14,16 +14,26 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """AI Admin Assistant module definition."""
+from .. import ai_assistant
 from ..registry import CivicModule
+
+AI_ASSISTANT_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
+    (
+        "permit_ai_reviews",
+        ["id", "permit_id", "check_type", "model", "report", "created_by", "created_at"],
+        set(),
+        True,
+    ),
+]
 
 MODULE = CivicModule(
     id="ai_assistant",
     name="AI Admin Assistant",
     description="Floating Gemini-powered chat assistant that answers questions from city documents and executes administrative actions across DocketHall.",
     routers=[],
-    bootstrap=lambda: None,
+    bootstrap=ai_assistant.ensure_ai_assistant_schema,
     permissions=[],
     features=[],
     nav_groups=[],
-    backup_tables=[],
+    backup_tables=AI_ASSISTANT_BACKUP_TABLES,
 )

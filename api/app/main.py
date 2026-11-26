@@ -91,6 +91,23 @@ app = FastAPI(title="DocketHall API", lifespan=lifespan)
 
 
 @app.middleware("http")
+async def origin_csrf_middleware(request: Request, call_next):
+    if request.method in ("POST", "PUT", "PATCH", "DELETE") and request.url.path != "/api/payments/webhook":
+        origin = (request.headers.get("origin") or "").strip()
+        if origin:
+            from urllib.parse import urlparse
+
+            orig_host = (urlparse(origin).netloc or "").lower()
+            req_host = (request.headers.get("host") or "").lower()
+            app_url = (os.environ.get("APP_BASE_URL") or "").strip()
+            app_host = (urlparse(app_url).netloc or "").lower() if app_url else ""
+            allowed = {h for h in (req_host, app_host) if h}
+            if orig_host and allowed and orig_host not in allowed:
+                return JSONResponse(status_code=403, content={"detail": "Cross-origin state-changing request rejected"})
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def tenant_middleware(request: Request, call_next):
     path = request.url.path
     if path == "/api/health" or path.startswith("/api/platform/"):

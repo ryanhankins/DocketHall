@@ -32,7 +32,7 @@ from starlette.background import BackgroundTask
 
 from .agendas import _bucket, _storage, get_staff_user
 from .audit import record_audit
-from .auth import require_not_demo_mode, require_permission
+from .auth import require_admin, require_not_demo_mode, require_permission
 from .db import pool
 from .registry import get_module_backup_tables
 from .storage import BotoS3StorageClient
@@ -273,8 +273,10 @@ def _build_backup_zip(include_users: bool, exported_by: str) -> str:
 
     try:
         with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            # 1. Machine-reconstructible JSON tables
+            # 1. Machine-reconstructible JSON tables (never export plaintext integration secrets)
             for tname, rows in table_data.items():
+                if tname == "core_integrations":
+                    rows = [{**r, "api_key": ""} if "api_key" in r else r for r in rows]
                 zf.writestr(f"data/{tname}.json", json.dumps(rows, indent=2))
 
             # 2. Human-readable agendas & attachments index
@@ -431,12 +433,13 @@ def _build_backup_zip(include_users: bool, exported_by: str) -> str:
 
 
 @router.get("/export")
-def export_archive(user: dict = Depends(get_staff_user)):
+def export_archive(user: dict = Depends(require_admin)):
     """Export all DocketHall data in a human-readable and machine-reconstructible .zip archive."""
-    tmp_path = _build_backup_zip(include_users=(user["role"] == "admin"), exported_by=user["username"])
+    tmp_path = _build_backup_zip(include_users=True, exported_by=user["username"])
 
     with pool.connection() as conn:
         conn.execute("UPDATE agenda_preferences SET last_backup_at = now() WHERE id = 1")
+    record_audit(user["username"], "backup.exported", "backup", "archive", "Exported full backup archive")
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     return FileResponse(
@@ -447,10 +450,13 @@ def export_archive(user: dict = Depends(get_staff_user)):
     )
 
 
+MAX_IMPORT_DECOMPRESSED_BYTES = 1024 * 1024 * 1024  # 1 GiB zip-bomb guard
+
+
 @router.post("/import")
 async def import_archive(
     file: UploadFile = File(...),
-    user: dict = Depends(get_staff_user),
+    user: dict = Depends(require_admin),
 ):
     """Reconstruct DocketHall database and stored files from a backup .zip archive."""
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
@@ -464,6 +470,9 @@ async def import_archive(
             raise HTTPException(status_code=400, detail="Uploaded file is not a valid .zip archive")
 
         with zipfile.ZipFile(tmp_path, "r") as zf:
+            total_uncompressed = sum(info.file_size for info in zf.infolist())
+            if total_uncompressed > MAX_IMPORT_DECOMPRESSED_BYTES:
+                raise HTTPException(status_code=413, detail="Backup archive exceeds maximum uncompressed size")
             names = set(zf.namelist())
             if "manifest.json" not in names:
                 raise HTTPException(status_code=400, detail="Archive is missing manifest.json")
