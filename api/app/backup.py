@@ -23,6 +23,7 @@ import re
 import tempfile
 import zipfile
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
@@ -109,6 +110,8 @@ def _get_export_tables() -> list[tuple[str, list[str], set[str], bool]]:
 def _json_val(v):
     if isinstance(v, (datetime, date)):
         return v.isoformat()
+    if isinstance(v, Decimal):
+        return float(v)
     return v
 
 

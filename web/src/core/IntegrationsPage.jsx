@@ -45,6 +45,7 @@ export default function IntegrationsPage() {
   const [geminiCfg, setGeminiCfg] = useState(null);
   const [geminiKey, setGeminiKey] = useState('');
   const [geminiModel, setGeminiModel] = useState('gemini-3.5-flash-lite');
+  const [geminiDailyCap, setGeminiDailyCap] = useState('1.00');
   const [geminiBusy, setGeminiBusy] = useState(false);
   const [geminiMsg, setGeminiMsg] = useState({ text: '', isError: false });
 
@@ -68,6 +69,9 @@ export default function IntegrationsPage() {
     if (ai) {
       setGeminiCfg(ai);
       setGeminiModel(ai.model || 'gemini-3.5-flash-lite');
+      if (ai.daily_spend_limit_usd !== undefined && ai.daily_spend_limit_usd !== null) {
+        setGeminiDailyCap(String(ai.daily_spend_limit_usd));
+      }
     }
   }, []);
 
@@ -212,13 +216,23 @@ export default function IntegrationsPage() {
             }
             setGeminiBusy(true);
             try {
-              const payload = { model: geminiModel };
+              const parsedCap = Number.parseFloat(geminiDailyCap);
+              const payload = {
+                model: geminiModel,
+                daily_spend_limit_usd: Number.isFinite(parsedCap) && parsedCap >= 0 ? parsedCap : 1.0,
+              };
               if (geminiKey.trim()) payload.api_key = geminiKey.trim();
               const res = await api('/api/ai/config', {
                 method: 'PUT',
                 body: JSON.stringify(payload),
               });
-              setGeminiCfg((prev) => ({ ...(prev || {}), configured: !!res.configured, model: res.model, source: res.source }));
+              setGeminiCfg((prev) => ({
+                ...(prev || {}),
+                configured: !!res.configured,
+                model: res.model,
+                source: res.source,
+                daily_spend_limit_usd: res.daily_spend_limit_usd,
+              }));
               setGeminiKey('');
               setGeminiMsg({ text: `Verified and saved (${res.model}).`, isError: false });
               showToast(`Saved Gemini settings (${res.model})`, 'ok');
@@ -242,6 +256,27 @@ export default function IntegrationsPage() {
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="gemini-daily-cap">Daily Spend Cap (USD, 0 = unlimited)</label>
+            <input
+              id="gemini-daily-cap"
+              type="number"
+              min="0"
+              max="10000"
+              step="0.25"
+              value={geminiDailyCap}
+              onChange={(e) => setGeminiDailyCap(e.target.value)}
+            />
+            {geminiCfg && (
+              <div className="muted" style={{ fontSize: '.82rem', marginTop: '.25rem' }}>
+                Today&apos;s estimated spend: ${(geminiCfg.today_spend_usd || 0).toFixed(4)}
+                {Number(geminiCfg.daily_spend_limit_usd) > 0
+                  ? ` / $${Number(geminiCfg.daily_spend_limit_usd).toFixed(2)} (${geminiCfg.today_requests || 0} calls)`
+                  : ` (unlimited, ${geminiCfg.today_requests || 0} calls)`}
+              </div>
+            )}
           </div>
 
           <div className="field">

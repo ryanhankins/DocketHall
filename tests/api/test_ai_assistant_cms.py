@@ -100,3 +100,40 @@ def test_ai_blog_notice_page_publish_without_duplication(admin_client):
 
     assert ai_assistant._describe_proposed_action("create_blog_post", {"title": "Test", "is_published": False}).startswith("Create draft")
     assert ai_assistant._describe_proposed_action("update_blog_post", {"title": "Test", "is_published": True}).startswith("Publish")
+
+
+def test_ai_configurable_daily_spend_cap(admin_client, monkeypatch):
+    from fastapi import HTTPException
+    from app import ai_assistant
+
+    admin_client.put("/api/modules/admin/ai_assistant", json={"enabled": True})
+
+    st = admin_client.get("/api/ai/status")
+    assert st.status_code == 200
+    assert st.json()["daily_spend_limit_usd"] == 1.0
+
+    # Mock Gemini verification call so PUT /api/ai/config works offline
+    monkeypatch.setattr(ai_assistant, "_call_gemini", lambda key, model, payload, **kw: {"candidates": []})
+    cfg = admin_client.put(
+        "/api/ai/config",
+        json={"api_key": "test-gemini-key-12345", "model": "gemini-3.8-flash", "daily_spend_limit_usd": 0.25},
+    )
+    assert cfg.status_code == 200, cfg.text
+    assert cfg.json()["daily_spend_limit_usd"] == 0.25
+
+    # Record usage below cap (100k input @ $0.30/1M = $0.03) -> allowed
+    ai_assistant._record_gemini_usage("gemini-3.8-flash", {"usageMetadata": {"promptTokenCount": 100_000, "candidatesTokenCount": 0}})
+    ai_assistant._enforce_daily_budget()
+
+    # Record usage pushing over $0.25 (100k output @ $2.50/1M = $0.25) -> 429
+    ai_assistant._record_gemini_usage("gemini-3.8-flash", {"usageMetadata": {"promptTokenCount": 0, "candidatesTokenCount": 100_000}})
+    try:
+        ai_assistant._enforce_daily_budget()
+        assert False, "Expected HTTP 429 when daily spend cap reached"
+    except HTTPException as exc:
+        assert exc.status_code == 429
+
+    # Raising cap or setting 0 (unlimited) unblocks immediately
+    cfg2 = admin_client.put("/api/ai/config", json={"model": "gemini-3.8-flash", "daily_spend_limit_usd": 0})
+    assert cfg2.status_code == 200
+    ai_assistant._enforce_daily_budget()

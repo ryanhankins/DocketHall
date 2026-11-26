@@ -37,12 +37,20 @@ from .registry import is_module_enabled
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+DEFAULT_DAILY_SPEND_LIMIT_USD = 1.00
 _ALLOWED_MODELS = (
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
     "gemini-3.8-flash",
     "gemini-3.8-pro",
 )
+# Conservative USD per 1M tokens: (input, output)
+_MODEL_RATES_PER_M: dict[str, tuple[float, float]] = {
+    "gemini-3.5-flash-lite": (0.10, 0.40),
+    "gemini-3.1-flash-lite": (0.10, 0.40),
+    "gemini-3.8-flash": (0.30, 2.50),
+    "gemini-3.8-pro": (1.25, 10.00),
+}
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
@@ -51,24 +59,118 @@ def _slugify(text: str, fallback: str = "item") -> str:
     return s[:80] or fallback
 
 
-def _load_gemini_config() -> tuple[str, str, str]:
-    """Return (api_key, model, source)."""
+def _default_daily_limit_usd() -> float:
+    raw = (os.environ.get("AI_DAILY_SPEND_LIMIT_USD") or "").strip()
+    if raw:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+    return DEFAULT_DAILY_SPEND_LIMIT_USD
+
+
+def _parse_daily_limit(cfg: dict) -> float:
+    if isinstance(cfg, dict) and "daily_spend_limit_usd" in cfg and cfg["daily_spend_limit_usd"] is not None:
+        try:
+            return max(0.0, float(cfg["daily_spend_limit_usd"]))
+        except (TypeError, ValueError):
+            pass
+    return _default_daily_limit_usd()
+
+
+def _load_gemini_settings() -> tuple[str, str, str, float]:
+    """Return (api_key, model, source, daily_spend_limit_usd)."""
     with pool.connection() as conn:
         row = conn.execute(
             "SELECT enabled, api_key, config FROM core_integrations WHERE provider = 'gemini_ai'"
         ).fetchone()
+    cfg = row[2] if row and isinstance(row[2], dict) else {}
+    limit = _parse_daily_limit(cfg)
     if row and row[0] and (row[1] or "").strip():
-        cfg = row[2] if isinstance(row[2], dict) else {}
         model = (cfg.get("model") or DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
-        return row[1].strip(), model, "integrations"
+        return row[1].strip(), model, "integrations", limit
     env_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
     if env_key:
         env_model = (os.environ.get("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
-        return env_key, env_model, "env"
-    return "", DEFAULT_GEMINI_MODEL, "none"
+        return env_key, env_model, "env", limit
+    return "", DEFAULT_GEMINI_MODEL, "none", limit
 
 
-def _call_gemini(api_key: str, model: str, payload: dict) -> dict:
+def _load_gemini_config() -> tuple[str, str, str]:
+    """Return (api_key, model, source)."""
+    key, model, source, _ = _load_gemini_settings()
+    return key, model, source
+
+
+def _estimate_call_cost_usd(model: str, prompt_tokens: int, output_tokens: int) -> float:
+    in_rate, out_rate = _MODEL_RATES_PER_M.get(model, (0.30, 2.50))
+    return (max(0, prompt_tokens) * in_rate + max(0, output_tokens) * out_rate) / 1_000_000.0
+
+
+def _ensure_ai_daily_usage_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ai_daily_usage (
+            usage_date DATE PRIMARY KEY,
+            prompt_tokens BIGINT NOT NULL DEFAULT 0,
+            output_tokens BIGINT NOT NULL DEFAULT 0,
+            request_count INTEGER NOT NULL DEFAULT 0,
+            estimated_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        """
+    )
+
+
+def _get_today_usage() -> tuple[float, int]:
+    """Return (estimated_cost_usd, request_count) for today (UTC)."""
+    with pool.connection() as conn:
+        _ensure_ai_daily_usage_table(conn)
+        row = conn.execute(
+            "SELECT estimated_cost_usd, request_count FROM ai_daily_usage WHERE usage_date = CURRENT_DATE"
+        ).fetchone()
+    if not row:
+        return 0.0, 0
+    return float(row[0] or 0.0), int(row[1] or 0)
+
+
+def _record_gemini_usage(model: str, resp: dict) -> None:
+    usage = resp.get("usageMetadata") if isinstance(resp, dict) else None
+    if not isinstance(usage, dict):
+        return
+    p_tok = int(usage.get("promptTokenCount") or 0)
+    c_tok = int(usage.get("candidatesTokenCount") or 0) + int(usage.get("thoughtsTokenCount") or 0)
+    cost = _estimate_call_cost_usd(model, p_tok, c_tok)
+    with pool.connection() as conn:
+        _ensure_ai_daily_usage_table(conn)
+        conn.execute(
+            "INSERT INTO ai_daily_usage (usage_date, prompt_tokens, output_tokens, request_count, estimated_cost_usd, updated_at) "
+            "VALUES (CURRENT_DATE, %s, %s, 1, %s, now()) "
+            "ON CONFLICT (usage_date) DO UPDATE SET "
+            "prompt_tokens = ai_daily_usage.prompt_tokens + EXCLUDED.prompt_tokens, "
+            "output_tokens = ai_daily_usage.output_tokens + EXCLUDED.output_tokens, "
+            "request_count = ai_daily_usage.request_count + 1, "
+            "estimated_cost_usd = ai_daily_usage.estimated_cost_usd + EXCLUDED.estimated_cost_usd, "
+            "updated_at = now()",
+            (p_tok, c_tok, cost),
+        )
+
+
+def _enforce_daily_budget() -> None:
+    _, _, _, limit = _load_gemini_settings()
+    if limit <= 0:
+        return
+    spent, _ = _get_today_usage()
+    if spent >= limit:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily AI spend limit (${limit:.2f}/day) reached (today's estimated spend: ${spent:.4f}). An administrator can adjust the limit in Integrations.",
+        )
+
+
+def _call_gemini(api_key: str, model: str, payload: dict, *, enforce_budget: bool = True) -> dict:
+    if enforce_budget:
+        _enforce_daily_budget()
     safe_model = urllib.parse.quote(model, safe=".-")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{safe_model}:generateContent"
     req = urllib.request.Request(
@@ -79,7 +181,9 @@ def _call_gemini(api_key: str, model: str, payload: dict) -> dict:
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            data = json.loads(resp.read().decode("utf-8"))
+            _record_gemini_usage(model, data)
+            return data
     except urllib.error.HTTPError as exc:
         raw = exc.read().decode("utf-8", errors="replace")
         try:
@@ -2500,6 +2604,7 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
 class AiConfigIn(BaseModel):
     api_key: str | None = Field(default=None, max_length=300)
     model: str = DEFAULT_GEMINI_MODEL
+    daily_spend_limit_usd: float | None = Field(default=None, ge=0, le=10000)
 
 
 class AiHistoryMsg(BaseModel):
@@ -2528,7 +2633,9 @@ def _require_ai_module_enabled() -> None:
 
 @router.get("/status")
 def get_ai_status(user: dict = Depends(_require_ai_user)):
-    key, model, source = _load_gemini_config()
+    key, model, source, limit = _load_gemini_settings()
+    today_spend, today_requests = _get_today_usage()
+    remaining = round(max(0.0, limit - today_spend), 6) if limit > 0 else None
     return {
         "enabled": is_module_enabled("ai_assistant"),
         "configured": bool(key),
@@ -2537,6 +2644,10 @@ def get_ai_status(user: dict = Depends(_require_ai_user)):
         "model": model,
         "source": source,
         "available_models": list(_ALLOWED_MODELS),
+        "daily_spend_limit_usd": limit,
+        "today_spend_usd": round(today_spend, 6),
+        "today_requests": today_requests,
+        "budget_remaining_usd": remaining,
     }
 
 
@@ -2544,16 +2655,18 @@ def get_ai_status(user: dict = Depends(_require_ai_user)):
 def save_ai_config(body: AiConfigIn, user: dict = Depends(require_admin)):
     _require_ai_module_enabled()
     require_not_demo_mode("Configuring Gemini AI key")
-    existing_key, _, existing_source = _load_gemini_config()
+    existing_key, _, existing_source, existing_limit = _load_gemini_settings()
     key = (body.api_key or "").strip() or existing_key
     if len(key) < 10:
         raise HTTPException(status_code=400, detail="Gemini API key is required")
     model = body.model.strip() if body.model.strip() in _ALLOWED_MODELS else DEFAULT_GEMINI_MODEL
-    # Quick verification call to Gemini
+    limit = round(float(body.daily_spend_limit_usd), 2) if body.daily_spend_limit_usd is not None else existing_limit
+    # Quick verification call to Gemini (bypass budget so admins can adjust limits)
     _call_gemini(
         key,
         model,
         {"contents": [{"role": "user", "parts": [{"text": "Reply with OK"}]}]},
+        enforce_budget=False,
     )
     with pool.connection() as conn:
         conn.execute(
@@ -2562,10 +2675,15 @@ def save_ai_config(body: AiConfigIn, user: dict = Depends(require_admin)):
             "ON CONFLICT (provider) DO UPDATE SET "
             "enabled = TRUE, api_key = EXCLUDED.api_key, config = EXCLUDED.config, "
             "validated_at = now(), last_status = 'ok', updated_by = EXCLUDED.updated_by, updated_at = now()",
-            (key, Jsonb({"model": model}), user["username"]),
+            (key, Jsonb({"model": model, "daily_spend_limit_usd": limit}), user["username"]),
         )
-    record_audit(user["username"], "ai.configure", f"Configured Gemini AI ({model})")
-    return {"configured": True, "model": model, "source": existing_source if not (body.api_key or "").strip() else "integrations"}
+    record_audit(user["username"], "ai.configure", f"Configured Gemini AI ({model}, cap=${limit:.2f}/day)")
+    return {
+        "configured": True,
+        "model": model,
+        "source": existing_source if not (body.api_key or "").strip() else "integrations",
+        "daily_spend_limit_usd": limit,
+    }
 
 
 @router.delete("/config")
@@ -2961,6 +3079,7 @@ def ensure_ai_assistant_schema() -> None:
     """Ensure AI assistant database tables exist."""
     with pool.connection() as conn:
         _ensure_permit_ai_reviews_table(conn)
+        _ensure_ai_daily_usage_table(conn)
 
 
 class PermitEvaluateIn(BaseModel):

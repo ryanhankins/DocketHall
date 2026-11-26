@@ -24,6 +24,12 @@ AI_ASSISTANT_BACKUP_TABLES: list[tuple[str, list[str], set[str], bool]] = [
         set(),
         True,
     ),
+    (
+        "ai_daily_usage",
+        ["usage_date", "prompt_tokens", "output_tokens", "request_count", "estimated_cost_usd", "updated_at"],
+        set(),
+        False,
+    ),
 ]
 
 MODULE = CivicModule(
