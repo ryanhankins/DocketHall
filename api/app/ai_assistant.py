@@ -1670,32 +1670,51 @@ class PermitEvaluateIn(BaseModel):
     check_type: str = Field(..., pattern="^(completeness|code_check)$")
 
 
+def _permit_last_modified(conn, permit_id: int):
+    row = conn.execute(
+        "SELECT GREATEST("
+        "  p.updated_at, "
+        "  COALESCE((SELECT MAX(d.created_at) FROM permit_documents d WHERE d.permit_id = p.id), p.updated_at)"
+        ") FROM permits p WHERE p.id = %s",
+        (permit_id,),
+    ).fetchone()
+    return row[0] if row else None
+
+
 @router.get("/permits/{permit_id}/reviews")
 def list_permit_ai_reviews(permit_id: int, _: dict = Depends(require_permission("permits.manage"))):
     if not is_module_enabled("ai_assistant"):
-        return {"enabled": False, "configured": False, "reviews": []}
+        return {"enabled": False, "configured": False, "reviews": [], "up_to_date": {"completeness": False, "code_check": False}}
     key, _, _ = _load_gemini_config()
     with pool.connection() as conn:
         _ensure_permit_ai_reviews_table(conn)
+        last_mod = _permit_last_modified(conn, permit_id)
         rows = conn.execute(
             "SELECT id, check_type, model, report, created_by, created_at "
             "FROM permit_ai_reviews WHERE permit_id = %s ORDER BY id DESC LIMIT 20",
             (permit_id,),
         ).fetchall()
+    up_to_date = {"completeness": False, "code_check": False}
+    reviews = []
+    for r in rows:
+        ctype, created_at = r[1], r[5]
+        is_current = bool(last_mod and created_at and created_at >= last_mod)
+        if ctype in up_to_date and not up_to_date[ctype] and is_current:
+            up_to_date[ctype] = True
+        reviews.append({
+            "id": r[0],
+            "check_type": ctype,
+            "model": r[2],
+            "report": r[3],
+            "created_by": r[4],
+            "created_at": created_at.isoformat() if created_at else "",
+            "is_current": is_current,
+        })
     return {
         "enabled": True,
         "configured": bool(key),
-        "reviews": [
-            {
-                "id": r[0],
-                "check_type": r[1],
-                "model": r[2],
-                "report": r[3],
-                "created_by": r[4],
-                "created_at": r[5].isoformat() if r[5] else "",
-            }
-            for r in rows
-        ],
+        "reviews": reviews,
+        "up_to_date": up_to_date,
     }
 
 
@@ -1706,8 +1725,28 @@ def _run_and_save_permit_evaluation(permit_id: int, check_type: str, user: dict)
             "SELECT permit_number, permit_type_name, permit_use_name, property_address FROM permits WHERE id = %s",
             (permit_id,),
         ).fetchone()
-    if not p:
-        raise HTTPException(status_code=404, detail="Permit not found")
+        if not p:
+            raise HTTPException(status_code=404, detail="Permit not found")
+        last_mod = _permit_last_modified(conn, permit_id)
+        latest = conn.execute(
+            "SELECT id, model, report, created_by, created_at "
+            "FROM permit_ai_reviews WHERE permit_id = %s AND check_type = %s ORDER BY id DESC LIMIT 1",
+            (permit_id, check_type),
+        ).fetchone()
+        if latest and last_mod and latest[4] and latest[4] >= last_mod:
+            return {
+                "cached": True,
+                "message": "Permit has not changed since the last check.",
+                "review": {
+                    "id": latest[0],
+                    "check_type": check_type,
+                    "model": latest[1],
+                    "report": latest[2],
+                    "created_by": latest[3],
+                    "created_at": latest[4].isoformat(),
+                    "is_current": True,
+                },
+            }
     pnum, ptype, puse, addr = p[0], p[1] or "Permit", p[2] or "", p[3] or "no address"
     label = f"{ptype}{f' - {puse}' if puse else ''}, {addr}"
     if check_type == "completeness":

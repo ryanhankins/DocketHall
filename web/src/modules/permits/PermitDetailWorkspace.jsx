@@ -101,7 +101,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
   const [docCat, setDocCat] = useState('Other');
   const [docRound, setDocRound] = useState(1);
   const [busy, setBusy] = useState(false);
-  const [aiState, setAiState] = useState({ enabled: false, configured: false, reviews: [] });
+  const [aiState, setAiState] = useState({ enabled: false, configured: false, reviews: [], up_to_date: { completeness: false, code_check: false } });
   const [aiBusy, setAiBusy] = useState('');
   const showToast = useToast();
 
@@ -118,8 +118,9 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
           enabled: !!d?.enabled,
           configured: !!d?.configured,
           reviews: Array.isArray(d?.reviews) ? d.reviews : [],
+          up_to_date: d?.up_to_date || { completeness: false, code_check: false },
         }))
-        .catch(() => setAiState({ enabled: false, configured: false, reviews: [] }));
+        .catch(() => setAiState({ enabled: false, configured: false, reviews: [], up_to_date: { completeness: false, code_check: false } }));
     }
     setDetails({
       applicant_name: permit.applicant_name || '',
@@ -583,7 +584,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                   <button
                     type="button"
                     className="btn sm"
-                    disabled={!!aiBusy || !aiState.configured}
+                    disabled={!!aiBusy || !aiState.configured || !!aiState.up_to_date?.completeness}
                     onClick={async () => {
                       setAiBusy('completeness');
                       try {
@@ -591,8 +592,15 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                           method: 'POST',
                           body: JSON.stringify({ check_type: 'completeness' }),
                         });
-                        if (res?.review) {
-                          setAiState((s) => ({ ...s, reviews: [res.review, ...s.reviews] }));
+                        if (res?.cached) {
+                          setAiState((s) => ({ ...s, up_to_date: { ...s.up_to_date, completeness: true } }));
+                          showToast(res.message || 'Permit has not changed since the last completeness check', 'ok');
+                        } else if (res?.review) {
+                          setAiState((s) => ({
+                            ...s,
+                            reviews: [res.review, ...s.reviews],
+                            up_to_date: { ...s.up_to_date, completeness: true },
+                          }));
                           showToast('Saved AI completeness check to permit', 'ok');
                         }
                       } catch (err) {
@@ -601,14 +609,24 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                         setAiBusy('');
                       }
                     }}
-                    title={aiState.configured ? 'Run AI completeness check and save to this permit' : 'Configure Gemini API key in AI Assistant first'}
+                    title={
+                      !aiState.configured
+                        ? 'Configure Gemini API key in AI Assistant first'
+                        : aiState.up_to_date?.completeness
+                          ? 'Permit has not changed since the last completeness check'
+                          : 'Run AI completeness check and save to this permit'
+                    }
                   >
-                    {aiBusy === 'completeness' ? 'Evaluating…' : 'Run Completeness Check'}
+                    {aiBusy === 'completeness'
+                      ? 'Evaluating…'
+                      : aiState.up_to_date?.completeness
+                        ? 'Completeness Check (Up to Date)'
+                        : 'Run Completeness Check'}
                   </button>
                   <button
                     type="button"
                     className="btn sm"
-                    disabled={!!aiBusy || !aiState.configured}
+                    disabled={!!aiBusy || !aiState.configured || !!aiState.up_to_date?.code_check}
                     onClick={async () => {
                       setAiBusy('code_check');
                       try {
@@ -616,8 +634,15 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                           method: 'POST',
                           body: JSON.stringify({ check_type: 'code_check' }),
                         });
-                        if (res?.review) {
-                          setAiState((s) => ({ ...s, reviews: [res.review, ...s.reviews] }));
+                        if (res?.cached) {
+                          setAiState((s) => ({ ...s, up_to_date: { ...s.up_to_date, code_check: true } }));
+                          showToast(res.message || 'Permit has not changed since the last City Code check', 'ok');
+                        } else if (res?.review) {
+                          setAiState((s) => ({
+                            ...s,
+                            reviews: [res.review, ...s.reviews],
+                            up_to_date: { ...s.up_to_date, code_check: true },
+                          }));
                           showToast('Saved AI City Code check to permit', 'ok');
                         }
                       } catch (err) {
@@ -626,9 +651,19 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                         setAiBusy('');
                       }
                     }}
-                    title={aiState.configured ? 'Evaluate substantive City Code compliance and save to this permit' : 'Configure Gemini API key in AI Assistant first'}
+                    title={
+                      !aiState.configured
+                        ? 'Configure Gemini API key in AI Assistant first'
+                        : aiState.up_to_date?.code_check
+                          ? 'Permit has not changed since the last City Code check'
+                          : 'Evaluate substantive City Code compliance and save to this permit'
+                    }
                   >
-                    {aiBusy === 'code_check' ? 'Evaluating…' : 'Run City Code Check'}
+                    {aiBusy === 'code_check'
+                      ? 'Evaluating…'
+                      : aiState.up_to_date?.code_check
+                        ? 'City Code Check (Up to Date)'
+                        : 'Run City Code Check'}
                   </button>
                 </div>
               </div>
