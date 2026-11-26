@@ -512,6 +512,125 @@ _TOOL_DECLARATIONS = [
             },
         },
     },
+    {
+        "name": "get_agenda_details",
+        "description": "Fetch full details and agenda items for a specific meeting agenda by agenda_id.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "agenda_id": {"type": "INTEGER", "description": "Agenda ID"},
+            },
+            "required": ["agenda_id"],
+        },
+    },
+    {
+        "name": "list_backlog_todos",
+        "description": "List or search agenda backlog / todo items.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional search keyword"},
+                "status": {"type": "STRING", "description": "Optional status ('open' or 'done')"},
+            },
+        },
+    },
+    {
+        "name": "list_inspections",
+        "description": "List or search permit inspections by permit number or result.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "permit_number": {"type": "STRING", "description": "Optional permit number filter"},
+                "result": {"type": "STRING", "description": "Optional result filter ('scheduled', 'passed', 'failed')"},
+            },
+        },
+    },
+    {
+        "name": "list_work_orders",
+        "description": "List or search 311 / Public Works work orders.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional search by work order number, location, or description"},
+                "status": {"type": "STRING", "description": "Optional status filter"},
+            },
+        },
+    },
+    {
+        "name": "list_foia_requests",
+        "description": "List or search Public Records / FOIA requests.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional search by request number, subject, or requester"},
+                "status": {"type": "STRING", "description": "Optional status filter"},
+            },
+        },
+    },
+    {
+        "name": "list_calendar_events",
+        "description": "List or search upcoming municipal calendar events.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional keyword"},
+                "from_date": {"type": "STRING", "description": "Optional start date YYYY-MM-DD"},
+            },
+        },
+    },
+    {
+        "name": "search_directory",
+        "description": "Search City Directory contacts (staff, departments, elected officials).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional name, role, or department"},
+            },
+        },
+    },
+    {
+        "name": "list_forms",
+        "description": "List or search published City Forms and Polls.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional keyword"},
+            },
+        },
+    },
+    {
+        "name": "list_contractor_licenses",
+        "description": "List or search licensed contractors.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional business name or license number"},
+                "status": {"type": "STRING", "description": "Optional status filter"},
+            },
+        },
+    },
+    {
+        "name": "list_utility_bills",
+        "description": "List or search municipal utility billing statements.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional reference, account number, payer name, or address"},
+                "payment_status": {"type": "STRING", "description": "Optional status ('unpaid', 'paid')"},
+            },
+        },
+    },
+    {
+        "name": "list_citations",
+        "description": "List or search municipal citations.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional reference number, payer name, or address"},
+                "payment_status": {"type": "STRING", "description": "Optional status ('unpaid', 'paid')"},
+            },
+        },
+    },
 ]
 
 
@@ -548,6 +667,17 @@ _TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "create_citation": ("citations", ("citations.manage",)),
     "toggle_module": (None, ("__admin__",)),
     "update_branding": (None, ("__admin__",)),
+    "get_agenda_details": ("agendas", ("agendas.manage", "agendas.submit")),
+    "list_backlog_todos": ("agendas", ("agendas.manage",)),
+    "list_inspections": ("permits", ("permits.manage",)),
+    "list_work_orders": ("complaints", ("complaints.manage",)),
+    "list_foia_requests": ("records", ("records.manage", "records.view")),
+    "list_calendar_events": ("calendar", ()),
+    "search_directory": ("communications", ()),
+    "list_forms": ("communications", ()),
+    "list_contractor_licenses": ("licensing", ("licensing.manage",)),
+    "list_utility_bills": ("utilities", ("utilities.manage",)),
+    "list_citations": ("citations", ("citations.manage",)),
 }
 
 
@@ -1370,6 +1500,267 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                 {"tool": name, "summary": "Updated city branding/preferences", "route": "/app/preferences-general"},
             )
 
+        if name == "get_agenda_details":
+            ag_id = int(args["agenda_id"])
+            ag = conn.execute(
+                "SELECT id, title, body, meeting_date, meeting_time, status, finalized_at, minutes_status "
+                "FROM agendas WHERE id = %s",
+                (ag_id,),
+            ).fetchone()
+            if not ag:
+                return {"ok": False, "error": f"Agenda #{ag_id} not found"}, None
+            items = conn.execute(
+                "SELECT id, position, section, title, description, presenter, recommended_motion "
+                "FROM agenda_items WHERE agenda_id = %s ORDER BY position, id",
+                (ag_id,),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "agenda": {
+                        "id": ag[0],
+                        "title": ag[1],
+                        "body": ag[2],
+                        "meeting_date": ag[3].isoformat() if ag[3] else None,
+                        "meeting_time": ag[4],
+                        "status": ag[5],
+                        "finalized_at": ag[6].isoformat() if ag[6] else None,
+                        "minutes_status": ag[7],
+                        "items": [
+                            {"id": it[0], "position": it[1], "section": it[2], "title": it[3], "description": (it[4] or "")[:300], "presenter": it[5], "recommended_motion": it[6]}
+                            for it in items
+                        ],
+                    },
+                },
+                None,
+            )
+
+        if name == "list_backlog_todos":
+            q = str(args.get("query") or "").strip()
+            st_f = str(args.get("status") or "").strip().lower()
+            like = f"%{q}%"
+            rows = conn.execute(
+                "SELECT id, title, description, target_body, target_date, todo_status, assigned_to "
+                "FROM agenda_items WHERE agenda_id IS NULL "
+                "AND (%s = '' OR title ILIKE %s OR description ILIKE %s) "
+                "AND (%s = '' OR LOWER(todo_status) = %s) ORDER BY id DESC LIMIT 20",
+                (q, like, like, st_f, st_f),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "todos": [
+                        {
+                            "id": r[0],
+                            "title": r[1],
+                            "description": (r[2] or "")[:250],
+                            "target_body": r[3],
+                            "target_date": r[4].isoformat() if r[4] else None,
+                            "status": r[5],
+                            "assigned_to": r[6],
+                        }
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "list_inspections":
+            pnum = str(args.get("permit_number") or "").strip()
+            res_f = str(args.get("result") or "").strip().lower()
+            rows = conn.execute(
+                "SELECT p.permit_number, p.property_address, i.inspection_type, i.scheduled_date, i.inspector, i.result, i.notes "
+                "FROM permit_inspections i JOIN permits p ON p.id = i.permit_id "
+                "WHERE (%s = '' OR UPPER(p.permit_number) = UPPER(%s)) "
+                "AND (%s = '' OR LOWER(i.result) = %s) ORDER BY i.id DESC LIMIT 20",
+                (pnum, pnum, res_f, res_f),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "inspections": [
+                        {"permit_number": r[0], "property_address": r[1], "inspection_type": r[2], "scheduled_date": r[3], "inspector": r[4], "result": r[5], "notes": (r[6] or "")[:200]}
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "list_work_orders":
+            q = str(args.get("query") or "").strip()
+            st_f = str(args.get("status") or "").strip().lower()
+            like = f"%{q}%"
+            rows = conn.execute(
+                "SELECT work_order_number, category, location, description, priority, status, assigned_crew "
+                "FROM public_works_orders "
+                "WHERE (%s = '' OR work_order_number ILIKE %s OR location ILIKE %s OR description ILIKE %s OR category ILIKE %s) "
+                "AND (%s = '' OR LOWER(status) = %s) ORDER BY id DESC LIMIT 15",
+                (q, like, like, like, like, st_f, st_f),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "work_orders": [
+                        {"work_order_number": r[0], "category": r[1], "location": r[2], "description": (r[3] or "")[:250], "priority": r[4], "status": r[5], "assigned_crew": r[6]}
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "list_foia_requests":
+            q = str(args.get("query") or "").strip()
+            st_f = str(args.get("status") or "").strip().lower()
+            like = f"%{q}%"
+            rows = conn.execute(
+                "SELECT request_number, requester_name, subject, department, status, due_date, assigned_to "
+                "FROM public_records_requests "
+                "WHERE (%s = '' OR request_number ILIKE %s OR subject ILIKE %s OR requester_name ILIKE %s) "
+                "AND (%s = '' OR LOWER(status) = %s) ORDER BY id DESC LIMIT 15",
+                (q, like, like, like, st_f, st_f),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "foia_requests": [
+                        {"request_number": r[0], "requester_name": r[1], "subject": r[2], "department": r[3], "status": r[4], "due_date": r[5], "assigned_to": r[6]}
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "list_calendar_events":
+            q = str(args.get("query") or "").strip()
+            from_raw = str(args.get("from_date") or "").strip()
+            from_d = date.fromisoformat(from_raw) if from_raw else None
+            like = f"%{q}%"
+            rows = conn.execute(
+                "SELECT id, title, event_date, start_time, location, category, description "
+                "FROM calendar_events "
+                "WHERE (%s = '' OR title ILIKE %s OR location ILIKE %s OR description ILIKE %s) "
+                "AND (%s IS NULL OR event_date >= %s) ORDER BY event_date ASC, id ASC LIMIT 20",
+                (q, like, like, like, from_d, from_d),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "events": [
+                        {"id": r[0], "title": r[1], "event_date": r[2].isoformat() if r[2] else None, "start_time": r[3], "location": r[4], "category": r[5], "description": (r[6] or "")[:200]}
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "search_directory":
+            q = str(args.get("query") or "").strip()
+            like = f"%{q}%"
+            rows = conn.execute(
+                "SELECT name, title_role, department, email, phone, office_hours, is_elected "
+                "FROM city_directory_entries "
+                "WHERE (%s = '' OR name ILIKE %s OR title_role ILIKE %s OR department ILIKE %s) "
+                "ORDER BY is_elected DESC, sort_order ASC, id ASC LIMIT 20",
+                (q, like, like, like),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "contacts": [
+                        {"name": r[0], "title_role": r[1], "department": r[2], "email": r[3], "phone": r[4], "office_hours": r[5], "is_elected": r[6]}
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "list_forms":
+            q = str(args.get("query") or "").strip()
+            like = f"%{q}%"
+            rows = conn.execute(
+                "SELECT slug, title, form_kind, description, closes_at, is_public "
+                "FROM city_forms "
+                "WHERE (%s = '' OR title ILIKE %s OR description ILIKE %s) "
+                "ORDER BY sort_order ASC, id ASC LIMIT 20",
+                (q, like, like),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "forms": [
+                        {"slug": r[0], "title": r[1], "kind": r[2], "description": (r[3] or "")[:200], "closes_at": r[4].isoformat() if r[4] else None, "is_public": r[5]}
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "list_contractor_licenses":
+            q = str(args.get("query") or "").strip()
+            st_f = str(args.get("status") or "").strip().lower()
+            like = f"%{q}%"
+            rows = conn.execute(
+                "SELECT license_number, business_name, license_type, contact_name, email, phone, license_expires_at, status "
+                "FROM contractor_licenses "
+                "WHERE (%s = '' OR business_name ILIKE %s OR license_number ILIKE %s OR license_type ILIKE %s) "
+                "AND (%s = '' OR LOWER(status) = %s) ORDER BY id DESC LIMIT 20",
+                (q, like, like, like, st_f, st_f),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "contractors": [
+                        {"license_number": r[0], "business_name": r[1], "license_type": r[2], "contact_name": r[3], "email": r[4], "phone": r[5], "expires_at": r[6].isoformat() if r[6] else None, "status": r[7]}
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "list_utility_bills":
+            q = str(args.get("query") or "").strip()
+            st_f = str(args.get("payment_status") or "").strip().lower()
+            like = f"%{q}%"
+            rows = conn.execute(
+                "SELECT reference_number, account_number, payer_name, service_address, amount_due, due_date, payment_status "
+                "FROM municipal_bills WHERE bill_type = 'utility' "
+                "AND (%s = '' OR reference_number ILIKE %s OR account_number ILIKE %s OR payer_name ILIKE %s OR service_address ILIKE %s) "
+                "AND (%s = '' OR LOWER(payment_status) = %s) ORDER BY id DESC LIMIT 20",
+                (q, like, like, like, like, st_f, st_f),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "utility_bills": [
+                        {"reference_number": r[0], "account_number": r[1], "payer_name": r[2], "service_address": r[3], "amount_due": r[4], "due_date": r[5], "payment_status": r[6]}
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "list_citations":
+            q = str(args.get("query") or "").strip()
+            st_f = str(args.get("payment_status") or "").strip().lower()
+            like = f"%{q}%"
+            rows = conn.execute(
+                "SELECT reference_number, payer_name, service_address, description, amount_due, due_date, payment_status "
+                "FROM municipal_bills WHERE bill_type = 'citation' "
+                "AND (%s = '' OR reference_number ILIKE %s OR payer_name ILIKE %s OR service_address ILIKE %s OR description ILIKE %s) "
+                "AND (%s = '' OR LOWER(payment_status) = %s) ORDER BY id DESC LIMIT 20",
+                (q, like, like, like, like, st_f, st_f),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "citations": [
+                        {"reference_number": r[0], "payer_name": r[1], "service_address": r[2], "description": (r[3] or "")[:200], "amount_due": r[4], "due_date": r[5], "payment_status": r[6]}
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
     return {"ok": False, "error": f"Unknown tool: {name}"}, None
 
 
@@ -1507,15 +1898,26 @@ def _extract_document_text(filename: str, content_type: str, data: bytes, max_ch
 
 _READ_ONLY_TOOLS = {
     "list_agendas",
+    "get_agenda_details",
+    "list_backlog_todos",
     "list_permits",
     "get_permit_details",
+    "list_inspections",
     "list_complaints",
     "get_complaint_details",
+    "list_work_orders",
     "search_records",
     "read_record_file",
+    "list_foia_requests",
     "search_city_code",
     "get_city_code_section",
     "search_portal_info",
+    "list_calendar_events",
+    "search_directory",
+    "list_forms",
+    "list_contractor_licenses",
+    "list_utility_bills",
+    "list_citations",
 }
 
 
