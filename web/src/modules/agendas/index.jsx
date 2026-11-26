@@ -19,7 +19,6 @@ import React from 'react';
 
 const AgendasListPage = React.lazy(() => import('./AgendasListPage.jsx'));
 const AgendaDetailPage = React.lazy(() => import('./AgendaDetailPage.jsx'));
-const BacklogPage = React.lazy(() => import('./BacklogPage.jsx'));
 const AgendaPrefsPage = React.lazy(() => import('./AgendaPrefsPage.jsx'));
 const CouncilPage = React.lazy(() => import('./CouncilPage.jsx'));
 const FinalizedAgendasPage = React.lazy(() => import('./FinalizedAgendasPage.jsx'));
@@ -44,9 +43,9 @@ const agendasModule = {
       component: AgendasListPage,
     },
     {
-      match: (hash) => (hash === 'backlog' ? {} : null),
+      match: (hash) => (hash === 'backlog' ? { initialTab: 'queue' } : null),
       permission: 'agendas.manage',
-      component: BacklogPage,
+      component: AgendasListPage,
     },
     {
       match: (hash) => (hash === 'preferences-agenda' || hash === 'preferences' ? {} : null),

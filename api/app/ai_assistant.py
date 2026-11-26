@@ -190,7 +190,7 @@ def _call_gemini(api_key: str, model: str, payload: dict, *, enforce_budget: boo
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=60) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             _record_gemini_usage(model, data)
             return data
@@ -2991,6 +2991,7 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict, page_context: 
     pending_actions: list[dict] = []
     used_tools: set[str] = set()
     final_text = ""
+    ended_on_tool_calls = False
 
     for _ in range(8):
         resp = _call_gemini(
@@ -3004,6 +3005,7 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict, page_context: 
         )
         cands = resp.get("candidates") or []
         if not cands:
+            ended_on_tool_calls = False
             break
         model_content = cands[0].get("content") or {}
         parts = model_content.get("parts") or []
@@ -3011,11 +3013,12 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict, page_context: 
 
         fn_calls = [p["functionCall"] for p in parts if isinstance(p, dict) and "functionCall" in p]
         text_parts = [p["text"] for p in parts if isinstance(p, dict) and p.get("text") and not p.get("thought")]
-        if text_parts:
-            final_text = "\n".join(text_parts).strip()
-
         if not fn_calls:
+            if text_parts:
+                final_text = "\n".join(text_parts).strip()
+            ended_on_tool_calls = False
             break
+        ended_on_tool_calls = True
 
         fn_responses = []
         for fc in fn_calls:
@@ -3064,7 +3067,7 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict, page_context: 
             fn_responses.append({"functionResponse": fn_resp_obj})
         contents.append({"role": "user", "parts": fn_responses})
 
-    if not final_text and not actions and not pending_actions:
+    if (not final_text or ended_on_tool_calls) and not actions and not pending_actions:
         contents.append({
             "role": "user",
             "parts": [{"text": "Based on the search results above, please answer the question directly. If the municipal code or documents do not specify a limit, state that clearly and cite the relevant sections you checked."}],
@@ -3270,8 +3273,8 @@ def _run_and_save_permit_evaluation(permit_id: int, check_type: str, user: dict)
         )
     res = _run_ai_command(prompt, [], user)
     report = (res.get("reply") or "").strip()
-    if not report:
-        raise HTTPException(status_code=500, detail="AI returned an empty evaluation.")
+    if not report or report == "I couldn't find an answer or propose an action for that request.":
+        raise HTTPException(status_code=502, detail="AI returned an empty evaluation. Please try again.")
     _, model, _ = _load_gemini_config()
     with pool.connection() as conn:
         row = conn.execute(

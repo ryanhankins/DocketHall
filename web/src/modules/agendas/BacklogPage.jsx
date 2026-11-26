@@ -165,7 +165,7 @@ export function CreateTodoModal({ context, bodies = [], onClose, onCreated }) {
   );
 }
 
-export default function BacklogPage({ onNavigate, onBacklogCount }) {
+export default function BacklogPage({ onNavigate, onBacklogCount, embedded = false, onAgendasChanged }) {
   const [items, setItems] = useState([]);
   const [agendas, setAgendas] = useState([]);
   const [bodies, setBodies] = useState([]);
@@ -283,9 +283,12 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
 
   const today = todayIso();
 
+  const Wrapper = embedded ? 'div' : 'section';
+  const wrapperProps = embedded ? {} : { id: 'section-backlog' };
+
   return (
-    <section id="section-backlog">
-      <h1>Todos &amp; Item Backlog</h1>
+    <Wrapper {...wrapperProps}>
+      {!embedded && <h1>Todos &amp; Item Backlog</h1>}
 
       <datalist id="backlog-sections-datalist">
         {sections.map(s => <option key={s} value={s} />)}
@@ -470,6 +473,7 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
                             onSave={async (next) => {
                               await api(`/api/agendas/backlog/${it.id}`, { method: 'PATCH', body: JSON.stringify({ folder: next }) });
                               await loadAll();
+                            onAgendasChanged?.();
                             }}
                           />
                         </span>
@@ -500,6 +504,7 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
                               onClick: () => onNavigate(`#agendas/${agendaId}`),
                             });
                             await loadAll();
+                            onAgendasChanged?.();
                           } catch (err) {
                             showToast(err.message, 'error');
                           } finally {
@@ -585,6 +590,7 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
                               onClick={async () => {
                                 await api(`/api/agendas/backlog/${it.id}/documents/${d.id}`, { method: 'DELETE' });
                                 await loadAll();
+                            onAgendasChanged?.();
                               }}
                             >
                               Remove
@@ -619,6 +625,6 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
         )}
       </div>
       )}
-    </section>
+    </Wrapper>
   );
 }

@@ -103,9 +103,47 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
   const [busy, setBusy] = useState(false);
   const [aiState, setAiState] = useState({ enabled: false, configured: false, reviews: [], up_to_date: { completeness: false, code_check: false } });
   const [aiBusy, setAiBusy] = useState('');
+  const [aiError, setAiError] = useState('');
   const showToast = useToast();
 
+  async function runAiEvaluation(checkType) {
+    const label = checkType === 'completeness' ? 'completeness check' : 'City Code check';
+    setAiBusy(checkType);
+    setAiError('');
+    try {
+      const res = await api(`/api/ai/permits/${permit.id}/evaluate`, {
+        method: 'POST',
+        body: JSON.stringify({ check_type: checkType }),
+      });
+      if (res?.review) {
+        setAiState((s) => ({
+          ...s,
+          reviews: s.reviews.some((r) => r.id === res.review.id) ? s.reviews : [res.review, ...s.reviews],
+          up_to_date: { ...s.up_to_date, [checkType]: true },
+        }));
+        showToast(
+          res.cached ? (res.message || `Permit has not changed since the last ${label}`) : `Saved AI ${label} to permit`,
+          'ok',
+        );
+      } else if (res?.cached) {
+        setAiState((s) => ({ ...s, up_to_date: { ...s.up_to_date, [checkType]: true } }));
+        showToast(res.message || `Permit has not changed since the last ${label}`, 'ok');
+      } else {
+        const msg = `AI ${label} returned no output.`;
+        setAiError(msg);
+        showToast(msg, 'error');
+      }
+    } catch (err) {
+      const msg = err.message || `AI ${label} failed`;
+      setAiError(msg);
+      showToast(msg, 'error');
+    } finally {
+      setAiBusy('');
+    }
+  }
+
   useEffect(() => {
+    setAiError('');
     setStatus(permit.status);
     setFee(permit.fee_amount || '');
     setPayStatus(permit.payment_status || 'unpaid');
@@ -585,30 +623,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                     type="button"
                     className="btn sm"
                     disabled={!!aiBusy || !aiState.configured || !!aiState.up_to_date?.completeness}
-                    onClick={async () => {
-                      setAiBusy('completeness');
-                      try {
-                        const res = await api(`/api/ai/permits/${permit.id}/evaluate`, {
-                          method: 'POST',
-                          body: JSON.stringify({ check_type: 'completeness' }),
-                        });
-                        if (res?.cached) {
-                          setAiState((s) => ({ ...s, up_to_date: { ...s.up_to_date, completeness: true } }));
-                          showToast(res.message || 'Permit has not changed since the last completeness check', 'ok');
-                        } else if (res?.review) {
-                          setAiState((s) => ({
-                            ...s,
-                            reviews: [res.review, ...s.reviews],
-                            up_to_date: { ...s.up_to_date, completeness: true },
-                          }));
-                          showToast('Saved AI completeness check to permit', 'ok');
-                        }
-                      } catch (err) {
-                        showToast(err.message || 'AI completeness check failed', 'error');
-                      } finally {
-                        setAiBusy('');
-                      }
-                    }}
+                    onClick={() => runAiEvaluation('completeness')}
                     title={
                       !aiState.configured
                         ? 'Configure Gemini API key in AI Assistant first'
@@ -627,30 +642,7 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                     type="button"
                     className="btn sm"
                     disabled={!!aiBusy || !aiState.configured || !!aiState.up_to_date?.code_check}
-                    onClick={async () => {
-                      setAiBusy('code_check');
-                      try {
-                        const res = await api(`/api/ai/permits/${permit.id}/evaluate`, {
-                          method: 'POST',
-                          body: JSON.stringify({ check_type: 'code_check' }),
-                        });
-                        if (res?.cached) {
-                          setAiState((s) => ({ ...s, up_to_date: { ...s.up_to_date, code_check: true } }));
-                          showToast(res.message || 'Permit has not changed since the last City Code check', 'ok');
-                        } else if (res?.review) {
-                          setAiState((s) => ({
-                            ...s,
-                            reviews: [res.review, ...s.reviews],
-                            up_to_date: { ...s.up_to_date, code_check: true },
-                          }));
-                          showToast('Saved AI City Code check to permit', 'ok');
-                        }
-                      } catch (err) {
-                        showToast(err.message || 'AI City Code check failed', 'error');
-                      } finally {
-                        setAiBusy('');
-                      }
-                    }}
+                    onClick={() => runAiEvaluation('code_check')}
                     title={
                       !aiState.configured
                         ? 'Configure Gemini API key in AI Assistant first'
@@ -667,6 +659,22 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
                   </button>
                 </div>
               </div>
+              {aiError && (
+                <div
+                  role="alert"
+                  style={{
+                    background: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    color: '#991b1b',
+                    borderRadius: '6px',
+                    padding: '.5rem .75rem',
+                    fontSize: '.85rem',
+                    marginBottom: '.6rem',
+                  }}
+                >
+                  {aiError}
+                </div>
+              )}
               {aiState.reviews.length === 0 ? (
                 <div className="muted" style={{ fontSize: '.85rem' }}>
                   No AI evaluations saved on this permit yet. Click a button above to run one.

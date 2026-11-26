@@ -301,7 +301,7 @@ export default function CoreShell() {
         if (r.permission && !hasPermission(me, r.permission)) continue;
         const params = r.match(hash);
         if (params) {
-          const activeSection = routePath.startsWith('agendas/')
+          const activeSection = (routePath.startsWith('agendas/') || routePath === 'backlog')
             ? 'agendas'
             : (routePath.startsWith('complaints-manage/')
                 ? 'complaints-manage'

@@ -19,7 +19,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, formatDate, formatTime12h, toTimeInputValue } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
 import AgendaQuickGuideModal from './AgendaQuickGuideModal.jsx';
-import { isAgendaFinalized } from './BacklogPage.jsx';
+import BacklogPage, { isAgendaFinalized } from './BacklogPage.jsx';
 
 function SubmissionRow({ sub, agendas, categories = [], onReloadAll, onReloadSubs }) {
   const showToast = useToast();
@@ -192,7 +192,7 @@ function SubmissionRow({ sub, agendas, categories = [], onReloadAll, onReloadSub
   );
 }
 
-export default function AgendasListPage({ onNavigate, onBacklogCount }) {
+export default function AgendasListPage({ onNavigate, onBacklogCount, initialTab = 'agendas' }) {
   const [agendas, setAgendas] = useState([]);
   const [bodies, setBodies] = useState([]);
   const [categories, setCategories] = useState([
@@ -214,7 +214,10 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
   const [templateId, setTemplateId] = useState('');
   const [formErr, setFormErr] = useState('');
 
-  const [tab, setTab] = useState('agendas');
+  const [tab, setTab] = useState(initialTab);
+  useEffect(() => {
+    setTab(initialTab);
+  }, [initialTab]);
   const [search, setSearch] = useState('');
   const [selectedBodies, setSelectedBodies] = useState([]);
   const [selectedCats, setSelectedCats] = useState([]);
@@ -397,8 +400,8 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
               <strong>Create an Agenda (or Starter Template):</strong> Use the <em>New Agenda</em> form below, then click <strong>Save as Template</strong> so future meetings start pre-populated.
             </li>
             <li>
-              <strong>Add Items &amp; Supporting PDFs:</strong> Open an agenda to add items, attach backup files, or pull scheduled recurring items from{' '}
-              <button type="button" className="link-btn" onClick={() => onNavigate('#backlog')}>Todos &amp; Backlog</button>.
+              <strong>Add Items &amp; Supporting PDFs:</strong> Open an agenda to add items, attach backup files, or pull scheduled recurring items and council proposals from{' '}
+              <button type="button" className="link-btn" onClick={() => setTab('queue')}>Backlog &amp; Proposals</button>.
             </li>
             <li>
               {hasFinalizedAgenda ? '✓ ' : ''}
@@ -410,26 +413,21 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
 
       <AgendaQuickGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} onNavigate={onNavigate} />
 
-      {dueBacklogCount > 0 && (
-        <div className="banner show" style={{ background: '#fffbeb', borderColor: '#fcd34d', color: '#92400e' }}>
-          <span>{dueBacklogCount} scheduled/backlog item(s) have reached their target date.</span>
-          <button type="button" className="btn sm" onClick={() => onNavigate('#backlog')}>Open Item Backlog</button>
-        </div>
-      )}
-
       <div className="tabs">
         <button type="button" className={`btn sm${tab === 'agendas' ? ' active' : ''}`} onClick={() => setTab('agendas')}>
           Agendas ({agendas.length})
         </button>
         <button
           type="button"
-          className={`btn sm${tab === 'submissions' ? ' active' : ''}`}
-          onClick={() => setTab('submissions')}
+          className={`btn sm${tab === 'queue' ? ' active' : ''}`}
+          onClick={() => setTab('queue')}
           style={{ display: 'inline-flex', alignItems: 'center', gap: '.4rem' }}
         >
-          <span>Council Submissions</span>
-          {submissions.length > 0 && (
-            <span className="badge" style={{ background: '#fef3c7', color: '#92400e' }}>{submissions.length}</span>
+          <span>Backlog &amp; Proposals</span>
+          {(submissions.length + dueBacklogCount) > 0 && (
+            <span className="badge" style={{ background: '#fef3c7', color: '#92400e' }}>
+              {submissions.length + dueBacklogCount}
+            </span>
           )}
         </button>
         <button type="button" className={`btn sm${tab === 'create' ? ' active' : ''}`} onClick={() => setTab('create')}>
@@ -437,27 +435,30 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
         </button>
       </div>
 
-      {tab === 'submissions' && (
-        <div className="card">
-          <div className="between" style={{ marginBottom: '.65rem' }}>
-            <h2 style={{ margin: 0 }}>Council &amp; Staff Submissions</h2>
-            <span className="badge draft">{submissions.length} pending</span>
+      {tab === 'queue' && (
+        <>
+          <div className="card">
+            <div className="between" style={{ marginBottom: '.65rem' }}>
+              <h2 style={{ margin: 0 }}>Council &amp; Staff Proposals</h2>
+              <span className="badge draft">{submissions.length} pending</span>
+            </div>
+            {submissions.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }}>No pending council or staff proposals.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr><th>Submitted Item</th><th>From</th><th>Requested</th><th>Assign to Agenda</th><th>Actions</th></tr>
+                </thead>
+                <tbody>
+                  {submissions.map(s => (
+                    <SubmissionRow key={s.id} sub={s} agendas={agendas} categories={categories} onReloadAll={loadAll} onReloadSubs={loadSubs} />
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
-          {submissions.length === 0 ? (
-            <p className="muted" style={{ margin: 0 }}>No pending council or staff submissions.</p>
-          ) : (
-            <table>
-              <thead>
-                <tr><th>Submitted Item</th><th>From</th><th>Requested</th><th>Assign to Agenda</th><th>Actions</th></tr>
-              </thead>
-              <tbody>
-                {submissions.map(s => (
-                  <SubmissionRow key={s.id} sub={s} agendas={agendas} categories={categories} onReloadAll={loadAll} onReloadSubs={loadSubs} />
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
+          <BacklogPage embedded onNavigate={onNavigate} onBacklogCount={onBacklogCount} onAgendasChanged={loadAll} />
+        </>
       )}
 
       {tab === 'create' && (
