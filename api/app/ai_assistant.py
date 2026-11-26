@@ -654,6 +654,30 @@ _TOOL_DECLARATIONS = [
             },
         },
     },
+    {
+        "name": "list_facilities",
+        "description": "List available reservable municipal facilities (parks, pavilions, halls) and their fees.",
+        "parameters": {"type": "OBJECT", "properties": {}},
+    },
+    {
+        "name": "create_facility_reservation",
+        "description": "Create a municipal facility reservation request (e.g. park pavilion or hall booking).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "facility_name": {"type": "STRING", "description": "Facility name (e.g. 'Tighe-Schmitz Park Pavilion')"},
+                "event_date": {"type": "STRING", "description": "Event date YYYY-MM-DD"},
+                "event_title": {"type": "STRING", "description": "Event title or purpose (default 'Park Pavilion Reservation')"},
+                "requester_name": {"type": "STRING", "description": "Requester name (defaults to current user)"},
+                "start_time": {"type": "STRING", "description": "Optional start time (e.g. '3:00 PM')"},
+                "end_time": {"type": "STRING", "description": "Optional end time (e.g. '5:00 PM')"},
+                "requester_email": {"type": "STRING", "description": "Optional email"},
+                "requester_phone": {"type": "STRING", "description": "Optional phone"},
+                "notes": {"type": "STRING", "description": "Optional notes"},
+            },
+            "required": ["facility_name", "event_date"],
+        },
+    },
 ]
 
 
@@ -703,6 +727,8 @@ _TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "list_citations": ("citations", ("citations.manage",)),
     "list_compliance_programs": ("licensing", ("licensing.manage",)),
     "list_facility_reservations": ("calendar", ("calendar.manage",)),
+    "list_facilities": ("calendar", ()),
+    "create_facility_reservation": ("calendar", ("calendar.manage",)),
 }
 
 
@@ -1884,6 +1910,70 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                 None,
             )
 
+        if name == "list_facilities":
+            rows = conn.execute(
+                "SELECT id, name, description, daily_fee, hourly_fee, capacity, is_active "
+                "FROM reservable_facilities WHERE is_active = TRUE ORDER BY sort_order ASC, id ASC"
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "facilities": [
+                        {
+                            "id": r[0],
+                            "name": r[1],
+                            "description": (r[2] or "")[:200],
+                            "daily_fee": r[3],
+                            "hourly_fee": r[4],
+                            "capacity": r[5],
+                        }
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "create_facility_reservation":
+            fname_req = str(args.get("facility_name") or "").strip()
+            ev_date = date.fromisoformat(str(args["event_date"]).strip())
+            ev_title = str(args.get("event_title") or "Park / Facility Reservation").strip()
+            req_name = str(args.get("requester_name") or username).strip() or username
+            st_time = str(args.get("start_time") or "").strip()
+            en_time = str(args.get("end_time") or "").strip()
+            req_email = str(args.get("requester_email") or "").strip()
+            req_phone = str(args.get("requester_phone") or "").strip()
+            notes = str(args.get("notes") or "").strip()
+            terms = _extract_search_terms(fname_req)
+            fac = conn.execute(
+                "SELECT id, name, daily_fee, hourly_fee FROM reservable_facilities WHERE is_active = TRUE AND LOWER(name) = LOWER(%s)",
+                (fname_req,),
+            ).fetchone()
+            if not fac and terms:
+                conds = " AND ".join("name ILIKE %s" for _ in terms)
+                fac = conn.execute(
+                    f"SELECT id, name, daily_fee, hourly_fee FROM reservable_facilities WHERE is_active = TRUE AND ({conds}) ORDER BY id ASC LIMIT 1",
+                    tuple(f"%{t}%" for t in terms),
+                ).fetchone()
+            if not fac:
+                return {"ok": False, "error": f"Active facility matching '{fname_req}' not found"}, None
+            rental_mode = "hourly" if (st_time or en_time) else "full_day"
+            fee_amt = fac[3] if (rental_mode == "hourly" and fac[3]) else fac[2]
+            year = datetime.now(timezone.utc).year
+            row = conn.execute(
+                "INSERT INTO facility_reservations "
+                "(reservation_number, facility_id, facility_name, event_date, event_title, requester_name, "
+                "requester_email, requester_phone, notes, fee_amount, rental_mode, start_time, end_time, status) "
+                "VALUES ('TEMP', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending') RETURNING id",
+                (fac[0], fac[1], ev_date, ev_title, req_name, req_email, req_phone, notes, fee_amt, rental_mode, st_time, en_time),
+            ).fetchone()
+            rid = row[0]
+            rnum = f"RES-{year}-{rid:04d}"
+            conn.execute("UPDATE facility_reservations SET reservation_number = %s WHERE id = %s", (rnum, rid))
+            return (
+                {"ok": True, "reservation_id": rid, "reservation_number": rnum, "facility_name": fac[1], "event_date": ev_date.isoformat(), "status": "pending"},
+                {"tool": name, "summary": f"Created reservation request {rnum} for {fac[1]} on {ev_date.isoformat()}", "route": "/app/calendar-manage"},
+            )
+
     return {"ok": False, "error": f"Unknown tool: {name}"}, None
 
 
@@ -2041,6 +2131,7 @@ _READ_ONLY_TOOLS = {
     "list_contractor_licenses",
     "list_compliance_programs",
     "list_facility_reservations",
+    "list_facilities",
     "list_utility_bills",
     "list_citations",
 }
@@ -2064,6 +2155,9 @@ def _describe_proposed_action(name: str, args: dict) -> str:
         return f"Publish blog post '{a.get('title', '')}'"
     if name == "create_calendar_event":
         return f"Create calendar event '{a.get('title', '')}' on {a.get('event_date', '')}"
+    if name == "create_facility_reservation":
+        t_range = f" ({a['start_time']} - {a['end_time']})" if a.get("start_time") or a.get("end_time") else ""
+        return f"Create reservation request for '{a.get('facility_name', '')}' on {a.get('event_date', '')}{t_range}"
     if name == "update_urgent_alert":
         return f"{'Enable' if a.get('enabled') else 'Clear'} urgent alert banner" + (f": {a.get('message')}" if a.get("enabled") and a.get("message") else "")
     if name == "create_permit":
