@@ -211,15 +211,12 @@ export function MarkdownMessage({ text }) {
 export default function AiAssistantBar({ onNavigate }) {
   const [status, setStatus] = useState({
     configured: false,
+    can_configure: false,
     model: 'gemini-3.8-flash',
     available_models: DEFAULT_MODELS,
     loading: true,
   });
   const [minimized, setMinimized] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('gemini-3.8-flash');
-  const [apiKey, setApiKey] = useState('');
-  const [savingKey, setSavingKey] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -227,20 +224,22 @@ export default function AiAssistantBar({ onNavigate }) {
   const showToast = useToast();
 
   useEffect(() => {
-    api('/api/ai/status')
-      .then((d) => {
-        const m = d?.model || 'gemini-3.8-flash';
-        setStatus({
-          configured: !!d?.configured,
-          can_configure: !!d?.can_configure,
-          model: m,
-          available_models: Array.isArray(d?.available_models) && d.available_models.length ? d.available_models : DEFAULT_MODELS,
-          loading: false,
-        });
-        setSelectedModel(m);
-        if (!d?.configured && d?.can_configure) setShowSettings(true);
-      })
-      .catch(() => setStatus((s) => ({ ...s, loading: false })));
+    const loadStatus = () => {
+      api('/api/ai/status')
+        .then((d) => {
+          setStatus({
+            configured: !!d?.configured,
+            can_configure: !!d?.can_configure,
+            model: d?.model || 'gemini-3.8-flash',
+            available_models: Array.isArray(d?.available_models) && d.available_models.length ? d.available_models : DEFAULT_MODELS,
+            loading: false,
+          });
+        })
+        .catch(() => setStatus((s) => ({ ...s, loading: false })));
+    };
+    loadStatus();
+    window.addEventListener('dockethall:ai-config-changed', loadStatus);
+    return () => window.removeEventListener('dockethall:ai-config-changed', loadStatus);
   }, []);
 
   useEffect(() => {
@@ -344,50 +343,6 @@ export default function AiAssistantBar({ onNavigate }) {
     ]);
   }
 
-  async function handleModelChange(nextModel) {
-    setSelectedModel(nextModel);
-    if (!status.configured) return;
-    setSavingKey(true);
-    try {
-      const res = await api('/api/ai/config', {
-        method: 'PUT',
-        body: JSON.stringify({ model: nextModel }),
-      });
-      setStatus((s) => ({ ...s, configured: !!res.configured, model: res.model }));
-      showToast(`Switched Gemini model to ${res.model}`, 'ok');
-    } catch (err) {
-      setSelectedModel(status.model);
-      showToast(err.message || 'Failed to switch Gemini model', 'error');
-    } finally {
-      setSavingKey(false);
-    }
-  }
-
-  async function handleSaveConfig(e) {
-    e.preventDefault();
-    if (!status.configured && !apiKey.trim()) {
-      showToast('Enter a Gemini API key', 'error');
-      return;
-    }
-    setSavingKey(true);
-    try {
-      const payload = { model: selectedModel };
-      if (apiKey.trim()) payload.api_key = apiKey.trim();
-      const res = await api('/api/ai/config', {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      });
-      setStatus((s) => ({ ...s, configured: !!res.configured, model: res.model }));
-      setApiKey('');
-      setShowSettings(false);
-      showToast(`Saved Gemini settings (${res.model})`, 'ok');
-    } catch (err) {
-      showToast(err.message || 'Failed to verify Gemini settings', 'error');
-    } finally {
-      setSavingKey(false);
-    }
-  }
-
   if (status.loading) return null;
 
   if (minimized) {
@@ -464,22 +419,6 @@ export default function AiAssistantBar({ onNavigate }) {
               Clear
             </button>
           )}
-          {status.can_configure && (
-            <button
-              type="button"
-              className="btn sm"
-              aria-pressed={showSettings}
-              onClick={() => setShowSettings((v) => !v)}
-              title={showSettings ? 'Hide AI settings' : 'Open AI settings'}
-              style={{
-                padding: '.2rem .45rem',
-                fontSize: '.74rem',
-                background: showSettings ? '#e2e8f0' : undefined,
-              }}
-            >
-              Settings
-            </button>
-          )}
           <button
             type="button"
             className="btn sm"
@@ -493,55 +432,33 @@ export default function AiAssistantBar({ onNavigate }) {
         </div>
       </div>
 
-      {showSettings && (
-        <form
-          onSubmit={handleSaveConfig}
+      {!status.configured && (
+        <div
           style={{
-            padding: '.65rem .8rem',
-            background: '#f8fafc',
-            borderBottom: '1px solid #e2e8f0',
-            display: 'grid',
-            gap: '.45rem',
+            padding: '.6rem .75rem',
+            background: '#fffbeb',
+            borderBottom: '1px solid #fde68a',
+            fontSize: '.8rem',
+            color: '#92400e',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '.5rem',
+            flexWrap: 'wrap',
           }}
         >
-          <label style={{ fontSize: '.78rem', fontWeight: 600, color: '#334155' }}>
-            Gemini Model
-            <select
-              value={selectedModel}
-              onChange={(e) => handleModelChange(e.target.value)}
-              disabled={savingKey}
-              style={{ marginTop: '.2rem', width: '100%' }}
-            >
-              {status.available_models.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </label>
-          <label style={{ fontSize: '.78rem', fontWeight: 600, color: '#334155' }}>
-            Gemini API Key {status.configured ? '(leave blank to keep current)' : ''}
-            <input
-              type="password"
-              aria-label="Gemini API Key"
-              placeholder={status.configured ? '•••••••• (saved)' : 'Paste Gemini API key (AQ... or AIza...)'}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              style={{ marginTop: '.2rem', width: '100%' }}
-            />
-          </label>
-          <div style={{ display: 'flex', gap: '.45rem', justifyContent: 'flex-end' }}>
+          <span>Gemini API key is not configured.</span>
+          {status.can_configure && (
             <button
               type="button"
               className="btn sm"
-              onClick={() => setShowSettings(false)}
-              disabled={savingKey}
+              onClick={() => onNavigate?.('/app/integrations')}
+              style={{ fontSize: '.74rem', padding: '.2rem .5rem' }}
             >
-              Close
+              Email &amp; Integrations &rarr;
             </button>
-            <button type="submit" className="btn sm primary" disabled={savingKey}>
-              {savingKey ? 'Verifying…' : 'Verify & Save'}
-            </button>
-          </div>
-        </form>
+          )}
+        </div>
       )}
 
       <div
@@ -674,7 +591,7 @@ export default function AiAssistantBar({ onNavigate }) {
         <input
           type="text"
           aria-label="AI Admin Command"
-          placeholder={status.configured ? 'Type a command…' : (status.can_configure ? 'Open Settings to add API key…' : 'AI key not configured by admin…')}
+          placeholder={status.configured ? 'Type a command…' : 'Configure Gemini key in Email & Integrations…'}
           value={prompt}
           disabled={!status.configured || busy}
           onChange={(e) => setPrompt(e.target.value)}

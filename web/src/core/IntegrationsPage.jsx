@@ -41,11 +41,19 @@ export default function IntegrationsPage() {
   const [emailMsg, setEmailMsg] = useState({ text: '', isError: false });
   const [subData, setSubData] = useState({ topics: [], counts: {}, subscribers: [] });
 
+  // Gemini AI Assistant state
+  const [geminiCfg, setGeminiCfg] = useState(null);
+  const [geminiKey, setGeminiKey] = useState('');
+  const [geminiModel, setGeminiModel] = useState('gemini-3.5-flash-lite');
+  const [geminiBusy, setGeminiBusy] = useState(false);
+  const [geminiMsg, setGeminiMsg] = useState({ text: '', isError: false });
+
   const loadConfig = useCallback(async () => {
-    const [data, em, subs] = await Promise.all([
+    const [data, em, subs, ai] = await Promise.all([
       api('/api/integrations/google-cloud'),
       api('/api/integrations/email'),
       api('/api/subscriptions').catch(() => ({ topics: [], counts: {}, subscribers: [] })),
+      api('/api/ai/status').catch(() => null),
     ]);
     setCfg(data);
     setProjectId(data.project_id || '');
@@ -57,6 +65,10 @@ export default function IntegrationsPage() {
     setSenderEmail(em.sender_email || '');
     setEmailEnabled(em.has_password ? Boolean(em.enabled) : true);
     setSubData(subs || { topics: [], counts: {}, subscribers: [] });
+    if (ai) {
+      setGeminiCfg(ai);
+      setGeminiModel(ai.model || 'gemini-3.5-flash-lite');
+    }
   }, []);
 
   useEffect(() => {
@@ -151,7 +163,141 @@ export default function IntegrationsPage() {
         <button type="button" className={`btn sm${tab === 'google' ? ' active' : ''}`} onClick={() => setTab('google')}>
           Google Cloud
         </button>
+        <button type="button" className={`btn sm${tab === 'gemini' ? ' active' : ''}`} onClick={() => setTab('gemini')}>
+          Gemini AI Assistant
+        </button>
       </div>
+
+      {tab === 'gemini' && (
+      <div className="card">
+        <div className="between" style={{ marginBottom: '.75rem' }}>
+          <div>
+            <h2 style={{ margin: 0 }}>Gemini AI Assistant</h2>
+            <p className="muted" style={{ margin: '4px 0 0' }}>
+              Configure the Google Gemini API key and default model used by the AI Assistant and Permit Review checks.
+            </p>
+          </div>
+          {geminiCfg && (
+            <span className={`badge ${geminiCfg.configured ? 'active' : 'disabled'}`}>
+              {geminiCfg.configured ? 'Configured' : 'Not Configured'}
+            </span>
+          )}
+        </div>
+
+        {geminiCfg?.configured && (
+          <div
+            style={{
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: 6,
+              padding: '.75rem',
+              marginBottom: '1rem',
+              fontSize: '.88rem',
+              display: 'grid',
+              gap: '.25rem',
+            }}
+          >
+            <div><strong>Active Model:</strong> <code>{geminiCfg.model}</code></div>
+            <div><strong>Key Source:</strong> {geminiCfg.source === 'env' ? 'Environment Variable' : 'Stored in DocketHall Integrations'}</div>
+          </div>
+        )}
+
+        <form
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setGeminiMsg({ text: '', isError: false });
+            if (!geminiCfg?.configured && !geminiKey.trim()) {
+              setGeminiMsg({ text: 'Please enter a Gemini API key.', isError: true });
+              return;
+            }
+            setGeminiBusy(true);
+            try {
+              const payload = { model: geminiModel };
+              if (geminiKey.trim()) payload.api_key = geminiKey.trim();
+              const res = await api('/api/ai/config', {
+                method: 'PUT',
+                body: JSON.stringify(payload),
+              });
+              setGeminiCfg((prev) => ({ ...(prev || {}), configured: !!res.configured, model: res.model, source: res.source }));
+              setGeminiKey('');
+              setGeminiMsg({ text: `Verified and saved (${res.model}).`, isError: false });
+              showToast(`Saved Gemini settings (${res.model})`, 'ok');
+              window.dispatchEvent(new CustomEvent('dockethall:ai-config-changed'));
+            } catch (err) {
+              setGeminiMsg({ text: err.message || 'Failed to verify Gemini API key.', isError: true });
+            } finally {
+              setGeminiBusy(false);
+            }
+          }}
+          style={{ display: 'grid', gap: '.9rem', maxWidth: 560 }}
+        >
+          <div className="field">
+            <label htmlFor="gemini-model">Gemini Model</label>
+            <select
+              id="gemini-model"
+              value={geminiModel}
+              onChange={(e) => setGeminiModel(e.target.value)}
+            >
+              {(geminiCfg?.available_models || ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-3.8-pro']).map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="field">
+            <label htmlFor="gemini-api-key">
+              {geminiCfg?.configured ? 'Replace Gemini API Key (leave blank to keep current key)' : 'Gemini API Key'}
+            </label>
+            <input
+              id="gemini-api-key"
+              type="password"
+              autoComplete="off"
+              placeholder={geminiCfg?.configured ? '•••••••• (saved)' : 'Paste Gemini API key (AQ... or AIza...)'}
+              value={geminiKey}
+              onChange={(e) => setGeminiKey(e.target.value)}
+            />
+          </div>
+
+          <div className="actions">
+            <button type="submit" className="btn primary" disabled={geminiBusy}>
+              {geminiBusy ? 'Verifying…' : 'Verify & Save'}
+            </button>
+            {geminiCfg?.configured && geminiCfg?.source !== 'env' && (
+              <button
+                type="button"
+                className="btn danger"
+                disabled={geminiBusy}
+                onClick={async () => {
+                  if (!window.confirm('Remove the stored Gemini API key?')) return;
+                  setGeminiBusy(true);
+                  setGeminiMsg({ text: '', isError: false });
+                  try {
+                    const res = await api('/api/ai/config', { method: 'DELETE' });
+                    setGeminiCfg((prev) => ({ ...(prev || {}), configured: !!res.configured, model: res.model, source: res.source }));
+                    setGeminiKey('');
+                    setGeminiMsg({ text: 'Gemini API key removed.', isError: false });
+                    showToast('Gemini API key removed', 'ok');
+                    window.dispatchEvent(new CustomEvent('dockethall:ai-config-changed'));
+                  } catch (err) {
+                    setGeminiMsg({ text: err.message, isError: true });
+                  } finally {
+                    setGeminiBusy(false);
+                  }
+                }}
+              >
+                Remove Key
+              </button>
+            )}
+          </div>
+
+          {geminiMsg.text && (
+            <p className={geminiMsg.isError ? 'error-msg' : 'ok-msg'} style={{ margin: 0 }}>
+              {geminiMsg.text}
+            </p>
+          )}
+        </form>
+      </div>
+      )}
 
       {tab === 'google' && (
       <div className="card">
