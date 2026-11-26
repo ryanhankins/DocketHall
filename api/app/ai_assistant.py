@@ -660,6 +660,21 @@ _TOOL_DECLARATIONS = [
         "parameters": {"type": "OBJECT", "properties": {}},
     },
     {
+        "name": "create_facility",
+        "description": "Add a new reservable municipal facility (only after the user confirms they want to create it).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "name": {"type": "STRING", "description": "Facility name (e.g. 'Tighe-Schmitz Park Pavilion')"},
+                "description": {"type": "STRING", "description": "Optional description"},
+                "daily_fee": {"type": "STRING", "description": "Optional daily fee (e.g. '$50.00')"},
+                "hourly_fee": {"type": "STRING", "description": "Optional hourly fee"},
+                "capacity": {"type": "STRING", "description": "Optional capacity"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
         "name": "create_facility_reservation",
         "description": "Create a municipal facility reservation request (e.g. park pavilion or hall booking).",
         "parameters": {
@@ -728,6 +743,7 @@ _TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "list_compliance_programs": ("licensing", ("licensing.manage",)),
     "list_facility_reservations": ("calendar", ("calendar.manage",)),
     "list_facilities": ("calendar", ()),
+    "create_facility": ("calendar", ("calendar.manage",)),
     "create_facility_reservation": ("calendar", ("calendar.manage",)),
 }
 
@@ -751,6 +767,23 @@ def _check_tool_access(name: str, user: dict) -> str | None:
 
 def _allowed_tools_for_user(user: dict) -> list[dict]:
     return [decl for decl in _TOOL_DECLARATIONS if _check_tool_access(decl["name"], user) is None]
+
+
+def _find_active_facility(conn, fname_req: str):
+    """Look up an active reservable facility by exact name or search terms."""
+    fac = conn.execute(
+        "SELECT id, name, daily_fee, hourly_fee FROM reservable_facilities WHERE is_active = TRUE AND LOWER(name) = LOWER(%s)",
+        (fname_req,),
+    ).fetchone()
+    if not fac:
+        terms = _extract_search_terms(fname_req)
+        if terms:
+            conds = " AND ".join("name ILIKE %s" for _ in terms)
+            fac = conn.execute(
+                f"SELECT id, name, daily_fee, hourly_fee FROM reservable_facilities WHERE is_active = TRUE AND ({conds}) ORDER BY id ASC LIMIT 1",
+                tuple(f"%{t}%" for t in terms),
+            ).fetchone()
+    return fac
 
 
 def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]:
@@ -1933,6 +1966,31 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                 None,
             )
 
+        if name == "create_facility":
+            fac_name = str(args.get("name") or "").strip()
+            if not fac_name:
+                return {"ok": False, "error": "Facility name is required"}, None
+            desc = str(args.get("description") or "").strip()
+            dfee = str(args.get("daily_fee") or "$0.00").strip() or "$0.00"
+            hfee = str(args.get("hourly_fee") or "").strip()
+            cap = str(args.get("capacity") or "").strip()
+            existing = conn.execute("SELECT id, name FROM reservable_facilities WHERE LOWER(name) = LOWER(%s)", (fac_name,)).fetchone()
+            if existing:
+                conn.execute("UPDATE reservable_facilities SET is_active = TRUE WHERE id = %s", (existing[0],))
+                return (
+                    {"ok": True, "facility_id": existing[0], "name": existing[1]},
+                    {"tool": name, "summary": f"Activated facility '{existing[1]}'", "route": "/app/preferences-calendar"},
+                )
+            row = conn.execute(
+                "INSERT INTO reservable_facilities (name, description, daily_fee, hourly_fee, capacity, is_active) "
+                "VALUES (%s, %s, %s, %s, %s, TRUE) RETURNING id",
+                (fac_name, desc, dfee, hfee, cap),
+            ).fetchone()
+            return (
+                {"ok": True, "facility_id": row[0], "name": fac_name},
+                {"tool": name, "summary": f"Created reservable facility '{fac_name}'", "route": "/app/preferences-calendar"},
+            )
+
         if name == "create_facility_reservation":
             fname_req = str(args.get("facility_name") or "").strip()
             ev_date = date.fromisoformat(str(args["event_date"]).strip())
@@ -1943,23 +2001,12 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             req_email = str(args.get("requester_email") or "").strip()
             req_phone = str(args.get("requester_phone") or "").strip()
             notes = str(args.get("notes") or "").strip()
-            terms = _extract_search_terms(fname_req)
-            fac = conn.execute(
-                "SELECT id, name, daily_fee, hourly_fee FROM reservable_facilities WHERE is_active = TRUE AND LOWER(name) = LOWER(%s)",
-                (fname_req,),
-            ).fetchone()
-            if not fac and terms:
-                conds = " AND ".join("name ILIKE %s" for _ in terms)
-                fac = conn.execute(
-                    f"SELECT id, name, daily_fee, hourly_fee FROM reservable_facilities WHERE is_active = TRUE AND ({conds}) ORDER BY id ASC LIMIT 1",
-                    tuple(f"%{t}%" for t in terms),
-                ).fetchone()
+            fac = _find_active_facility(conn, fname_req)
             if not fac:
-                fac = conn.execute(
-                    "INSERT INTO reservable_facilities (name, is_active) VALUES (%s, TRUE) "
-                    "RETURNING id, name, daily_fee, hourly_fee",
-                    (fname_req or "Municipal Facility",),
-                ).fetchone()
+                return {
+                    "ok": False,
+                    "error": f"Active facility matching '{fname_req}' not found. Ask the user if they would like to create it first.",
+                }, None
             rental_mode = "hourly" if (st_time or en_time) else "full_day"
             fee_amt = fac[3] if (rental_mode == "hourly" and fac[3]) else fac[2]
             year = datetime.now(timezone.utc).year
@@ -2159,6 +2206,8 @@ def _describe_proposed_action(name: str, args: dict) -> str:
         return f"Publish blog post '{a.get('title', '')}'"
     if name == "create_calendar_event":
         return f"Create calendar event '{a.get('title', '')}' on {a.get('event_date', '')}"
+    if name == "create_facility":
+        return f"Add reservable facility '{a.get('name', '')}'"
     if name == "create_facility_reservation":
         t_range = f" ({a['start_time']} - {a['end_time']})" if a.get("start_time") or a.get("end_time") else ""
         return f"Create reservation request for '{a.get('facility_name', '')}' on {a.get('event_date', '')}{t_range}"
@@ -2287,6 +2336,24 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
                 denied = _check_tool_access(fname, user)
                 if denied:
                     result_obj = {"ok": False, "error": denied}
+                elif fname == "create_facility_reservation" and not any(p["tool"] == "create_facility" for p in pending_actions):
+                    fname_req = str(fargs.get("facility_name") or "").strip()
+                    with pool.connection() as conn:
+                        fac = _find_active_facility(conn, fname_req)
+                        avail = [r[0] for r in conn.execute("SELECT name FROM reservable_facilities WHERE is_active = TRUE ORDER BY sort_order, id").fetchall()]
+                    if not fac:
+                        result_obj = {
+                            "ok": False,
+                            "error": (
+                                f"Active reservable facility '{fname_req}' does not exist yet. "
+                                f"Available facilities: {avail or 'none'}. "
+                                f"Ask the user whether they would like to create '{fname_req}' as a new reservable facility first."
+                            ),
+                        }
+                    else:
+                        summary = _describe_proposed_action(fname, fargs)
+                        pending_actions.append({"tool": fname, "args": fargs, "summary": summary})
+                        result_obj = {"ok": True, "status": "pending_confirmation", "proposed": summary}
                 else:
                     summary = _describe_proposed_action(fname, fargs)
                     pending_actions.append({"tool": fname, "args": fargs, "summary": summary})
