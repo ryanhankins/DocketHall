@@ -106,6 +106,12 @@ export default function ComplaintsManagePage({ me, initialId = null }) {
   }, [loadAll]);
 
   useEffect(() => {
+    const onAiAction = () => loadAll().catch(() => {});
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadAll]);
+
+  useEffect(() => {
     fetch('/api/codification/public')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {

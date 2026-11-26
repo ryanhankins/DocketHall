@@ -32,6 +32,12 @@ export default function FinalizedAgendasPage() {
     loadData().catch(e => showToast(e.message, 'error'));
   }, [loadData, showToast]);
 
+  useEffect(() => {
+    const onAiAction = () => loadData().catch(() => {});
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadData]);
+
   return (
     <section id="section-finalized-agendas">
       <h1>Finalized Agendas</h1>

@@ -546,6 +546,12 @@ export default function CodificationAdminPage() {
     loadCode(search).catch(e => showToast(e.message, 'error'));
   }, [loadCode, search, showToast]);
 
+  useEffect(() => {
+    const onAiAction = () => loadCode(search).catch(() => {});
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadCode, search]);
+
   const queueFiles = useCallback((rawList) => {
     const valid = Array.from(rawList || []).filter((f) => {
       const lower = (f.name || '').toLowerCase();

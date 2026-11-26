@@ -196,6 +196,12 @@ export default function FieldInspectorPage({ me }) {
   useEffect(() => { loadQueue(); }, [loadQueue]);
 
   useEffect(() => {
+    const onAiAction = () => loadQueue().catch(() => {});
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadQueue]);
+
+  useEffect(() => {
     const onOnline = () => setOnline(true);
     const onOffline = () => setOnline(false);
     window.addEventListener('online', onOnline);

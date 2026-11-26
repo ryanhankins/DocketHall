@@ -41,6 +41,12 @@ export default function ModulesPage({ onModulesChanged }) {
     loadAll().catch(e => showToast(e.message, 'error'));
   }, [loadAll, showToast]);
 
+  useEffect(() => {
+    const onAiAction = () => loadAll().catch(() => {});
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadAll]);
+
   const handleToggle = async (mod) => {
     setBusyId(mod.id);
     try {

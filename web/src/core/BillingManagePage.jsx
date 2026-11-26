@@ -113,6 +113,15 @@ export default function BillingManagePage({ fixedBillType = '', pageTitle = '', 
     loadBills();
   }, [loadBills]);
 
+  useEffect(() => {
+    const onAiAction = () => {
+      loadBills();
+      if (tab === 'reconciliation') loadReconciliation();
+    };
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadBills, loadReconciliation, tab]);
+
   const handleCreate = async (e) => {
     e.preventDefault();
     setSaving(true);

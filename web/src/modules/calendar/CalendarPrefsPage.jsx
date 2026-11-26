@@ -42,6 +42,12 @@ export default function CalendarPrefsPage() {
     load().catch((e) => showToast(e.message, 'error'));
   }, [load, showToast]);
 
+  useEffect(() => {
+    const onAiAction = () => load().catch(() => {});
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [load]);
+
   return (
     <section id="section-preferences-calendar">
       <h1>Calendar &amp; Rental Settings</h1>

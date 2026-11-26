@@ -136,6 +136,19 @@ export default function RecordsPage({ me }) {
   }, [loadRecords]);
 
   useEffect(() => {
+    const onAiAction = () => {
+      loadRecords().catch(() => {});
+      if (tab === 'foia') {
+        api('/api/records/requests')
+          .then((rows) => setFoiaItems(Array.isArray(rows) ? rows : []))
+          .catch(() => {});
+      }
+    };
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadRecords, tab]);
+
+  useEffect(() => {
     if (tab !== 'foia') return;
     api('/api/records/requests')
       .then((rows) => setFoiaItems(Array.isArray(rows) ? rows : []))

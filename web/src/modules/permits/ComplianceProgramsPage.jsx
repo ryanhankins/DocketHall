@@ -71,6 +71,12 @@ export default function ComplianceProgramsPage() {
     load().catch((e) => showToast(e.message, 'error'));
   }, [load, showToast]);
 
+  useEffect(() => {
+    const onAiAction = () => load().catch(() => {});
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [load]);
+
   const save = async (e) => {
     e.preventDefault();
     if (!form.property_address.trim()) return;

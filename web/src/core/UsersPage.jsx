@@ -93,6 +93,12 @@ export default function UsersPage({ me, permissionsCatalog = [] }) {
     loadUsers().catch(e => showToast(e.message, 'error'));
   }, [loadUsers, showToast]);
 
+  useEffect(() => {
+    const onAiAction = () => loadUsers().catch(() => {});
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadUsers]);
+
   const toggleNewPerm = (key) => {
     setNewPerms(prev => (prev.includes(key) ? prev.filter(p => p !== key) : [...prev, key]));
   };

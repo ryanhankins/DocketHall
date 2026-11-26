@@ -181,6 +181,16 @@ export default function BlogManagePage({ initialTab = 'posts' }) {
   }, [loadComments, showToast]);
 
   useEffect(() => {
+    const onAiAction = () => {
+      loadPosts().catch(() => {});
+      loadCategories().catch(() => {});
+      loadComments().catch(() => {});
+    };
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadPosts, loadCategories, loadComments]);
+
+  useEffect(() => {
     api('/api/branding')
       .then((b) => {
         setHomeBlogEnabled(b?.home_blog_enabled !== false);

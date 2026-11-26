@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { api } from './api.js';
 import { DEFAULT_THEME, THEME_PRESETS, applyTheme, getThemeContrastWarnings } from './theme.js';
 import RichTextEditor from './RichTextEditor.jsx';
@@ -52,8 +52,8 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
   const [dragOver, setDragOver] = useState(false);
   const [msg, setMsg] = useState({ text: '', isError: false });
 
-  useEffect(() => {
-    api('/api/branding')
+  const loadBranding = useCallback(() => {
+    return api('/api/branding')
       .then((b) => {
         setCityTitle(b.city_title || '');
         setAlertEnabled(!!b.alert_enabled);
@@ -82,6 +82,16 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    loadBranding();
+  }, [loadBranding]);
+
+  useEffect(() => {
+    const onAiAction = () => { loadBranding(); };
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadBranding]);
 
   const uploadLogoFile = async (file) => {
     if (!file) return;

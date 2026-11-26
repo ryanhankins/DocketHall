@@ -72,6 +72,12 @@ export default function ContractorsManagePage() {
     load().catch((e) => showToast(e.message, 'error'));
   }, [load, showToast]);
 
+  useEffect(() => {
+    const onAiAction = () => load().catch(() => {});
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [load]);
+
   const handleSave = async (e) => {
     e.preventDefault();
     if (!form.license_number.trim() || !form.business_name.trim()) return;

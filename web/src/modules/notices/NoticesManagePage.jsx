@@ -78,6 +78,12 @@ export default function NoticesManagePage() {
     loadItems().catch((e) => showToast(e.message, 'error'));
   }, [loadItems, showToast]);
 
+  useEffect(() => {
+    const onAiAction = () => loadItems().catch(() => {});
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadItems]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.title.trim()) return;
