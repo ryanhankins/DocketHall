@@ -53,6 +53,12 @@ export default function CouncilPage() {
   }, [loadData, showToast]);
 
   useEffect(() => {
+    const onAiAction = () => { loadData().catch(() => {}); };
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadData]);
+
+  useEffect(() => {
     const prevent = (e) => {
       if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
         e.preventDefault();
