@@ -33,7 +33,7 @@ docker compose -f docker-compose.demo.yml run -T --rm --no-deps --entrypoint sh 
 echo "==> Starting API container..."
 docker compose -f docker-compose.demo.yml start api
 
-for i in $(seq 1 30); do
+for i in $(seq 1 90); do
   if curl -fsS http://127.0.0.1:8080/api/health >/dev/null 2>&1; then
     echo "Demo reset complete!"
     exit 0
@@ -41,5 +41,5 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
-echo "WARNING: /api/health did not respond within 30s" >&2
+echo "WARNING: /api/health did not respond within 90s" >&2
 exit 1
