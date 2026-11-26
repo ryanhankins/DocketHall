@@ -24,6 +24,7 @@ export default function CouncilPage() {
   const [guideOpen, setGuideOpen] = useState(false);
   const [targets, setTargets] = useState([]);
   const [submissions, setSubmissions] = useState([]);
+  const [editingId, setEditingId] = useState(null);
   const [title, setTitle] = useState('');
   const [section, setSection] = useState('');
   const [targetAgendaId, setTargetAgendaId] = useState('');
@@ -86,39 +87,52 @@ export default function CouncilPage() {
     await loadData();
   };
 
+  const resetForm = () => {
+    setEditingId(null);
+    setTitle('');
+    setSection('');
+    setTargetAgendaId('');
+    setTargetDate('');
+    setTargetNote('');
+    setMotion('');
+    setFiscal('');
+    setDescription('');
+    setQueuedFiles([]);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setMsg({ text: '', isError: false });
     try {
-      const created = await api('/api/agendas/council/submissions', {
-        method: 'POST',
-        body: JSON.stringify({
-          title: title.trim(),
-          description: description.trim(),
-          section: section.trim(),
-          recommended_motion: motion.trim(),
-          fiscal_impact: fiscal.trim(),
-          target_agenda_id: targetAgendaId ? Number(targetAgendaId) : null,
-          target_date: targetDate || null,
-          target_note: targetNote.trim(),
-        }),
-      });
+      const payload = {
+        title: title.trim(),
+        description: description.trim(),
+        section: section.trim(),
+        recommended_motion: motion.trim(),
+        fiscal_impact: fiscal.trim(),
+        target_agenda_id: targetAgendaId ? Number(targetAgendaId) : null,
+        target_date: targetDate || null,
+        target_note: targetNote.trim(),
+      };
+      const isEdit = editingId !== null;
+      const saved = isEdit
+        ? await api(`/api/agendas/council/submissions/${editingId}`, {
+            method: 'PATCH',
+            body: JSON.stringify(payload),
+          })
+        : await api('/api/agendas/council/submissions', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+      const subId = saved?.id || editingId;
       for (const file of queuedFiles) {
         const fd = new FormData();
         fd.append('file', file);
-        await api(`/api/agendas/council/submissions/${created.id}/documents`, { method: 'POST', body: fd });
+        await api(`/api/agendas/council/submissions/${subId}/documents`, { method: 'POST', body: fd });
       }
-      setTitle('');
-      setSection('');
-      setTargetAgendaId('');
-      setTargetDate('');
-      setTargetNote('');
-      setMotion('');
-      setFiscal('');
-      setDescription('');
-      setQueuedFiles([]);
-      setMsg({ text: 'Agenda item submitted for staff review.', isError: false });
-      showToast('Submitted to staff', 'ok');
+      resetForm();
+      setMsg({ text: isEdit ? 'Proposed agenda item updated.' : 'Agenda item submitted for staff review.', isError: false });
+      showToast(isEdit ? 'Submission updated' : 'Submitted to staff', 'ok');
       await loadData();
     } catch (err) {
       setMsg({ text: err.message, isError: true });
@@ -136,7 +150,7 @@ export default function CouncilPage() {
       <AgendaQuickGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} />
 
       <div className="card">
-        <h2>Submit an Agenda Item</h2>
+        <h2>{editingId !== null ? 'Edit Proposed Agenda Item' : 'Submit an Agenda Item'}</h2>
         <p className="muted" style={{ marginTop: 0 }}>
           Propose an item for an upcoming agenda. Staff will review and assign it to an agenda.
         </p>
@@ -234,7 +248,14 @@ export default function CouncilPage() {
               </div>
             )}
           </div>
-          <button type="submit" className="btn primary">Submit Item</button>
+          <div className="actions">
+            <button type="submit" className="btn primary">{editingId !== null ? 'Save Changes' : 'Submit Item'}</button>
+            {editingId !== null && (
+              <button type="button" className="btn" onClick={() => { resetForm(); setMsg({ text: '', isError: false }); }}>
+                Cancel Edit
+              </button>
+            )}
+          </div>
           {msg.text && <div className={msg.isError ? 'error-msg' : 'ok-msg'} role="status">{msg.text}</div>}
         </form>
       </div>
@@ -323,22 +344,45 @@ export default function CouncilPage() {
                         </>
                       )}
                       {s.status === 'pending' && (
-                        <button
-                          type="button"
-                          className="btn sm danger"
-                          onClick={async () => {
-                            if (!confirm(`Delete pending submission "${s.title}"?`)) return;
-                            try {
-                              await api(`/api/agendas/council/submissions/${s.id}`, { method: 'DELETE' });
-                              showToast('Submission deleted', 'ok');
-                              await loadData();
-                            } catch (err) {
-                              showToast(err.message, 'error');
-                            }
-                          }}
-                        >
-                          Delete
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            className="btn sm"
+                            onClick={() => {
+                              setEditingId(s.id);
+                              setTitle(s.title || '');
+                              setSection(s.section || '');
+                              setTargetAgendaId(s.target_agenda_id ? String(s.target_agenda_id) : '');
+                              setTargetDate(s.target_date || '');
+                              setTargetNote(s.target_note || '');
+                              setMotion(s.recommended_motion || '');
+                              setFiscal(s.fiscal_impact || '');
+                              setDescription(s.description || '');
+                              setQueuedFiles([]);
+                              setMsg({ text: '', isError: false });
+                              window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="btn sm danger"
+                            onClick={async () => {
+                              if (!confirm(`Delete pending submission "${s.title}"?`)) return;
+                              try {
+                                await api(`/api/agendas/council/submissions/${s.id}`, { method: 'DELETE' });
+                                if (editingId === s.id) resetForm();
+                                showToast('Submission deleted', 'ok');
+                                await loadData();
+                              } catch (err) {
+                                showToast(err.message, 'error');
+                              }
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </>
                       )}
                     </div>
                   </td>

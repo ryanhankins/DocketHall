@@ -2569,6 +2569,66 @@ def decline_council_submission(
     return {"status": "declined"}
 
 
+@router.patch("/council/submissions/{sub_id}")
+def update_council_submission(
+    sub_id: int,
+    body: CouncilSubmissionIn,
+    user: dict = Depends(get_council_or_staff_user),
+):
+    """Edit a pending council submission before it is accepted onto an agenda."""
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Item title is required")
+    with pool.connection() as conn:
+        sub = conn.execute(
+            "SELECT submitted_by, status FROM council_submissions WHERE id = %s",
+            (sub_id,),
+        ).fetchone()
+        if not sub:
+            raise HTTPException(status_code=404, detail="Submission not found")
+        if not has_permission(user, "agendas.manage") and sub[0] != user["id"]:
+            raise HTTPException(status_code=403, detail="You may only edit your own submissions")
+        if sub[1] != "pending":
+            raise HTTPException(status_code=400, detail="Only pending submissions can be edited")
+        if body.target_agenda_id is not None:
+            trow = conn.execute(
+                "SELECT 1 FROM agendas WHERE id = %s AND STRPOS(LOWER(body), 'council') > 0 "
+                "AND status = 'In-Progress Agendas'",
+                (body.target_agenda_id,),
+            ).fetchone()
+            if not trow:
+                raise HTTPException(status_code=400, detail="Selected target agenda is not available")
+        conn.execute(
+            "UPDATE council_submissions "
+            "SET title = %s, description = %s, section = %s, recommended_motion = %s, "
+            "    fiscal_impact = %s, target_agenda_id = %s, target_date = %s, target_note = %s "
+            "WHERE id = %s",
+            (
+                title,
+                body.description.strip(),
+                body.section.strip(),
+                body.recommended_motion.strip(),
+                body.fiscal_impact.strip(),
+                body.target_agenda_id,
+                body.target_date,
+                body.target_note.strip(),
+                sub_id,
+            ),
+        )
+    return {
+        "id": sub_id,
+        "title": title,
+        "description": body.description.strip(),
+        "section": body.section.strip(),
+        "recommended_motion": body.recommended_motion.strip(),
+        "fiscal_impact": body.fiscal_impact.strip(),
+        "target_agenda_id": body.target_agenda_id,
+        "target_date": body.target_date.isoformat() if body.target_date else None,
+        "target_note": body.target_note.strip(),
+        "status": "pending",
+    }
+
+
 @router.delete("/council/submissions/{sub_id}")
 def delete_council_submission(sub_id: int, user: dict = Depends(get_council_or_staff_user)):
     """Delete a pending council submission and its object storage attachments."""
