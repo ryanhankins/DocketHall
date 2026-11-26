@@ -1955,7 +1955,11 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                     tuple(f"%{t}%" for t in terms),
                 ).fetchone()
             if not fac:
-                return {"ok": False, "error": f"Active facility matching '{fname_req}' not found"}, None
+                fac = conn.execute(
+                    "INSERT INTO reservable_facilities (name, is_active) VALUES (%s, TRUE) "
+                    "RETURNING id, name, daily_fee, hourly_fee",
+                    (fname_req or "Municipal Facility",),
+                ).fetchone()
             rental_mode = "hourly" if (st_time or en_time) else "full_day"
             fee_amt = fac[3] if (rental_mode == "hourly" and fac[3]) else fac[2]
             year = datetime.now(timezone.utc).year
@@ -2225,8 +2229,8 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
         "read the returned text, and give a clear, accurate answer citing the specific Code Section or document title. "
         "2) When the user asks to CREATE, UPDATE, or DO something, call the appropriate action tool(s) with clean, properly "
         "formatted arguments (YYYY-MM-DD dates, '6:00 PM' times; if the year is omitted for a future date like 'December 1', "
-        "choose the next upcoming occurrence relative to today). Write actions are staged for user confirmation and are NOT "
-        "applied until the user clicks Confirm, so summarize the proposed change clearly and ask them to confirm or cancel."
+        "choose the next upcoming occurrence relative to today). IMPORTANT: Write actions are ONLY staged for the Confirm/Cancel "
+        "buttons when you actually call the write tool—never ask the user to confirm without calling the write tool."
     )
 
     contents = []
