@@ -1111,6 +1111,7 @@ function AuthModal({ open, initialRegister, initialResetToken, nextUrl, reason, 
             {[
               ['clerk', 'Try as City Clerk'],
               ['inspector', 'Try as Inspector'],
+              ['council', 'Try as Council Member'],
               ['resident', 'Try as Resident'],
               ['admin', 'Try as Admin'],
             ].map(([role, label]) => (
@@ -1133,7 +1134,7 @@ function AuthModal({ open, initialRegister, initialResetToken, nextUrl, reason, 
                     if (r.ok) {
                       const dest = role === 'resident' && (!nextUrl || nextUrl === '/app')
                         ? '/'
-                        : (role === 'inspector' ? '/app#field-inspector' : safeNext);
+                        : (role === 'inspector' ? '/app#field-inspector' : (role === 'council' ? '/app#council' : safeNext));
                       location.replace(dest);
                       return;
                     }

@@ -91,6 +91,23 @@ EXT_TOOL_DECLARATIONS: list[dict] = [
         },
     },
     {
+        "name": "propose_agenda_item",
+        "description": "Submit an agenda item proposal (council submission) for clerk/staff review.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "title": {"type": "STRING", "description": "Proposed agenda item title"},
+                "description": {"type": "STRING", "description": "Background / justification"},
+                "section": {"type": "STRING", "description": "Suggested section (default 'New Business')"},
+                "recommended_motion": {"type": "STRING", "description": "Optional recommended motion"},
+                "fiscal_impact": {"type": "STRING", "description": "Optional fiscal impact"},
+                "target_date": {"type": "STRING", "description": "Optional target meeting date YYYY-MM-DD"},
+                "target_note": {"type": "STRING", "description": "Optional note about target meeting"},
+            },
+            "required": ["title"],
+        },
+    },
+    {
         "name": "decide_council_submission",
         "description": "Accept a council submission onto an agenda or decline it.",
         "parameters": {
@@ -527,6 +544,7 @@ EXT_TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "update_todo": ("agendas", ("agendas.manage",)),
     "assign_todo_to_agenda": ("agendas", ("agendas.manage",)),
     "list_council_submissions": ("agendas", ("agendas.manage", "agendas.submit")),
+    "propose_agenda_item": ("agendas", ("agendas.submit", "agendas.manage")),
     "decide_council_submission": ("agendas", ("agendas.manage",)),
     "archive_item_to_records": ("agendas", ("agendas.manage",)),
     "update_inspection": ("permits", ("permits.manage",)),
@@ -576,6 +594,7 @@ def describe_ext_action(name: str, args: dict) -> str | None:
         "merge_agenda_items": lambda: f"Merge item #{a.get('remove_item_id', '')} into item #{a.get('keep_item_id', '')} on agenda #{a.get('agenda_id', '')} ('{a.get('title', '')}')",
         "update_todo": lambda: f"Update backlog todo #{a.get('todo_id', '')}",
         "assign_todo_to_agenda": lambda: f"Assign todo #{a.get('todo_id', '')} to agenda #{a.get('agenda_id', '')}",
+        "propose_agenda_item": lambda: f"Submit agenda proposal '{a.get('title', '')}'",
         "decide_council_submission": lambda: f"{str(a.get('decision', 'review')).capitalize()} council submission #{a.get('submission_id', '')}",
         "archive_item_to_records": lambda: f"Archive agenda #{a.get('agenda_id', '')} item #{a.get('item_id', '')} to Public Records",
         "update_inspection": lambda: f"Update inspection #{a.get('inspection_id', '')}" + (f" ({a['result']})" if a.get("result") else ""),
@@ -709,6 +728,27 @@ def execute_ext_tool(conn, name: str, args: dict, user: dict) -> tuple[dict, dic
         return (
             {"ok": True, "submissions": [{"id": r[0], "title": r[1], "section": r[2], "submitted_by": r[3], "status": r[4], "target_date": r[5].isoformat() if r[5] else None} for r in rows]},
             None,
+        )
+
+    if name == "propose_agenda_item":
+        title = str(args.get("title") or "").strip()
+        if not title:
+            return {"ok": False, "error": "Proposal title is required"}, None
+        desc = str(args.get("description") or "").strip()
+        sec = str(args.get("section") or "New Business").strip() or "New Business"
+        motion = str(args.get("recommended_motion") or "").strip()
+        fiscal = str(args.get("fiscal_impact") or "").strip()
+        tdate = date.fromisoformat(str(args["target_date"]).strip()) if args.get("target_date") else None
+        tnote = str(args.get("target_note") or "").strip()
+        row = conn.execute(
+            "INSERT INTO council_submissions "
+            "(submitted_by, submitted_username, title, description, section, recommended_motion, fiscal_impact, target_date, target_note, status) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending') RETURNING id",
+            (user["id"], username, title, desc, sec, motion, fiscal, tdate, tnote),
+        ).fetchone()
+        return (
+            {"ok": True, "submission_id": row[0], "title": title, "status": "pending"},
+            {"tool": name, "summary": f"Submitted agenda proposal '{title}'", "route": "/app/council"},
         )
 
     if name == "decide_council_submission":

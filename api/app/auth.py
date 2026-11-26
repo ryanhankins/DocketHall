@@ -267,6 +267,12 @@ _DEMO_ACCOUNTS: dict[str, tuple[str, str, str, list[str]]] = {
         "inspector@millbrook.example",
         ["permits.manage", "complaints.manage", "complaints.log", "licensing.manage"],
     ),
+    "council": (
+        "demo_council",
+        "council_member",
+        "council@millbrook.example",
+        ["agendas.submit", "complaints.submit", "complaints.log"],
+    ),
     "resident": ("demo_resident", "applicant", "resident@millbrook.example", []),
 }
 

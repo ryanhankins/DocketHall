@@ -327,3 +327,31 @@ def test_ai_merge_agenda_items(admin_client):
     assert len(ag["items"]) == 1
     assert ag["items"][0]["id"] == it1["item_id"]
     assert ag["items"][0]["title"] == "Road Salt Management and Lake Runoff Proposal"
+
+
+def test_demo_login_council_member(anon_client, monkeypatch):
+    from app import ai_assistant
+
+    monkeypatch.setenv("DEMO_MODE", "true")
+    r = anon_client.post("/api/demo-login", json={"role": "council"})
+    assert r.status_code == 200, r.text
+    me = anon_client.get("/api/me")
+    assert me.status_code == 200
+    assert me.json()["username"] == "demo_council"
+    assert me.json()["role"] == "council_member"
+    assert "agendas.submit" in me.json()["permissions"]
+
+    # Council member can submit an agenda proposal directly and via AI assistant
+    sub = anon_client.post(
+        "/api/agendas/council/submissions",
+        json={"title": "Trail Lighting Upgrade", "description": "Add solar lights along main trail."},
+    )
+    assert sub.status_code == 201, sub.text
+
+    ai_sub, _ = ai_assistant._execute_tool(
+        "propose_agenda_item",
+        {"title": "Crosswalk Safety Review", "description": "Evaluate Main & 2nd crosswalk."},
+        me.json(),
+    )
+    assert ai_sub["ok"] is True, ai_sub
+    assert ai_sub["status"] == "pending"
