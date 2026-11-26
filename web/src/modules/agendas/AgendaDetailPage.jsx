@@ -21,6 +21,7 @@ import { InlineEditable } from '../../core/InlineEditable.jsx';
 import PdfComplianceButton from '../../core/PdfComplianceButton.jsx';
 import { useToast } from '../../core/toast.jsx';
 import { recurrenceLabel } from './BacklogPage.jsx';
+import { isAgendaFinalized } from './BacklogPage.jsx';
 import AgendaItemsTab from './AgendaItemsTab.jsx';
 import AgendaContentsTab from './AgendaContentsTab.jsx';
 import AgendaMinutesTab from './AgendaMinutesTab.jsx';
@@ -441,7 +442,7 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
         {saveMsg.text && <span className={saveMsg.isError ? 'error-msg' : 'ok-msg'} style={{ margin: 0 }}>{saveMsg.text}</span>}
       </form>
 
-      {backlogMatches.length > 0 && !popupDismissed && (
+      {backlogMatches.length > 0 && !popupDismissed && !isAgendaFinalized(agenda, configuredCategories) && (
         <div className="card" style={{ background: '#fffbeb', borderColor: '#fcd34d', marginBottom: '1rem' }}>
           <div className="between" style={{ marginBottom: '.5rem' }}>
             <strong style={{ color: '#92400e' }}>

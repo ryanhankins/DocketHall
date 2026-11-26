@@ -37,6 +37,14 @@ export function recurrenceLabel(item) {
   return 'One-time';
 }
 
+export function isAgendaFinalized(agenda, categories = []) {
+  if (!agenda) return false;
+  if (agenda.finalized_at) return true;
+  const st = String(agenda.status || '').trim();
+  if (st.toLowerCase().startsWith('finalized')) return true;
+  return Array.isArray(categories) && categories.some(c => c && c.is_final && c.name === st);
+}
+
 export function CreateTodoModal({ context, bodies = [], onClose, onCreated }) {
   const dlgRef = useRef(null);
   const [title, setTitle] = useState('');
@@ -194,7 +202,8 @@ export default function BacklogPage({ onNavigate, onBacklogCount }) {
     const list = Array.isArray(bl) ? bl : [];
     setItems(list);
     onBacklogCount?.(list);
-    setAgendas(Array.isArray(ags) ? ags : []);
+    const cats = Array.isArray(prefs.categories) ? prefs.categories : [];
+    setAgendas((Array.isArray(ags) ? ags : []).filter(a => !isAgendaFinalized(a, cats)));
     setBodies(Array.isArray(prefs.bodies) ? prefs.bodies : []);
     setSections(Array.isArray(prefs.sections) ? prefs.sections : []);
   }, [onBacklogCount]);
