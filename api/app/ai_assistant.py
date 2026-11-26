@@ -2678,9 +2678,15 @@ class AiHistoryMsg(BaseModel):
     text: str
 
 
+class AiPageContextIn(BaseModel):
+    route: str = Field(default="", max_length=300)
+    title: str = Field(default="", max_length=300)
+
+
 class AiCommandIn(BaseModel):
     prompt: str = Field(..., min_length=2, max_length=2000)
     history: list[AiHistoryMsg] = Field(default_factory=list, max_length=20)
+    page_context: AiPageContextIn | None = None
 
 
 def _require_ai_user(request: Request) -> dict:
@@ -2918,7 +2924,7 @@ def _describe_proposed_action(name: str, args: dict) -> str:
     return f"Execute {name}"
 
 
-def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
+def _run_ai_command(prompt: str, history: list[dict], user: dict, page_context: dict | None = None) -> dict:
     username = user["username"]
     api_key, model, _ = _load_gemini_config()
     if not api_key:
@@ -2961,6 +2967,15 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
         "agenda item or record just because the topic is controversial or unusual. IMPORTANT: Write actions are ONLY staged "
         "for the Confirm/Cancel buttons when you actually call the write tool—never ask the user to confirm without calling the write tool."
     )
+    if page_context and (page_context.get("route") or page_context.get("title")):
+        ctx_route = str(page_context.get("route") or "").strip()[:200]
+        ctx_title = str(page_context.get("title") or "").strip()[:200]
+        sys_instruction += (
+            f" CURRENTLY OPEN PAGE IN UI: route='{ctx_route}'"
+            + (f", heading='{ctx_title}'" if ctx_title else "")
+            + ". If the user refers to 'this page', 'this agenda', 'this permit', 'this item', or omits an ID while viewing an entity page, "
+            "use the route/ID from this currently open page context (or call get_agenda_details/get_permit_details with its ID)."
+        )
 
     contents = []
     for h in history[-12:]:
@@ -3121,7 +3136,8 @@ def _execute_confirmed_actions(pending: list[AiPendingActionIn], user: dict) -> 
 async def run_ai_command(body: AiCommandIn, user: dict = Depends(_require_ai_user)):
     _require_ai_module_enabled()
     hist = [{"role": m.role, "text": m.text} for m in body.history]
-    return await run_in_threadpool(_run_ai_command, body.prompt.strip(), hist, user)
+    pctx = body.page_context.model_dump() if body.page_context else None
+    return await run_in_threadpool(_run_ai_command, body.prompt.strip(), hist, user, pctx)
 
 
 @router.post("/confirm")

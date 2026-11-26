@@ -648,7 +648,7 @@ export default function CoreShell() {
             </div>
           )}
 
-          {me && me.role !== 'read_only' && modulesMeta.some(m => m.id === 'ai_assistant') && <AiAssistantBar onNavigate={navigate} />}
+          {me && me.role !== 'read_only' && modulesMeta.some(m => m.id === 'ai_assistant') && <AiAssistantBar onNavigate={navigate} currentRoute={hash} />}
 
           {ActiveComponent ? (
             <Suspense fallback={<div className="muted">Loading…</div>}>

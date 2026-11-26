@@ -208,7 +208,7 @@ export function MarkdownMessage({ text }) {
   return <div style={{ lineHeight: 1.45 }}>{blocks}</div>;
 }
 
-export default function AiAssistantBar({ onNavigate }) {
+export default function AiAssistantBar({ onNavigate, currentRoute = '' }) {
   const [status, setStatus] = useState({
     configured: false,
     can_configure: false,
@@ -265,9 +265,15 @@ export default function AiAssistantBar({ onNavigate }) {
     setPrompt('');
     setBusy(true);
     try {
+      const heading = (document.querySelector('main h1')?.textContent || '').trim().slice(0, 160);
+      const routePath = String(currentRoute || window.location.pathname + window.location.search).slice(0, 200);
       const res = await api('/api/ai/command', {
         method: 'POST',
-        body: JSON.stringify({ prompt: text, history: historyPayload }),
+        body: JSON.stringify({
+          prompt: text,
+          history: historyPayload,
+          page_context: { route: routePath, title: heading },
+        }),
       });
       const actions = Array.isArray(res?.actions) ? res.actions : [];
       const pendingActions = Array.isArray(res?.pending_actions) ? res.pending_actions : [];

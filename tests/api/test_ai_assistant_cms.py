@@ -268,3 +268,29 @@ def test_ai_full_tool_coverage_and_extended_tools(admin_client):
 
     f_list, _ = ai_assistant._execute_tool("list_faqs", {}, user)
     assert f_list["ok"] is True
+
+
+def test_ai_receives_current_page_context(admin_client, monkeypatch):
+    from app import ai_assistant
+
+    admin_client.put("/api/modules/admin/ai_assistant", json={"enabled": True})
+    captured = {}
+
+    def _fake_call(api_key, model, payload, **kw):
+        captured["sys"] = payload["systemInstruction"]["parts"][0]["text"]
+        return {"candidates": [{"content": {"parts": [{"text": "Viewing agenda #3."}]}}]}
+
+    monkeypatch.setattr(ai_assistant, "_call_gemini", _fake_call)
+    monkeypatch.setattr(ai_assistant, "_load_gemini_config", lambda: ("test-key-12345", "gemini-3.5-flash-lite", "integrations"))
+
+    res = admin_client.post(
+        "/api/ai/command",
+        json={
+            "prompt": "Summarize this agenda",
+            "history": [],
+            "page_context": {"route": "agendas/3", "title": "Parks Committee"},
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert "route='agendas/3'" in captured["sys"]
+    assert "heading='Parks Committee'" in captured["sys"]
