@@ -259,6 +259,20 @@ _TOOL_DECLARATIONS = [
         },
     },
     {
+        "name": "add_agenda_item_attachment",
+        "description": "Attach a text document, memo, or code-research note to an agenda item (creates a downloadable text attachment on the item).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "agenda_id": {"type": "INTEGER", "description": "Agenda ID"},
+                "item_id": {"type": "INTEGER", "description": "Optional agenda item ID (defaults to the latest item on the agenda)"},
+                "title": {"type": "STRING", "description": "Attachment title (e.g. 'City Code Summary: Llamas')"},
+                "content": {"type": "STRING", "description": "Full text content of the attachment"},
+            },
+            "required": ["agenda_id", "title", "content"],
+        },
+    },
+    {
         "name": "create_notice",
         "description": "Create a NEW public notice, news item, bid, or job posting. Do not use to edit or publish an existing notice; use update_notice instead.",
         "parameters": {
@@ -906,6 +920,7 @@ _TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "create_agenda": ("agendas", ("agendas.manage",)),
     "add_agenda_item": ("agendas", ("agendas.manage", "agendas.submit")),
     "update_agenda_item": ("agendas", ("agendas.manage", "agendas.submit")),
+    "add_agenda_item_attachment": ("agendas", ("agendas.manage", "agendas.submit")),
     "create_todo": ("agendas", ("agendas.manage",)),
     "list_agendas": ("agendas", ("agendas.manage", "agendas.submit")),
     "finalize_agenda": ("agendas", ("agendas.manage",)),
@@ -1171,6 +1186,42 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             return (
                 {"ok": True, "item_id": item_id, "agenda_id": ag_id, "title": new_title},
                 {"tool": name, "summary": f"Updated item #{item_id} ('{new_title}') on {ag_exists[1]}", "route": f"/app/agendas/{ag_id}"},
+            )
+
+        if name == "add_agenda_item_attachment":
+            from . import agendas as _agendas
+
+            ag_id = int(args["agenda_id"])
+            ag_row = conn.execute("SELECT id, title FROM agendas WHERE id = %s", (ag_id,)).fetchone()
+            if not ag_row:
+                return {"ok": False, "error": f"Agenda #{ag_id} not found"}, None
+            if args.get("item_id") is not None:
+                item_id = int(args["item_id"])
+                it_row = conn.execute(
+                    "SELECT id, title FROM agenda_items WHERE id = %s AND agenda_id = %s",
+                    (item_id, ag_id),
+                ).fetchone()
+            else:
+                it_row = conn.execute(
+                    "SELECT id, title FROM agenda_items WHERE agenda_id = %s ORDER BY id DESC LIMIT 1",
+                    (ag_id,),
+                ).fetchone()
+            if not it_row:
+                return {"ok": False, "error": f"No agenda item found on agenda #{ag_id}. Add an agenda item first."}, None
+            item_id = it_row[0]
+            doc_title = str(args.get("title") or "").strip() or "Attachment"
+            doc_content = str(args.get("content") or "").strip()
+            if not doc_content:
+                return {"ok": False, "error": "Attachment content cannot be empty"}, None
+            _agendas.create_text_document(
+                ag_id,
+                item_id,
+                _agendas.TextDocIn(title=doc_title, content=doc_content),
+                user,
+            )
+            return (
+                {"ok": True, "agenda_id": ag_id, "item_id": item_id, "title": doc_title},
+                {"tool": name, "summary": f"Attached '{doc_title}' to '{it_row[1]}' on {ag_row[1]}", "route": f"/app/agendas/{ag_id}"},
             )
 
         if name == "create_todo":
@@ -2791,6 +2842,8 @@ def _describe_proposed_action(name: str, args: dict) -> str:
         return f"Add agenda item '{a.get('title', '')}' to agenda #{a.get('agenda_id', '')} ({a.get('section_name') or 'New Business'})"
     if name == "update_agenda_item":
         return f"Update agenda item #{a.get('item_id', '')} on agenda #{a.get('agenda_id', '')}" + (f" ('{a['title']}')" if a.get("title") else "")
+    if name == "add_agenda_item_attachment":
+        return f"Attach '{a.get('title', '')}' to agenda #{a.get('agenda_id', '')}"
     if name == "finalize_agenda":
         return f"Finalize agenda #{a.get('agenda_id', '')}"
     if name == "create_todo":
@@ -2886,7 +2939,9 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
         "formatted arguments (YYYY-MM-DD dates, '6:00 PM' times; if the year is omitted for a future date like 'December 1', "
         "choose the next upcoming occurrence relative to today). When asked to PUBLISH, UNPUBLISH, or EDIT an existing "
         "blog post, notice, or info page, ALWAYS use list_blog_posts / list_notices / list_pages to find it and call "
-        "update_blog_post / update_notice / update_page—NEVER call create_* to publish or edit an existing item. Recording or proposing an agenda item, backlog todo, complaint, "
+        "update_blog_post / update_notice / update_page—NEVER call create_* to publish or edit an existing item. "
+        "When asked to attach a memo, summary, or city code note to an agenda or agenda item, use add_agenda_item_attachment "
+        "(after searching city code/records if needed). Recording or proposing an agenda item, backlog todo, complaint, "
         "or notice is an administrative workflow for official council/staff review—do not refuse to stage a valid DocketHall "
         "agenda item or record just because the topic is controversial or unusual. IMPORTANT: Write actions are ONLY staged "
         "for the Confirm/Cancel buttons when you actually call the write tool—never ask the user to confirm without calling the write tool."

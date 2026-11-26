@@ -171,3 +171,46 @@ def test_ai_allowed_in_demo_mode_while_config_blocked(admin_client, monkeypatch)
     r_cmd = admin_client.post("/api/ai/command", json={"prompt": "Summarize today's agenda", "history": []})
     assert r_cmd.status_code == 200, r_cmd.text
     assert r_cmd.json()["reply"] == "Ready in demo."
+
+
+def test_ai_add_agenda_item_attachment(admin_client):
+    from app import ai_assistant
+
+    admin_client.put("/api/modules/admin/agendas", json={"enabled": True})
+    user = admin_client.get("/api/me").json()
+
+    ag_res, _ = ai_assistant._execute_tool(
+        "create_agenda",
+        {"title": "Parks Committee", "body": "Parks Committee", "meeting_date": "2026-12-03", "meeting_time": "6:00 PM"},
+        user,
+    )
+    assert ag_res["ok"] is True, ag_res
+    ag_id = ag_res["agenda_id"]
+
+    it_res, _ = ai_assistant._execute_tool(
+        "add_agenda_item",
+        {"agenda_id": ag_id, "title": "Proposal for Town Llama Rodeo Recreational Event", "description": "Rodeo details"},
+        user,
+    )
+    assert it_res["ok"] is True, it_res
+
+    att_res, _ = ai_assistant._execute_tool(
+        "add_agenda_item_attachment",
+        {
+            "agenda_id": ag_id,
+            "title": "City Code Summary: Llamas",
+            "content": "No specific llama restrictions were found in the municipal code.",
+        },
+        user,
+    )
+    assert att_res["ok"] is True, att_res
+    assert att_res["item_id"] == it_res["item_id"]
+
+    ag_detail = admin_client.get(f"/api/agendas/{ag_id}")
+    assert ag_detail.status_code == 200
+    items = ag_detail.json()["items"]
+    assert any(
+        d["title"] == "City Code Summary: Llamas"
+        for it in items
+        for d in it.get("documents", [])
+    )
