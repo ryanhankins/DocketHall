@@ -1635,13 +1635,22 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             from_raw = str(args.get("from_date") or "").strip()
             from_d = date.fromisoformat(from_raw) if from_raw else None
             like = f"%{q}%"
-            rows = conn.execute(
-                "SELECT id, title, event_date, start_time, location, category, description "
-                "FROM calendar_events "
-                "WHERE (%s = '' OR title ILIKE %s OR location ILIKE %s OR description ILIKE %s) "
-                "AND (%s IS NULL OR event_date >= %s) ORDER BY event_date ASC, id ASC LIMIT 20",
-                (q, like, like, like, from_d, from_d),
-            ).fetchall()
+            if from_d is not None:
+                rows = conn.execute(
+                    "SELECT id, title, event_date, start_time, location, category, description "
+                    "FROM calendar_events "
+                    "WHERE (%s = '' OR title ILIKE %s OR location ILIKE %s OR description ILIKE %s) "
+                    "AND event_date >= %s ORDER BY event_date ASC, id ASC LIMIT 20",
+                    (q, like, like, like, from_d),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, title, event_date, start_time, location, category, description "
+                    "FROM calendar_events "
+                    "WHERE (%s = '' OR title ILIKE %s OR location ILIKE %s OR description ILIKE %s) "
+                    "ORDER BY event_date ASC, id ASC LIMIT 20",
+                    (q, like, like, like),
+                ).fetchall()
             return (
                 {
                     "ok": True,
