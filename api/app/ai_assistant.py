@@ -631,6 +631,29 @@ _TOOL_DECLARATIONS = [
             },
         },
     },
+    {
+        "name": "list_compliance_programs",
+        "description": "List or search Rental & Fire Recurring Compliance Programs by property address, owner, parcel ID, certificate number, or program type.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional property address, owner name, parcel ID, or certificate number"},
+                "program_type": {"type": "STRING", "description": "Optional program type (e.g. 'Rental Housing', 'Fire Inspection')"},
+                "status": {"type": "STRING", "description": "Optional status ('active', 'inactive', 'suspended')"},
+            },
+        },
+    },
+    {
+        "name": "list_facility_reservations",
+        "description": "List or search municipal facility reservations by reservation number, facility name, event title, or requester.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional search keyword"},
+                "status": {"type": "STRING", "description": "Optional status ('pending', 'approved', 'denied', 'cancelled')"},
+            },
+        },
+    },
 ]
 
 
@@ -678,6 +701,8 @@ _TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "list_contractor_licenses": ("licensing", ("licensing.manage",)),
     "list_utility_bills": ("utilities", ("utilities.manage",)),
     "list_citations": ("citations", ("citations.manage",)),
+    "list_compliance_programs": ("licensing", ("licensing.manage",)),
+    "list_facility_reservations": ("calendar", ("calendar.manage",)),
 }
 
 
@@ -1770,6 +1795,95 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                 None,
             )
 
+        if name == "list_compliance_programs":
+            q = str(args.get("query") or "").strip()
+            ptype = str(args.get("program_type") or "").strip()
+            st_f = str(args.get("status") or "").strip().lower()
+            terms = _extract_search_terms(q)
+            where_parts = []
+            params: list = []
+            if terms:
+                term_clauses = " AND ".join(
+                    "(property_address ILIKE %s OR parcel_id ILIKE %s OR owner_name ILIKE %s OR certificate_number ILIKE %s OR program_type ILIKE %s)"
+                    for _ in terms
+                )
+                where_parts.append(f"({term_clauses})")
+                for t in terms:
+                    like = f"%{t}%"
+                    params.extend([like, like, like, like, like])
+            if ptype:
+                where_parts.append("program_type ILIKE %s")
+                params.append(f"%{ptype}%")
+            if st_f:
+                where_parts.append("LOWER(status) = %s")
+                params.append(st_f)
+            where_sql = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+            rows = conn.execute(
+                f"SELECT id, program_type, property_address, parcel_id, unit_count, owner_name, local_agent_name, "
+                f"cycle_months, last_inspected_date, next_inspection_date, last_result, inspector, certificate_number, status, notes "
+                f"FROM recurring_compliance_programs {where_sql} ORDER BY next_inspection_date ASC NULLS LAST, id DESC LIMIT 20",
+                tuple(params),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "compliance_programs": [
+                        {
+                            "id": r[0],
+                            "program_type": r[1],
+                            "property_address": r[2],
+                            "parcel_id": r[3],
+                            "unit_count": r[4],
+                            "owner_name": r[5],
+                            "local_agent_name": r[6],
+                            "cycle_months": r[7],
+                            "last_inspected_date": r[8].isoformat() if r[8] else None,
+                            "next_inspection_date": r[9].isoformat() if r[9] else None,
+                            "last_result": r[10],
+                            "inspector": r[11],
+                            "certificate_number": r[12],
+                            "status": r[13],
+                            "notes": (r[14] or "")[:300],
+                        }
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "list_facility_reservations":
+            q = str(args.get("query") or "").strip()
+            st_f = str(args.get("status") or "").strip().lower()
+            like = f"%{q}%"
+            rows = conn.execute(
+                "SELECT reservation_number, facility_name, event_date, start_time, end_time, event_title, requester_name, status, payment_status, fee_amount "
+                "FROM facility_reservations "
+                "WHERE (%s = '' OR reservation_number ILIKE %s OR facility_name ILIKE %s OR event_title ILIKE %s OR requester_name ILIKE %s) "
+                "AND (%s = '' OR LOWER(status) = %s) ORDER BY event_date DESC, id DESC LIMIT 20",
+                (q, like, like, like, like, st_f, st_f),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "reservations": [
+                        {
+                            "reservation_number": r[0],
+                            "facility_name": r[1],
+                            "event_date": r[2].isoformat() if r[2] else None,
+                            "start_time": r[3],
+                            "end_time": r[4],
+                            "event_title": r[5],
+                            "requester_name": r[6],
+                            "status": r[7],
+                            "payment_status": r[8],
+                            "fee_amount": r[9],
+                        }
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
     return {"ok": False, "error": f"Unknown tool: {name}"}, None
 
 
@@ -1925,6 +2039,8 @@ _READ_ONLY_TOOLS = {
     "search_directory",
     "list_forms",
     "list_contractor_licenses",
+    "list_compliance_programs",
+    "list_facility_reservations",
     "list_utility_bills",
     "list_citations",
 }
