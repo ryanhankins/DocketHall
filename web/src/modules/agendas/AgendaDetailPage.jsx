@@ -179,6 +179,12 @@ export default function AgendaDetailPage({ agendaId, tab = 'edit', onNavigate, o
     });
   }, [loadAll, onNavigate, showToast]);
 
+  useEffect(() => {
+    const onAiAction = () => loadAll().catch(() => {});
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadAll]);
+
   if (!agenda) {
     return (
       <section id="section-agendas">

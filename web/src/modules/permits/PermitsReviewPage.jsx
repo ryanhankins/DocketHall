@@ -51,6 +51,12 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
   }, [loadAll, showToast]);
 
   useEffect(() => {
+    const onAiAction = () => loadAll().catch(() => {});
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadAll]);
+
+  useEffect(() => {
     if (showParcels) loadParcels(parcelQuery).catch(() => {});
   }, [showParcels, parcelQuery, loadParcels]);
 
