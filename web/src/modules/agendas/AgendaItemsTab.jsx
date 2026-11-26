@@ -21,7 +21,7 @@ import { checkPdfFileBeforeUpload } from '../../core/a11y.js';
 import { InlineEditable } from '../../core/InlineEditable.jsx';
 import PdfComplianceButton from '../../core/PdfComplianceButton.jsx';
 import { useToast } from '../../core/toast.jsx';
-import { CreateTodoModal } from './BacklogPage.jsx';
+import { CreateTodoModal, isAgendaFinalized } from './BacklogPage.jsx';
 
 function TransferSelect({ otherAgendas, className, placeholder, ariaLabel, subjectLabel, onTransfer, onNavigate }) {
   const showToast = useToast();
@@ -959,7 +959,7 @@ export default function AgendaItemsTab({
   const dragSectionRef = useRef(null);
 
   const otherAgendas = useMemo(
-    () => (agendasList || []).filter(a => a.id !== agenda.id),
+    () => (agendasList || []).filter(a => a.id !== agenda.id && !isAgendaFinalized(a)),
     [agendasList, agenda.id],
   );
 

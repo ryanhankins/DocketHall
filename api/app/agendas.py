@@ -3226,6 +3226,7 @@ def move_item(
         ).fetchone()
         if not target:
             raise HTTPException(status_code=404, detail="Target agenda not found")
+        _require_agenda_not_finalized(conn, body.target_agenda_id, "Target agenda not found")
         next_pos = conn.execute(
             "SELECT COALESCE(MAX(position), 0) + 1 FROM agenda_items WHERE agenda_id = %s",
             (body.target_agenda_id,),
@@ -3297,6 +3298,7 @@ def move_section(
         ).fetchone()
         if not target:
             raise HTTPException(status_code=404, detail="Target agenda not found")
+        _require_agenda_not_finalized(conn, body.target_agenda_id, "Target agenda not found")
         rows = conn.execute(
             "SELECT id FROM agenda_items WHERE agenda_id = %s AND section = %s ORDER BY position, id",
             (agenda_id, section_name),

@@ -19,11 +19,13 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, formatDate, formatTime12h, toTimeInputValue } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
 import AgendaQuickGuideModal from './AgendaQuickGuideModal.jsx';
+import { isAgendaFinalized } from './BacklogPage.jsx';
 
-function SubmissionRow({ sub, agendas, onReloadAll, onReloadSubs }) {
+function SubmissionRow({ sub, agendas, categories = [], onReloadAll, onReloadSubs }) {
   const showToast = useToast();
-  const councilAgendas = agendas.filter(a => (a.body || '').toLowerCase().includes('council'));
-  const targetOptions = councilAgendas.length ? councilAgendas : agendas;
+  const editableAgendas = agendas.filter(a => !isAgendaFinalized(a, categories));
+  const councilAgendas = editableAgendas.filter(a => (a.body || '').toLowerCase().includes('council'));
+  const targetOptions = councilAgendas.length ? councilAgendas : editableAgendas;
 
   let defaultSel = sub.target_agenda_id ? String(sub.target_agenda_id) : '';
   if (!defaultSel && sub.target_date) {
@@ -444,7 +446,7 @@ export default function AgendasListPage({ onNavigate, onBacklogCount }) {
               </thead>
               <tbody>
                 {submissions.map(s => (
-                  <SubmissionRow key={s.id} sub={s} agendas={agendas} onReloadAll={loadAll} onReloadSubs={loadSubs} />
+                  <SubmissionRow key={s.id} sub={s} agendas={agendas} categories={categories} onReloadAll={loadAll} onReloadSubs={loadSubs} />
                 ))}
               </tbody>
             </table>
