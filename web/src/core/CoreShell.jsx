@@ -21,6 +21,7 @@ import { loadEnabledFrontendModules } from './registry.js';
 import ServiceIcon from './ServiceIcon.jsx';
 import { DemoBanner, DocketHallLogo } from './PublicChrome.jsx';
 import AiAssistantBar from './AiAssistantBar.jsx';
+import GettingStartedCard from './GettingStartedCard.jsx';
 import { applyTheme } from './theme.js';
 import { useToast } from './toast.jsx';
 
@@ -823,6 +824,10 @@ export default function CoreShell() {
           )}
 
           {me && me.role !== 'read_only' && modulesMeta.some(m => m.id === 'ai_assistant') && <AiAssistantBar onNavigate={navigate} currentRoute={hash} />}
+
+          {ActiveComponent && activeSection !== 'agendas' && (
+            <GettingStartedCard section={activeSection} onNavigate={navigate} />
+          )}
 
           {ActiveComponent ? (
             <Suspense fallback={<div className="muted">Loading…</div>}>
