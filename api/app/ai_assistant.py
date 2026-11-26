@@ -278,6 +278,28 @@ _TOOL_DECLARATIONS = [
         },
     },
     {
+        "name": "list_complaints",
+        "description": "List or search code-enforcement complaints by complaint number, property address, ordinance section, or description.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "query": {"type": "STRING", "description": "Optional search by complaint number, address, or keyword"},
+                "status": {"type": "STRING", "description": "Optional status filter (e.g. 'submitted', 'investigating', 'resolved')"},
+            },
+        },
+    },
+    {
+        "name": "get_complaint_details",
+        "description": "Fetch full details, alleged conduct, ordinance section, investigation report, and non-confidential documents for a specific complaint (e.g. 'CMP-2026-0002').",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "complaint_number": {"type": "STRING", "description": "Complaint number (e.g. 'CMP-2026-0002')"},
+            },
+            "required": ["complaint_number"],
+        },
+    },
+    {
         "name": "create_complaint",
         "description": "Log a code-enforcement or administrative complaint.",
         "parameters": {
@@ -513,6 +535,8 @@ _TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "list_permits": ("permits", ("permits.manage",)),
     "get_permit_details": ("permits", ("permits.manage",)),
     "create_complaint": ("complaints", ("complaints.manage", "complaints.submit")),
+    "list_complaints": ("complaints", ("complaints.manage", "complaints.log")),
+    "get_complaint_details": ("complaints", ("complaints.manage", "complaints.log")),
     "create_work_order": ("complaints", ("complaints.manage",)),
     "create_public_record": ("records", ("records.manage",)),
     "search_records": ("records", ("records.manage", "records.view")),
@@ -883,6 +907,91 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                         "documents": [
                             {"filename": d[0], "doc_type": d[1], "content_type": d[2], "size_bytes": d[3]}
                             for d in docs
+                        ],
+                    },
+                },
+                None,
+            )
+
+        if name == "list_complaints":
+            q = str(args.get("query") or "").strip()
+            st_f = str(args.get("status") or "").strip().lower()
+            like = f"%{q}%"
+            rows = conn.execute(
+                "SELECT complaint_number, subject_property_address, ordinance_section, conduct_description, status, enforcement_stage, date_observed "
+                "FROM complaints WHERE (%s = '' OR complaint_number ILIKE %s OR subject_property_address ILIKE %s OR ordinance_section ILIKE %s OR conduct_description ILIKE %s) "
+                "AND (%s = '' OR LOWER(status) = %s) ORDER BY id DESC LIMIT 12",
+                (q, like, like, like, like, st_f, st_f),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "complaints": [
+                        {
+                            "complaint_number": r[0],
+                            "property_address": r[1],
+                            "ordinance_section": r[2],
+                            "description": (r[3] or "")[:300],
+                            "status": r[4],
+                            "enforcement_stage": r[5],
+                            "date_observed": r[6],
+                        }
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "get_complaint_details":
+            cnum = str(args.get("complaint_number") or "").strip()
+            candidates = [cnum]
+            m_cmp = re.match(r"^(CMP-\d{4}-)(\d+)$", cnum, re.IGNORECASE)
+            if m_cmp:
+                candidates.append(f"{m_cmp.group(1)}{int(m_cmp.group(2)):04d}")
+            row = None
+            for cand in candidates:
+                row = conn.execute(
+                    "SELECT id, complaint_number, intake_channel, is_anonymous, complainant_name, "
+                    "subject_property_address, subject_person_name, ordinance_section, conduct_description, "
+                    "date_observed, status, assigned_to, investigation_report, enforcement_stage, "
+                    "nov_required_action, nov_compliance_deadline, final_resolution "
+                    "FROM complaints WHERE UPPER(complaint_number) = UPPER(%s)",
+                    (cand,),
+                ).fetchone()
+                if row:
+                    break
+            if not row:
+                return {"ok": False, "error": f"Complaint '{cnum}' not found"}, None
+            can_private = has_permission(user, "complaints.view_private")
+            docs = conn.execute(
+                "SELECT filename, doc_category, title, content_type, size_bytes, is_confidential "
+                "FROM complaint_documents WHERE complaint_id = %s ORDER BY id ASC",
+                (row[0],),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "complaint": {
+                        "complaint_number": row[1],
+                        "intake_channel": row[2],
+                        "is_anonymous": row[3],
+                        "complainant_name": (row[4] if can_private and not row[3] else "[Redacted]"),
+                        "subject_property_address": row[5],
+                        "subject_person_name": row[6],
+                        "ordinance_section": row[7],
+                        "conduct_description": row[8],
+                        "date_observed": row[9],
+                        "status": row[10],
+                        "assigned_to": row[11],
+                        "investigation_report": row[12],
+                        "enforcement_stage": row[13],
+                        "nov_required_action": row[14],
+                        "nov_compliance_deadline": row[15],
+                        "final_resolution": row[16],
+                        "documents": [
+                            {"filename": d[0], "category": d[1], "title": d[2], "content_type": d[3], "size_bytes": d[4]}
+                            for d in docs
+                            if can_private or not d[5]
                         ],
                     },
                 },
@@ -1400,6 +1509,8 @@ _READ_ONLY_TOOLS = {
     "list_agendas",
     "list_permits",
     "get_permit_details",
+    "list_complaints",
+    "get_complaint_details",
     "search_records",
     "read_record_file",
     "search_city_code",
@@ -1489,7 +1600,7 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
         "politely decline and explain that you can only assist with municipal tasks in DocketHall. "
         "1) When the user asks a QUESTION about city rules, ordinances, limits, permits, policies, records, or schedules, "
         "ALWAYS search the relevant data using your read/search tools (search_city_code, get_city_code_section, "
-        "search_records, read_record_file, search_portal_info, list_agendas, list_permits, get_permit_details), "
+        "search_records, read_record_file, search_portal_info, list_agendas, list_permits, get_permit_details, list_complaints, get_complaint_details), "
         "read the returned text, and give a clear, accurate answer citing the specific Code Section or document title. "
         "2) When the user asks to CREATE, UPDATE, or DO something, call the appropriate action tool(s) with clean, properly "
         "formatted arguments (YYYY-MM-DD dates, '6:00 PM' times; if the year is omitted for a future date like 'December 1', "
@@ -1590,7 +1701,7 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
         final_text = "Proposed change (please confirm): " + "; ".join(p["summary"] for p in pending_actions)
     elif not final_text and actions:
         final_text = "Done: " + "; ".join(a["summary"] for a in actions)
-    if final_text and "get_permit_details" in used_tools:
+    if final_text and ("get_permit_details" in used_tools or "get_complaint_details" in used_tools):
         final_text += (
             "\n\n*Note: This AI-generated analysis is advisory only and may contain errors or omissions. "
             "All findings and code interpretations must be independently verified by qualified municipal staff "

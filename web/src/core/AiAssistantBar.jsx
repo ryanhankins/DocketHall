@@ -27,7 +27,7 @@ const DEFAULT_MODELS = [
 ];
 
 function renderTextWithLinks(text, keyPrefix) {
-  const linkRe = /((?:City\s+)?Code\s+§+\s*\d+(?:\.\d+)+(?:\([^)]+\))*|Sections?\s+\d+(?:\.\d+)+(?:\([^)]+\))*|§+\s*\d+(?:\.\d+)+(?:\([^)]+\))*|\b\d{3}\.\d{2,3}(?:\.\d+)?(?:\([^)]+\))*|\bPRM-\d{4}-\d{4}\b)/gi;
+  const linkRe = /((?:City\s+)?Code\s+§+\s*\d+(?:\.\d+)+(?:\([^)]+\))*|Sections?\s+\d+(?:\.\d+)+(?:\([^)]+\))*|§+\s*\d+(?:\.\d+)+(?:\([^)]+\))*|\b\d{3}\.\d{2,3}(?:\.\d+)?(?:\([^)]+\))*|\bPRM-\d{4}-\d{3,4}\b|\bCMP-\d{4}-\d{3,4}\b)/gi;
   const out = [];
   let last = 0;
   let m;
@@ -42,6 +42,17 @@ function renderTextWithLinks(text, keyPrefix) {
           href="#/app/permits-review"
           style={{ color: '#2563eb', textDecoration: 'underline', fontWeight: 600 }}
           title="Open Permit Review Queue"
+        >
+          {raw}
+        </a>
+      );
+    } else if (/^CMP-/i.test(raw)) {
+      out.push(
+        <a
+          key={`${keyPrefix}-cmp-${k++}`}
+          href="#/app/complaints-manage"
+          style={{ color: '#2563eb', textDecoration: 'underline', fontWeight: 600 }}
+          title="Open Complaints Management"
         >
           {raw}
         </a>
