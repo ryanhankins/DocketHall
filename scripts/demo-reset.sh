@@ -27,7 +27,7 @@ docker compose -f docker-compose.demo.yml exec -T db \
   psql -U civicdesk -d civicdesk -v ON_ERROR_STOP=1 < "$SNAP_DIR/demo_seed.sql" >/dev/null
 
 echo "==> Restoring local uploads snapshot..."
-docker compose -f docker-compose.demo.yml run --rm --no-deps --entrypoint sh api -c \
+docker compose -f docker-compose.demo.yml run -T --rm --no-deps --entrypoint sh api -c \
   'rm -rf /data/records/* && tar -xzf - -C /data/records' < "$SNAP_DIR/demo_files.tar.gz"
 
 echo "==> Starting API container..."
