@@ -14,13 +14,27 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-# Remove the stack. Volumes and secrets are kept unless --purge is given.
+# Remove the stack. Volumes and secrets are kept unless --purge --yes is given.
 set -euo pipefail
 STACK_NAME="${STACK_NAME:-civicdesk}"
 
+PURGE=false
+YES=false
+for arg in "$@"; do
+  case "$arg" in
+    --purge) PURGE=true ;;
+    --yes) YES=true ;;
+  esac
+done
+
+if [ "$PURGE" = true ] && [ "$YES" != true ] && [ "${CONFIRM_PURGE:-0}" != "1" ]; then
+  echo "Refusing to purge volumes/database without --yes (or CONFIRM_PURGE=1)." >&2
+  exit 1
+fi
+
 docker stack rm "$STACK_NAME"
 
-if [ "${1:-}" = "--purge" ]; then
+if [ "$PURGE" = true ]; then
   echo "Waiting for services to stop..."
   while docker ps -q --filter "label=com.docker.stack.namespace=$STACK_NAME" | grep -q .; do sleep 2; done
   sleep 3
