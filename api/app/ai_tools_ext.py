@@ -34,6 +34,23 @@ EXT_TOOL_DECLARATIONS: list[dict] = [
         },
     },
     {
+        "name": "merge_agenda_items",
+        "description": "Merge two items on an in-progress agenda into a single item: updates keep_item_id with the combined content, moves any attachments, and deletes remove_item_id.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "agenda_id": {"type": "INTEGER", "description": "Agenda ID"},
+                "keep_item_id": {"type": "INTEGER", "description": "Item ID to keep and update"},
+                "remove_item_id": {"type": "INTEGER", "description": "Item ID to merge into keep_item_id and remove"},
+                "title": {"type": "STRING", "description": "Combined item title"},
+                "description": {"type": "STRING", "description": "Combined item description"},
+                "recommended_motion": {"type": "STRING", "description": "Optional combined recommended motion"},
+                "fiscal_impact": {"type": "STRING", "description": "Optional combined fiscal impact"},
+            },
+            "required": ["agenda_id", "keep_item_id", "remove_item_id", "title"],
+        },
+    },
+    {
         "name": "update_todo",
         "description": "Update an agenda backlog todo item (title, todo_status, assigned_to, due_date, notes).",
         "parameters": {
@@ -506,6 +523,7 @@ EXT_TOOL_DECLARATIONS: list[dict] = [
 
 EXT_TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "delete_agenda_item": ("agendas", ("agendas.manage",)),
+    "merge_agenda_items": ("agendas", ("agendas.manage",)),
     "update_todo": ("agendas", ("agendas.manage",)),
     "assign_todo_to_agenda": ("agendas", ("agendas.manage",)),
     "list_council_submissions": ("agendas", ("agendas.manage", "agendas.submit")),
@@ -555,6 +573,7 @@ def describe_ext_action(name: str, args: dict) -> str | None:
     a = args or {}
     descriptions = {
         "delete_agenda_item": lambda: f"Delete agenda item #{a.get('item_id', '')} from agenda #{a.get('agenda_id', '')}",
+        "merge_agenda_items": lambda: f"Merge item #{a.get('remove_item_id', '')} into item #{a.get('keep_item_id', '')} on agenda #{a.get('agenda_id', '')} ('{a.get('title', '')}')",
         "update_todo": lambda: f"Update backlog todo #{a.get('todo_id', '')}",
         "assign_todo_to_agenda": lambda: f"Assign todo #{a.get('todo_id', '')} to agenda #{a.get('agenda_id', '')}",
         "decide_council_submission": lambda: f"{str(a.get('decision', 'review')).capitalize()} council submission #{a.get('submission_id', '')}",
@@ -602,6 +621,35 @@ def execute_ext_tool(conn, name: str, args: dict, user: dict) -> tuple[dict, dic
         return (
             {"ok": True, "agenda_id": ag_id, "deleted_item_id": item_id},
             {"tool": name, "summary": f"Deleted item '{row[0]}' from agenda #{ag_id}", "route": f"/app/agendas/{ag_id}"},
+        )
+
+    if name == "merge_agenda_items":
+        ag_id = int(args["agenda_id"])
+        keep_id = int(args["keep_item_id"])
+        rem_id = int(args["remove_item_id"])
+        if keep_id == rem_id:
+            return {"ok": False, "error": "keep_item_id and remove_item_id must be different"}, None
+        keep_row = conn.execute("SELECT id, title FROM agenda_items WHERE id = %s AND agenda_id = %s", (keep_id, ag_id)).fetchone()
+        rem_row = conn.execute("SELECT id, title FROM agenda_items WHERE id = %s AND agenda_id = %s", (rem_id, ag_id)).fetchone()
+        if not keep_row or not rem_row:
+            return {"ok": False, "error": f"Both items (#{keep_id}, #{rem_id}) must exist on agenda #{ag_id}"}, None
+        new_title = str(args["title"]).strip()
+        sets, params = ["title = %s"], [new_title]
+        for k, col in [("description", "description"), ("recommended_motion", "recommended_motion"), ("fiscal_impact", "fiscal_impact")]:
+            if args.get(k) is not None:
+                sets.append(f"{col} = %s")
+                params.append(str(args[k]).strip())
+        params.extend([keep_id, ag_id])
+        conn.execute(f"UPDATE agenda_items SET {', '.join(sets)} WHERE id = %s AND agenda_id = %s", tuple(params))
+        next_doc_pos = conn.execute("SELECT COALESCE(MAX(position), 0) FROM agenda_documents WHERE agenda_item_id = %s", (keep_id,)).fetchone()[0]
+        conn.execute(
+            "UPDATE agenda_documents SET agenda_item_id = %s, position = position + %s WHERE agenda_item_id = %s",
+            (keep_id, next_doc_pos, rem_id),
+        )
+        conn.execute("DELETE FROM agenda_items WHERE id = %s AND agenda_id = %s", (rem_id, ag_id))
+        return (
+            {"ok": True, "agenda_id": ag_id, "kept_item_id": keep_id, "removed_item_id": rem_id, "title": new_title},
+            {"tool": name, "summary": f"Merged '{rem_row[1]}' into '{new_title}' on agenda #{ag_id}", "route": f"/app/agendas/{ag_id}"},
         )
 
     if name == "update_todo":

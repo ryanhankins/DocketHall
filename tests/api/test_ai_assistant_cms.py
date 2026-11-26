@@ -294,3 +294,36 @@ def test_ai_receives_current_page_context(admin_client, monkeypatch):
     assert res.status_code == 200, res.text
     assert "route='agendas/3'" in captured["sys"]
     assert "heading='Parks Committee'" in captured["sys"]
+
+
+def test_ai_merge_agenda_items(admin_client):
+    from app import ai_assistant
+
+    admin_client.put("/api/modules/admin/agendas", json={"enabled": True})
+    user = admin_client.get("/api/me").json()
+
+    ag_res, _ = ai_assistant._execute_tool(
+        "create_agenda",
+        {"title": "Special Meeting", "body": "City Council", "meeting_date": "2026-12-01", "meeting_time": "6:00 PM"},
+        user,
+    )
+    ag_id = ag_res["agenda_id"]
+    it1, _ = ai_assistant._execute_tool("add_agenda_item", {"agenda_id": ag_id, "title": "Road Salt"}, user)
+    it2, _ = ai_assistant._execute_tool("add_agenda_item", {"agenda_id": ag_id, "title": "Lake Runoff"}, user)
+
+    m_res, _ = ai_assistant._execute_tool(
+        "merge_agenda_items",
+        {
+            "agenda_id": ag_id,
+            "keep_item_id": it1["item_id"],
+            "remove_item_id": it2["item_id"],
+            "title": "Road Salt Management and Lake Runoff Proposal",
+            "description": "Combined proposal.",
+        },
+        user,
+    )
+    assert m_res["ok"] is True, m_res
+    ag = admin_client.get(f"/api/agendas/{ag_id}").json()
+    assert len(ag["items"]) == 1
+    assert ag["items"][0]["id"] == it1["item_id"]
+    assert ag["items"][0]["title"] == "Road Salt Management and Lake Runoff Proposal"
