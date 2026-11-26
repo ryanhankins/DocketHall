@@ -214,3 +214,57 @@ def test_ai_add_agenda_item_attachment(admin_client):
         for it in items
         for d in it.get("documents", [])
     )
+
+
+def test_ai_full_tool_coverage_and_extended_tools(admin_client):
+    from app import ai_assistant
+
+    # Enable all modules used by extended tools
+    for mod in ("agendas", "permits", "licensing", "codification", "records", "complaints", "calendar", "communications", "utilities", "citations"):
+        admin_client.put(f"/api/modules/admin/{mod}", json={"enabled": True})
+
+    # 1. Every declared tool must have an access policy, and every write tool a human description
+    decl_names = [d["name"] for d in ai_assistant._TOOL_DECLARATIONS]
+    assert len(decl_names) == len(set(decl_names)), "Duplicate tool declarations found"
+    for tname in decl_names:
+        assert tname in ai_assistant._TOOL_ACCESS, f"Missing _TOOL_ACCESS for {tname}"
+        if tname not in ai_assistant._READ_ONLY_TOOLS:
+            desc = ai_assistant._describe_proposed_action(tname, {})
+            assert desc != f"Execute {tname}", f"Missing _describe_proposed_action for {tname}"
+
+    user = admin_client.get("/api/me").json()
+
+    # 2. Codification create + update
+    ch_res, _ = ai_assistant._execute_tool(
+        "create_code_chapter",
+        {"code_prefix": "Title 9", "title": "Animals and Livestock"},
+        user,
+    )
+    assert ch_res["ok"] is True, ch_res
+    sec_res, _ = ai_assistant._execute_tool(
+        "create_code_section",
+        {"chapter_id": ch_res["chapter_id"], "section_number": "9.04.010", "title": "Llamas", "body": "Llamas allowed at special events."},
+        user,
+    )
+    assert sec_res["ok"] is True, sec_res
+    upd_sec, _ = ai_assistant._execute_tool(
+        "update_code_section",
+        {"section_id": sec_res["section_id"], "summary": "Allows llamas at permitted rodeos."},
+        user,
+    )
+    assert upd_sec["ok"] is True, upd_sec
+
+    # 3. Parcels + Audit + Users + FAQs + Bills
+    p_res, _ = ai_assistant._execute_tool("create_parcel", {"parcel_id": "APN-100", "address": "100 Main St", "zoning_district": "C-1"}, user)
+    assert p_res["ok"] is True, p_res
+    p_list, _ = ai_assistant._execute_tool("list_parcels", {"search": "APN-100"}, user)
+    assert any(p["parcel_id"] == "APN-100" for p in p_list["parcels"])
+
+    u_list, _ = ai_assistant._execute_tool("list_users", {}, user)
+    assert u_list["ok"] is True and len(u_list["users"]) >= 1
+
+    a_list, _ = ai_assistant._execute_tool("list_audit_log", {}, user)
+    assert a_list["ok"] is True
+
+    f_list, _ = ai_assistant._execute_tool("list_faqs", {}, user)
+    assert f_list["ok"] is True

@@ -29,6 +29,13 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from psycopg.types.json import Jsonb
 
+from .ai_tools_ext import (
+    EXT_READ_ONLY_TOOLS,
+    EXT_TOOL_ACCESS,
+    EXT_TOOL_DECLARATIONS,
+    describe_ext_action,
+    execute_ext_tool,
+)
 from .audit import record_audit
 from .auth import current_user, has_permission, is_demo_mode, require_admin, require_not_demo_mode, require_permission
 from .db import pool
@@ -913,7 +920,7 @@ _TOOL_DECLARATIONS = [
             "required": ["facility_name", "event_date"],
         },
     },
-]
+] + EXT_TOOL_DECLARATIONS
 
 
 _TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
@@ -973,6 +980,7 @@ _TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "list_facilities": ("calendar", ()),
     "create_facility": ("calendar", ("calendar.manage",)),
     "create_facility_reservation": ("calendar", ("calendar.manage",)),
+    **EXT_TOOL_ACCESS,
 }
 
 
@@ -2652,6 +2660,10 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                 {"tool": name, "summary": f"Created reservation request {rnum} for {fac[1]} on {ev_date.isoformat()}", "route": "/app/calendar-manage"},
             )
 
+        ext_res = execute_ext_tool(conn, name, args, user)
+        if ext_res is not None:
+            return ext_res
+
     return {"ok": False, "error": f"Unknown tool: {name}"}, None
 
 
@@ -2830,7 +2842,7 @@ _READ_ONLY_TOOLS = {
     "list_notices",
     "list_blog_posts",
     "list_pages",
-}
+} | EXT_READ_ONLY_TOOLS
 
 
 def _describe_proposed_action(name: str, args: dict) -> str:
@@ -2900,6 +2912,9 @@ def _describe_proposed_action(name: str, args: dict) -> str:
         return f"{'Enable' if a.get('enabled', True) else 'Disable'} module '{a.get('module_id', '')}'"
     if name == "update_branding":
         return "Update city preferences / branding"
+    ext_desc = describe_ext_action(name, a)
+    if ext_desc is not None:
+        return ext_desc
     return f"Execute {name}"
 
 
