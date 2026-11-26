@@ -472,6 +472,15 @@ def _append_agenda_header(flow: list, agenda: dict, prefs: dict, logo_bytes: byt
         flow.append(Paragraph(_esc_multiline(prefs["other_notes"]), notes_s))
 
 
+def _group_by_section(records: list[dict], *, key: str = "section") -> list[tuple[str, list[dict]]]:
+    """Group items/entries by section name while preserving first-seen section order."""
+    grouped: dict[str, list[dict]] = {}
+    for rec in records:
+        sec = (rec.get(key) or "").strip()
+        grouped.setdefault(sec, []).append(rec)
+    return list(grouped.items())
+
+
 def _render_toc(
     agenda: dict,
     toc_entries: list[dict],
@@ -495,32 +504,40 @@ def _render_toc(
     if not toc_entries:
         flow.append(Paragraph("No agenda items.", styles["Normal"]))
     else:
-        last_section = None
+        # Group each item with its child doc entries, then group by section
+        item_blocks: list[dict] = []
         for entry in toc_entries:
             if entry["kind"] == "item":
-                sec = (entry.get("section") or "").strip()
-                if sec and sec != last_section:
-                    flow.append(Paragraph(_esc(sec.upper()), sec_p))
-                last_section = sec
-            style = item_p if entry["kind"] == "item" else doc_p
-            badge = _rev_badge_markup(entry.get("revision_status")) if entry["kind"] == "item" else ""
-            pg_label = f"p. {entry['page']}" if entry.get("page") else "—"
-            row_tbl = Table(
-                [[Paragraph(_esc(entry["label"]) + badge, style), Paragraph(pg_label, pg_p)]],
-                colWidths=[6.15 * inch, 0.85 * inch],
-            )
-            row_tbl.setStyle(TableStyle([
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                ("LEFTPADDING", (0, 0), (-1, -1), 2),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
-                ("TOPPADDING", (0, 0), (-1, -1), 4),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-                ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
-            ]))
-            if link_records is not None and (entry.get("page") or 0) >= 1:
-                flow.append(_TocLinkFlowable(row_tbl, entry["page"] - 1, link_records))
+                item_blocks.append({"section": (entry.get("section") or "").strip(), "entries": [entry]})
+            elif item_blocks:
+                item_blocks[-1]["entries"].append(entry)
             else:
-                flow.append(row_tbl)
+                item_blocks.append({"section": "", "entries": [entry]})
+
+        for sec, blocks in _group_by_section(item_blocks):
+            if sec:
+                flow.append(Paragraph(_esc(sec.upper()), sec_p))
+            for blk in blocks:
+                for entry in blk["entries"]:
+                    style = item_p if entry["kind"] == "item" else doc_p
+                    badge = _rev_badge_markup(entry.get("revision_status")) if entry["kind"] == "item" else ""
+                    pg_label = f"p. {entry['page']}" if entry.get("page") else "—"
+                    row_tbl = Table(
+                        [[Paragraph(_esc(entry["label"]) + badge, style), Paragraph(pg_label, pg_p)]],
+                        colWidths=[6.15 * inch, 0.85 * inch],
+                    )
+                    row_tbl.setStyle(TableStyle([
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                        ("TOPPADDING", (0, 0), (-1, -1), 4),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                        ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+                    ]))
+                    if link_records is not None and (entry.get("page") or 0) >= 1:
+                        flow.append(_TocLinkFlowable(row_tbl, entry["page"] - 1, link_records))
+                    else:
+                        flow.append(row_tbl)
 
     if prefs.get("footer_disclosures"):
         flow.append(Paragraph("Additional Notes &amp; Disclosures", disc_h))
@@ -541,13 +558,11 @@ def _render_agenda_summary(
     if not items:
         parts.append("<p>No agenda items.</p>")
     else:
-        last_sec = None
-        for item in items:
-            sec = (item.get("section") or "").strip()
-            if sec and sec != last_sec:
+        for sec, sec_items in _group_by_section(items):
+            if sec:
                 parts.append(f'<h2>{_esc(sec)}</h2>')
-            last_sec = sec
-            rev_html = ""
+            for item in sec_items:
+                rev_html = ""
             if item.get("revision_status") == "revised":
                 rev_html = ' <span class="badge-rev">[REVISED]</span>'
             elif item.get("revision_status") == "addendum":
@@ -645,23 +660,25 @@ def _render_full_html_packet(
     if not items:
         parts.append("<p>No agenda items.</p>")
     else:
-        parts.append("<ul>")
-        for item in items:
-            sec = f" [{_esc(item['section'])}]" if item.get("section") else ""
-            parts.append(
-                f'<li><a href="#item-{item["position"]}">{item["position"]}. {_esc(item["title"])}{sec}</a>'
-            )
-            docs = item.get("documents", [])
-            if docs:
-                parts.append("<ul>")
-                for d in docs:
-                    parts.append(
-                        f'<li><a href="#doc-{item["position"]}-{d["position"]}">'
-                        f'{item["position"]}.{d["position"]} {_esc(d["title"])} [{_esc(d["doc_type"])}]</a></li>'
-                    )
-                parts.append("</ul>")
-            parts.append("</li>")
-        parts.append("</ul>")
+        for sec, sec_items in _group_by_section(items):
+            if sec:
+                parts.append(f'<h3 style="margin-top:12px;margin-bottom:4px;color:#1e3a8a;text-transform:uppercase;font-size:10.5pt;">{_esc(sec)}</h3>')
+            parts.append("<ul>")
+            for item in sec_items:
+                parts.append(
+                    f'<li><a href="#item-{item["position"]}">{item["position"]}. {_esc(item["title"])}</a>'
+                )
+                docs = item.get("documents", [])
+                if docs:
+                    parts.append("<ul>")
+                    for d in docs:
+                        parts.append(
+                            f'<li><a href="#doc-{item["position"]}-{d["position"]}">'
+                            f'{item["position"]}.{d["position"]} {_esc(d["title"])} [{_esc(d["doc_type"])}]</a></li>'
+                        )
+                    parts.append("</ul>")
+                parts.append("</li>")
+            parts.append("</ul>")
 
     if prefs.get("footer_disclosures"):
         parts.append("<h2>Additional Notes &amp; Disclosures</h2>")

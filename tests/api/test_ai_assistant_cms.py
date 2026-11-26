@@ -355,3 +355,37 @@ def test_demo_login_council_member(anon_client, monkeypatch):
     )
     assert ai_sub["ok"] is True, ai_sub
     assert ai_sub["status"] == "pending"
+
+
+def test_agenda_cover_page_groups_items_by_section(admin_client):
+    from pypdf import PdfReader
+    import io
+    from app.agenda_pdf import build_agenda_packet_pdf
+
+    agenda = {
+        "id": 1,
+        "title": "Regular Meeting",
+        "body": "City Council",
+        "meeting_date": "2026-12-03",
+        "meeting_time": "6:00 PM",
+        "status": "In Progress",
+        "items": [
+            {"position": 1, "section": "New Business", "title": "First New Item", "description": "", "documents": []},
+            {"position": 2, "section": "Old Business", "title": "Old Item", "description": "", "documents": []},
+            {"position": 3, "section": "New Business", "title": "Second New Item", "description": "", "documents": []},
+        ],
+    }
+    pdf_bytes = build_agenda_packet_pdf(
+        agenda,
+        {"city_name": "Millbrook", "city_title": "City of Millbrook"},
+        None,
+        lambda key: b"",
+    )
+    first_page_text = PdfReader(io.BytesIO(pdf_bytes)).pages[0].extract_text()
+    # Both sections appear as headers once (case-insensitive check)
+    upper_text = first_page_text.upper()
+    assert upper_text.count("NEW BUSINESS") == 1
+    assert upper_text.count("OLD BUSINESS") == 1
+    assert "First New Item" in first_page_text
+    assert "Second New Item" in first_page_text
+    assert "Old Item" in first_page_text
