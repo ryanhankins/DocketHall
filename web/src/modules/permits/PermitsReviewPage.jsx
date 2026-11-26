@@ -355,6 +355,36 @@ export default function PermitsReviewPage({ onNavigate, initialId = null }) {
                   <td>
                     <div className="actions">
                       <button type="button" className="btn sm primary" onClick={() => setSelectedId(p.id)}>Manage</button>
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={() => {
+                          const label = `${p.permit_type_name || 'Permit'}${p.permit_use_name ? ` - ${p.permit_use_name}` : ''}, ${p.property_address || 'no address'}`;
+                          window.dispatchEvent(new CustomEvent('dockethall:ai-ask', {
+                            detail: {
+                              prompt: `Evaluate permit ${p.permit_number} (${label}) for application completeness against the Municipal City Code: list every required item, document, fee, and form field, what is currently provided, and what is missing.`,
+                            },
+                          }));
+                        }}
+                        title="Check if the application has all required documents, fields, and fees"
+                      >
+                        AI Completeness
+                      </button>
+                      <button
+                        type="button"
+                        className="btn sm"
+                        onClick={() => {
+                          const label = `${p.permit_type_name || 'Permit'}${p.permit_use_name ? ` - ${p.permit_use_name}` : ''}, ${p.property_address || 'no address'}`;
+                          window.dispatchEvent(new CustomEvent('dockethall:ai-ask', {
+                            detail: {
+                              prompt: `Evaluate permit ${p.permit_number} (${label}) substantively against the Municipal City Code (regardless of whether the application is complete or incomplete): check zoning, setbacks, lot/impervious coverage, use rules, and approval standards, and identify any compliance issues, required variances, or conditions.`,
+                            },
+                          }));
+                        }}
+                        title="Evaluate substantive compliance against City Code (even if incomplete)"
+                      >
+                        AI Code Check
+                      </button>
                       {(p.permit_kind === 'annual_license' || p.expires_at) && (p.status === 'issued' || p.status === 'closed') && (
                         <button
                           type="button"

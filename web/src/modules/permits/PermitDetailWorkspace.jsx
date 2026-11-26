@@ -20,6 +20,7 @@ import { api, formatDate, formatSize } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
 import { permitExpiryInfo, permitStatusBadge } from './MyPermitsPage.jsx';
 import CustomFieldsRenderer from './CustomFieldsRenderer.jsx';
+import { MarkdownMessage } from '../../core/AiAssistantBar.jsx';
 
 export default function PermitDetailWorkspace({ permit, isManager = false, onUpdated, onBack }) {
   const [tab, setTab] = useState('overview');
@@ -100,6 +101,8 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
   const [docCat, setDocCat] = useState('Other');
   const [docRound, setDocRound] = useState(1);
   const [busy, setBusy] = useState(false);
+  const [aiState, setAiState] = useState({ enabled: false, configured: false, reviews: [] });
+  const [aiBusy, setAiBusy] = useState('');
   const showToast = useToast();
 
   useEffect(() => {
@@ -109,6 +112,15 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
     setAssignedTo(permit.assigned_to || '');
     setExpiresAt(permit.expires_at || '');
     setNotes(permit.review_notes || '');
+    if (isManager) {
+      api(`/api/ai/permits/${permit.id}/reviews`)
+        .then((d) => setAiState({
+          enabled: !!d?.enabled,
+          configured: !!d?.configured,
+          reviews: Array.isArray(d?.reviews) ? d.reviews : [],
+        }))
+        .catch(() => setAiState({ enabled: false, configured: false, reviews: [] }));
+    }
     setDetails({
       applicant_name: permit.applicant_name || '',
       applicant_email: permit.applicant_email || '',
@@ -557,6 +569,101 @@ export default function PermitDetailWorkspace({ permit, isManager = false, onUpd
               )}
             </div>
           </div>
+
+          {isManager && aiState.enabled && (
+            <div style={{ marginTop: '1.25rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>
+              <div className="between" style={{ marginBottom: '.5rem', flexWrap: 'wrap', gap: '.5rem' }}>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1rem' }}>AI Permit Review (On-Demand)</h3>
+                  <div className="muted" style={{ fontSize: '.8rem', marginTop: '.15rem' }}>
+                    Advisory only — AI may make mistakes or omit details. Always verify findings against the City Code.
+                  </div>
+                </div>
+                <div className="actions">
+                  <button
+                    type="button"
+                    className="btn sm"
+                    disabled={!!aiBusy || !aiState.configured}
+                    onClick={async () => {
+                      setAiBusy('completeness');
+                      try {
+                        const res = await api(`/api/ai/permits/${permit.id}/evaluate`, {
+                          method: 'POST',
+                          body: JSON.stringify({ check_type: 'completeness' }),
+                        });
+                        if (res?.review) {
+                          setAiState((s) => ({ ...s, reviews: [res.review, ...s.reviews] }));
+                          showToast('Saved AI completeness check to permit', 'ok');
+                        }
+                      } catch (err) {
+                        showToast(err.message || 'AI completeness check failed', 'error');
+                      } finally {
+                        setAiBusy('');
+                      }
+                    }}
+                    title={aiState.configured ? 'Run AI completeness check and save to this permit' : 'Configure Gemini API key in AI Assistant first'}
+                  >
+                    {aiBusy === 'completeness' ? 'Evaluating…' : 'Run Completeness Check'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn sm"
+                    disabled={!!aiBusy || !aiState.configured}
+                    onClick={async () => {
+                      setAiBusy('code_check');
+                      try {
+                        const res = await api(`/api/ai/permits/${permit.id}/evaluate`, {
+                          method: 'POST',
+                          body: JSON.stringify({ check_type: 'code_check' }),
+                        });
+                        if (res?.review) {
+                          setAiState((s) => ({ ...s, reviews: [res.review, ...s.reviews] }));
+                          showToast('Saved AI City Code check to permit', 'ok');
+                        }
+                      } catch (err) {
+                        showToast(err.message || 'AI City Code check failed', 'error');
+                      } finally {
+                        setAiBusy('');
+                      }
+                    }}
+                    title={aiState.configured ? 'Evaluate substantive City Code compliance and save to this permit' : 'Configure Gemini API key in AI Assistant first'}
+                  >
+                    {aiBusy === 'code_check' ? 'Evaluating…' : 'Run City Code Check'}
+                  </button>
+                </div>
+              </div>
+              {aiState.reviews.length === 0 ? (
+                <div className="muted" style={{ fontSize: '.85rem' }}>
+                  No AI evaluations saved on this permit yet. Click a button above to run one.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: '.65rem', marginTop: '.6rem' }}>
+                  {aiState.reviews.map((rev) => (
+                    <div
+                      key={rev.id}
+                      style={{
+                        background: '#f8fafc',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '8px',
+                        padding: '.75rem .9rem',
+                        fontSize: '.88rem',
+                      }}
+                    >
+                      <div className="between" style={{ marginBottom: '.4rem', flexWrap: 'wrap', gap: '.4rem' }}>
+                        <span className="badge" style={{ background: '#f5f3ff', color: '#6d28d9' }}>
+                          {rev.check_type === 'completeness' ? 'Completeness Check' : 'City Code Check'}
+                        </span>
+                        <span className="muted" style={{ fontSize: '.78rem' }}>
+                          {formatDate(rev.created_at)} · by {rev.created_by || 'staff'}{rev.model ? ` · ${rev.model}` : ''}
+                        </span>
+                      </div>
+                      <MarkdownMessage text={rev.report} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {(customFieldDefs.length > 0 || Object.keys(customData || {}).length > 0) && (
             <div style={{ marginTop: '1.25rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>

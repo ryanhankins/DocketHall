@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 from psycopg.types.json import Jsonb
 
 from .audit import record_audit
-from .auth import current_user, has_permission, require_admin, require_not_demo_mode
+from .auth import current_user, has_permission, require_admin, require_not_demo_mode, require_permission
 from .db import pool
 from .registry import is_module_enabled
 
@@ -267,6 +267,17 @@ _TOOL_DECLARATIONS = [
         },
     },
     {
+        "name": "get_permit_details",
+        "description": "Fetch full details, custom/planning fields, fee payment status, and attached documents for a specific permit or variance application.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "permit_number": {"type": "STRING", "description": "Permit number (e.g. 'PRM-2026-0001')"},
+            },
+            "required": ["permit_number"],
+        },
+    },
+    {
         "name": "create_complaint",
         "description": "Log a code-enforcement or administrative complaint.",
         "parameters": {
@@ -500,6 +511,7 @@ _TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "update_permit_status": ("permits", ("permits.manage",)),
     "schedule_inspection": ("permits", ("permits.manage",)),
     "list_permits": ("permits", ("permits.manage",)),
+    "get_permit_details": ("permits", ("permits.manage",)),
     "create_complaint": ("complaints", ("complaints.manage", "complaints.submit")),
     "create_work_order": ("complaints", ("complaints.manage",)),
     "create_public_record": ("records", ("records.manage",)),
@@ -829,6 +841,51 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             ).fetchall()
             return (
                 {"ok": True, "permits": [{"permit_number": r[0], "type": r[1], "use": r[2], "address": r[3], "status": r[4], "fee": r[5]} for r in rows]},
+                None,
+            )
+
+        if name == "get_permit_details":
+            pnum = str(args.get("permit_number") or "").strip()
+            row = conn.execute(
+                "SELECT id, permit_number, permit_type_name, permit_use_name, applicant_name, applicant_email, "
+                "applicant_phone, owner_name, property_address, parcel_id, project_description, estimated_value, "
+                "status, fee_amount, payment_status, review_notes, custom_data, planning_data "
+                "FROM permits WHERE UPPER(permit_number) = UPPER(%s)",
+                (pnum,),
+            ).fetchone()
+            if not row:
+                return {"ok": False, "error": f"Permit '{pnum}' not found"}, None
+            docs = conn.execute(
+                "SELECT filename, doc_type, content_type, size_bytes FROM permit_documents WHERE permit_id = %s ORDER BY id ASC",
+                (row[0],),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "permit": {
+                        "permit_number": row[1],
+                        "type": row[2],
+                        "use": row[3],
+                        "applicant_name": row[4],
+                        "applicant_email": row[5],
+                        "applicant_phone": row[6],
+                        "owner_name": row[7],
+                        "property_address": row[8],
+                        "parcel_id": row[9],
+                        "project_description": row[10],
+                        "estimated_value": row[11],
+                        "status": row[12],
+                        "fee_amount": row[13],
+                        "payment_status": row[14],
+                        "review_notes": row[15],
+                        "custom_data": row[16] or {},
+                        "planning_data": row[17] or {},
+                        "documents": [
+                            {"filename": d[0], "doc_type": d[1], "content_type": d[2], "size_bytes": d[3]}
+                            for d in docs
+                        ],
+                    },
+                },
                 None,
             )
 
@@ -1339,6 +1396,69 @@ def _extract_document_text(filename: str, content_type: str, data: bytes, max_ch
     return (text[:max_chars], len(text) > max_chars)
 
 
+_READ_ONLY_TOOLS = {
+    "list_agendas",
+    "list_permits",
+    "get_permit_details",
+    "search_records",
+    "read_record_file",
+    "search_city_code",
+    "get_city_code_section",
+    "search_portal_info",
+}
+
+
+def _describe_proposed_action(name: str, args: dict) -> str:
+    """Return a concise human-readable summary of a proposed write action."""
+    a = args or {}
+    if name == "create_agenda":
+        return f"Create agenda '{a.get('title') or 'Meeting Agenda'}' on {a.get('meeting_date', '')} at {a.get('meeting_time') or '6:30 PM'}"
+    if name == "add_agenda_item":
+        return f"Add agenda item '{a.get('title', '')}' to agenda #{a.get('agenda_id', '')} ({a.get('section_name') or 'New Business'})"
+    if name == "finalize_agenda":
+        return f"Finalize agenda #{a.get('agenda_id', '')}"
+    if name == "create_todo":
+        due = f" (due {a['due_date']})" if a.get("due_date") else ""
+        return f"Add backlog todo '{a.get('title', '')}'{due}"
+    if name == "create_notice":
+        return f"Post notice '{a.get('title', '')}' ({a.get('category') or 'general'})"
+    if name == "create_blog_post":
+        return f"Publish blog post '{a.get('title', '')}'"
+    if name == "create_calendar_event":
+        return f"Create calendar event '{a.get('title', '')}' on {a.get('event_date', '')}"
+    if name == "update_urgent_alert":
+        return f"{'Enable' if a.get('enabled') else 'Clear'} urgent alert banner" + (f": {a.get('message')}" if a.get("enabled") and a.get("message") else "")
+    if name == "create_permit":
+        return f"Create {a.get('permit_type_name', 'permit')} application for {a.get('property_address', '')}"
+    if name == "update_permit_status":
+        return f"Update permit {a.get('permit_number', '')} status to '{a.get('status', '')}'"
+    if name == "schedule_inspection":
+        return f"Schedule {a.get('inspection_type', 'inspection')} for permit {a.get('permit_number', '')} on {a.get('scheduled_date', '')}"
+    if name == "create_complaint":
+        return f"Log code-enforcement complaint at {a.get('property_address', '')}"
+    if name == "create_work_order":
+        return f"Create 311 work order ({a.get('category', 'Public Works')}) at {a.get('location', '')}"
+    if name == "create_public_record":
+        return f"Create {a.get('category', 'Record')}: '{a.get('title', '')}'"
+    if name == "create_directory_entry":
+        return f"Add directory contact '{a.get('name', '')}'"
+    if name == "create_faq":
+        return f"Add FAQ: '{a.get('question', '')}'"
+    if name == "create_page":
+        return f"Create info page '{a.get('title', '')}'"
+    if name == "add_contractor_license":
+        return f"Add contractor license '{a.get('business_name', '')}' ({a.get('license_number', '')})"
+    if name == "create_utility_bill":
+        return f"Create utility bill (${a.get('amount_due', '')}) for {a.get('payer_name', '')}"
+    if name == "create_citation":
+        return f"Issue municipal citation (${a.get('amount_due', '')}) to {a.get('payer_name', '')}"
+    if name == "toggle_module":
+        return f"{'Enable' if a.get('enabled', True) else 'Disable'} module '{a.get('module_id', '')}'"
+    if name == "update_branding":
+        return "Update city preferences / branding"
+    return f"Execute {name}"
+
+
 def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
     username = user["username"]
     api_key, model, _ = _load_gemini_config()
@@ -1356,13 +1476,14 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
         "Permits & Land-Use/Variance Applications, Inspections, Contractor Licensing, Municipal City Code, "
         "Public Records & FOIA, Code-Enforcement Complaints & 311 Work Orders, Public Notices, City Blog, "
         "Calendar, City Directory & FAQs, Info Pages, Utility Billing, Municipal Citations, and Site Modules/Branding. "
-        "1) When the admin asks a QUESTION about city rules, ordinances, limits, permits, policies, records, or schedules, "
+        "1) When the user asks a QUESTION about city rules, ordinances, limits, permits, policies, records, or schedules, "
         "ALWAYS search the relevant data using your read/search tools (search_city_code, get_city_code_section, "
         "search_records, read_record_file, search_portal_info, list_agendas, list_permits), read the returned text, "
         "and give a clear, accurate answer citing the specific Code Section or document title. "
-        "2) When the admin asks to CREATE, UPDATE, or DO something, use your action tools directly with clean, properly "
+        "2) When the user asks to CREATE, UPDATE, or DO something, call the appropriate action tool(s) with clean, properly "
         "formatted arguments (YYYY-MM-DD dates, '6:00 PM' times; if the year is omitted for a future date like 'December 1', "
-        "choose the next upcoming occurrence relative to today), and summarize concisely what was done."
+        "choose the next upcoming occurrence relative to today). Write actions are staged for user confirmation and are NOT "
+        "applied until the user clicks Confirm, so summarize the proposed change clearly and ask them to confirm or cancel."
     )
 
     contents = []
@@ -1374,6 +1495,8 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
     contents.append({"role": "user", "parts": [{"text": prompt}]})
     tools = [{"functionDeclarations": allowed_decls}]
     actions: list[dict] = []
+    pending_actions: list[dict] = []
+    used_tools: set[str] = set()
     final_text = ""
 
     for _ in range(8):
@@ -1405,12 +1528,22 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
         for fc in fn_calls:
             fname = fc.get("name", "")
             fargs = fc.get("args") or {}
-            try:
-                result_obj, action_card = _execute_tool(fname, fargs, user)
-            except Exception as exc:
-                result_obj, action_card = {"ok": False, "error": str(exc)}, None
-            if action_card:
-                actions.append(action_card)
+            used_tools.add(fname)
+            if fname in _READ_ONLY_TOOLS:
+                try:
+                    result_obj, action_card = _execute_tool(fname, fargs, user)
+                except Exception as exc:
+                    result_obj, action_card = {"ok": False, "error": str(exc)}, None
+                if action_card:
+                    actions.append(action_card)
+            else:
+                denied = _check_tool_access(fname, user)
+                if denied:
+                    result_obj = {"ok": False, "error": denied}
+                else:
+                    summary = _describe_proposed_action(fname, fargs)
+                    pending_actions.append({"tool": fname, "args": fargs, "summary": summary})
+                    result_obj = {"ok": True, "status": "pending_confirmation", "proposed": summary}
             fn_resp_obj = {
                 "name": fname,
                 "response": result_obj,
@@ -1420,7 +1553,7 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
             fn_responses.append({"functionResponse": fn_resp_obj})
         contents.append({"role": "user", "parts": fn_responses})
 
-    if not final_text and not actions:
+    if not final_text and not actions and not pending_actions:
         contents.append({
             "role": "user",
             "parts": [{"text": "Based on the search results above, please answer the question directly. If the municipal code or documents do not specify a limit, state that clearly and cite the relevant sections you checked."}],
@@ -1442,10 +1575,52 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
             if text_parts:
                 final_text = "\n".join(text_parts).strip()
 
-    if not final_text and actions:
+    if not final_text and pending_actions:
+        final_text = "Proposed change (please confirm): " + "; ".join(p["summary"] for p in pending_actions)
+    elif not final_text and actions:
         final_text = "Done: " + "; ".join(a["summary"] for a in actions)
-    record_audit(username, "ai.command", f"Prompt: {prompt[:120]} | Actions: {len(actions)}")
-    return {"reply": final_text or "I couldn't find an answer or complete an action for that request.", "actions": actions}
+    if final_text and "get_permit_details" in used_tools:
+        final_text += (
+            "\n\n*Note: This AI-generated analysis is advisory only and may contain errors or omissions. "
+            "All findings and code interpretations must be independently verified by qualified municipal staff "
+            "before making a determination.*"
+        )
+    record_audit(username, "ai.command", f"Prompt: {prompt[:120]} | Proposed: {len(pending_actions)}")
+    return {
+        "reply": final_text or "I couldn't find an answer or propose an action for that request.",
+        "actions": actions,
+        "pending_actions": pending_actions,
+    }
+
+
+class AiPendingActionIn(BaseModel):
+    tool: str
+    args: dict = Field(default_factory=dict)
+
+
+class AiConfirmIn(BaseModel):
+    pending_actions: list[AiPendingActionIn] = Field(..., min_length=1, max_length=10)
+
+
+def _execute_confirmed_actions(pending: list[AiPendingActionIn], user: dict) -> dict:
+    actions: list[dict] = []
+    errors: list[str] = []
+    for item in pending:
+        try:
+            result_obj, action_card = _execute_tool(item.tool, item.args, user)
+            if not result_obj.get("ok"):
+                errors.append(result_obj.get("error") or f"Failed: {item.tool}")
+            elif action_card:
+                actions.append(action_card)
+        except Exception as exc:
+            errors.append(str(exc))
+    parts = []
+    if actions:
+        parts.append("Done: " + "; ".join(a["summary"] for a in actions))
+    if errors:
+        parts.append("Errors: " + "; ".join(errors))
+    record_audit(user["username"], "ai.confirm", f"Confirmed {len(actions)} action(s), {len(errors)} error(s)")
+    return {"reply": "\n".join(parts) or "No changes made.", "actions": actions}
 
 
 @router.post("/command")
@@ -1454,3 +1629,119 @@ async def run_ai_command(body: AiCommandIn, user: dict = Depends(_require_ai_use
     require_not_demo_mode("AI Assistant")
     hist = [{"role": m.role, "text": m.text} for m in body.history]
     return await run_in_threadpool(_run_ai_command, body.prompt.strip(), hist, user)
+
+
+@router.post("/confirm")
+async def confirm_ai_actions(body: AiConfirmIn, user: dict = Depends(_require_ai_user)):
+    _require_ai_module_enabled()
+    require_not_demo_mode("AI Assistant")
+    return await run_in_threadpool(_execute_confirmed_actions, body.pending_actions, user)
+
+
+def _ensure_permit_ai_reviews_table(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS permit_ai_reviews (
+            id BIGSERIAL PRIMARY KEY,
+            permit_id BIGINT NOT NULL REFERENCES permits(id) ON DELETE CASCADE,
+            check_type TEXT NOT NULL,
+            model TEXT NOT NULL DEFAULT '',
+            report TEXT NOT NULL,
+            created_by TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS permit_ai_reviews_permit_idx ON permit_ai_reviews (permit_id, id DESC);
+        """
+    )
+
+
+class PermitEvaluateIn(BaseModel):
+    check_type: str = Field(..., pattern="^(completeness|code_check)$")
+
+
+@router.get("/permits/{permit_id}/reviews")
+def list_permit_ai_reviews(permit_id: int, _: dict = Depends(require_permission("permits.manage"))):
+    if not is_module_enabled("ai_assistant"):
+        return {"enabled": False, "configured": False, "reviews": []}
+    key, _, _ = _load_gemini_config()
+    with pool.connection() as conn:
+        _ensure_permit_ai_reviews_table(conn)
+        rows = conn.execute(
+            "SELECT id, check_type, model, report, created_by, created_at "
+            "FROM permit_ai_reviews WHERE permit_id = %s ORDER BY id DESC LIMIT 20",
+            (permit_id,),
+        ).fetchall()
+    return {
+        "enabled": True,
+        "configured": bool(key),
+        "reviews": [
+            {
+                "id": r[0],
+                "check_type": r[1],
+                "model": r[2],
+                "report": r[3],
+                "created_by": r[4],
+                "created_at": r[5].isoformat() if r[5] else "",
+            }
+            for r in rows
+        ],
+    }
+
+
+def _run_and_save_permit_evaluation(permit_id: int, check_type: str, user: dict) -> dict:
+    with pool.connection() as conn:
+        _ensure_permit_ai_reviews_table(conn)
+        p = conn.execute(
+            "SELECT permit_number, permit_type_name, permit_use_name, property_address FROM permits WHERE id = %s",
+            (permit_id,),
+        ).fetchone()
+    if not p:
+        raise HTTPException(status_code=404, detail="Permit not found")
+    pnum, ptype, puse, addr = p[0], p[1] or "Permit", p[2] or "", p[3] or "no address"
+    label = f"{ptype}{f' - {puse}' if puse else ''}, {addr}"
+    if check_type == "completeness":
+        prompt = (
+            f"Evaluate permit {pnum} ({label}) for application completeness against the Municipal City Code: "
+            "use get_permit_details and search_city_code to list every required item, document, fee, and form field, "
+            "what is currently provided, and what is missing."
+        )
+    else:
+        prompt = (
+            f"Evaluate permit {pnum} ({label}) substantively against the Municipal City Code "
+            "(regardless of whether the application is complete or incomplete): use get_permit_details and "
+            "search_city_code to check zoning, setbacks, lot/impervious coverage, use rules, and approval standards, "
+            "and identify any compliance issues, required variances, or conditions."
+        )
+    res = _run_ai_command(prompt, [], user)
+    report = (res.get("reply") or "").strip()
+    if not report:
+        raise HTTPException(status_code=500, detail="AI returned an empty evaluation.")
+    _, model, _ = _load_gemini_config()
+    with pool.connection() as conn:
+        row = conn.execute(
+            "INSERT INTO permit_ai_reviews (permit_id, check_type, model, report, created_by) "
+            "VALUES (%s, %s, %s, %s, %s) RETURNING id, created_at",
+            (permit_id, check_type, model, report, user["username"]),
+        ).fetchone()
+    record_audit(user["username"], "ai.permit_evaluate", f"{pnum} ({check_type})")
+    return {
+        "review": {
+            "id": row[0],
+            "check_type": check_type,
+            "model": model,
+            "report": report,
+            "created_by": user["username"],
+            "created_at": row[1].isoformat() if row[1] else "",
+        }
+    }
+
+
+@router.post("/permits/{permit_id}/evaluate")
+async def evaluate_permit_ai(
+    permit_id: int,
+    body: PermitEvaluateIn,
+    user: dict = Depends(require_permission("permits.manage")),
+):
+    _require_ai_module_enabled()
+    require_not_demo_mode("AI Permit Evaluation")
+    return await run_in_threadpool(_run_and_save_permit_evaluation, permit_id, body.check_type, user)

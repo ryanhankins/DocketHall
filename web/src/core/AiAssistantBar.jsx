@@ -26,19 +26,77 @@ const DEFAULT_MODELS = [
   'gemini-3.8-pro',
 ];
 
+function renderTextWithLinks(text, keyPrefix) {
+  const linkRe = /((?:City\s+)?Code\s+§+\s*\d+(?:\.\d+)+(?:\([^)]+\))*|Sections?\s+\d+(?:\.\d+)+(?:\([^)]+\))*|§+\s*\d+(?:\.\d+)+(?:\([^)]+\))*|\b\d{3}\.\d{2,3}(?:\.\d+)?(?:\([^)]+\))*|\bPRM-\d{4}-\d{4}\b)/gi;
+  const out = [];
+  let last = 0;
+  let m;
+  let k = 0;
+  while ((m = linkRe.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const raw = m[0];
+    if (/^PRM-/i.test(raw)) {
+      out.push(
+        <a
+          key={`${keyPrefix}-p-${k++}`}
+          href="#/app/permits-review"
+          style={{ color: '#2563eb', textDecoration: 'underline', fontWeight: 600 }}
+          title="Open Permit Review Queue"
+        >
+          {raw}
+        </a>
+      );
+    } else {
+      const secMatch = raw.match(/\d+(?:\.\d+)+/);
+      const sec = secMatch ? secMatch[0] : '';
+      out.push(
+        <a
+          key={`${keyPrefix}-c-${k++}`}
+          href={`/code?sec=${encodeURIComponent(sec)}`}
+          target="_blank"
+          rel="noreferrer"
+          style={{ color: '#2563eb', textDecoration: 'underline', fontWeight: 600 }}
+          title={`Open City Code § ${sec}`}
+        >
+          {raw}
+        </a>
+      );
+    }
+    last = m.index + raw.length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
 function renderInlineMarkdown(text) {
   const parts = [];
-  const tokenRe = /(\*\*[^*]+\*\*|`[^`]+`|\*[^*\n]+\*)/g;
+  const tokenRe = /(\[[^\]]+\]\((?:https?:\/\/|\/|#)[^)]+\)|\*\*[^*]+\*\*|`[^`]+`|\*[^*\n]+\*)/g;
   let last = 0;
   let match;
   let idx = 0;
   while ((match = tokenRe.exec(text)) !== null) {
     if (match.index > last) {
-      parts.push(text.slice(last, match.index));
+      parts.push(...renderTextWithLinks(text.slice(last, match.index), `t-${idx++}`));
     }
     const tok = match[0];
-    if (tok.startsWith('**') && tok.endsWith('**')) {
-      parts.push(<strong key={idx++}>{tok.slice(2, -2)}</strong>);
+    if (tok.startsWith('[') && tok.includes('](') && tok.endsWith(')')) {
+      const splitIdx = tok.indexOf('](');
+      const label = tok.slice(1, splitIdx);
+      const href = tok.slice(splitIdx + 2, -1);
+      const isExt = href.startsWith('http');
+      parts.push(
+        <a
+          key={idx++}
+          href={href}
+          target={isExt || href.startsWith('/code') ? '_blank' : undefined}
+          rel={isExt || href.startsWith('/code') ? 'noreferrer' : undefined}
+          style={{ color: '#2563eb', textDecoration: 'underline' }}
+        >
+          {label}
+        </a>
+      );
+    } else if (tok.startsWith('**') && tok.endsWith('**')) {
+      parts.push(<strong key={idx++}>{renderTextWithLinks(tok.slice(2, -2), `b-${idx}`)}</strong>);
     } else if (tok.startsWith('`') && tok.endsWith('`')) {
       parts.push(
         <code
@@ -54,17 +112,17 @@ function renderInlineMarkdown(text) {
         </code>
       );
     } else if (tok.startsWith('*') && tok.endsWith('*')) {
-      parts.push(<em key={idx++}>{tok.slice(1, -1)}</em>);
+      parts.push(<em key={idx++}>{renderTextWithLinks(tok.slice(1, -1), `i-${idx}`)}</em>);
     }
     last = match.index + tok.length;
   }
   if (last < text.length) {
-    parts.push(text.slice(last));
+    parts.push(...renderTextWithLinks(text.slice(last), `e-${idx++}`));
   }
   return parts;
 }
 
-function MarkdownMessage({ text }) {
+export function MarkdownMessage({ text }) {
   const lines = String(text || '').split(/\r?\n/);
   const blocks = [];
   let i = 0;
@@ -178,11 +236,15 @@ export default function AiAssistantBar({ onNavigate }) {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, busy, minimized]);
 
-  async function handleRun(e) {
-    e.preventDefault();
-    const text = prompt.trim();
-    if (!text || busy) return;
-    const historyPayload = messages.map((m) => ({
+  const messagesRef = useRef([]);
+  const busyRef = useRef(false);
+  messagesRef.current = messages;
+  busyRef.current = busy;
+
+  async function runPrompt(rawText) {
+    const text = String(rawText || '').trim();
+    if (!text || busyRef.current) return;
+    const historyPayload = messagesRef.current.map((m) => ({
       role: m.role === 'assistant' ? 'model' : 'user',
       text: m.text,
     }));
@@ -195,9 +257,10 @@ export default function AiAssistantBar({ onNavigate }) {
         body: JSON.stringify({ prompt: text, history: historyPayload }),
       });
       const actions = Array.isArray(res?.actions) ? res.actions : [];
+      const pendingActions = Array.isArray(res?.pending_actions) ? res.pending_actions : [];
       setMessages((prev) => [
         ...prev,
-        { role: 'assistant', text: res?.reply || 'Done.', actions },
+        { role: 'assistant', text: res?.reply || 'Done.', actions, pendingActions },
       ]);
       if (actions.length > 0) {
         showToast(actions[0].summary, 'ok');
@@ -213,6 +276,61 @@ export default function AiAssistantBar({ onNavigate }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  useEffect(() => {
+    const onAiAsk = (ev) => {
+      const p = ev?.detail?.prompt;
+      if (!p) return;
+      setMinimized(false);
+      runPrompt(p);
+    };
+    window.addEventListener('dockethall:ai-ask', onAiAsk);
+    return () => window.removeEventListener('dockethall:ai-ask', onAiAsk);
+  }, []);
+
+  async function handleRun(e) {
+    e.preventDefault();
+    await runPrompt(prompt);
+  }
+
+  async function handleConfirm(msgIndex, pendingActions) {
+    if (busy || !Array.isArray(pendingActions) || pendingActions.length === 0) return;
+    setBusy(true);
+    try {
+      const res = await api('/api/ai/confirm', {
+        method: 'POST',
+        body: JSON.stringify({
+          pending_actions: pendingActions.map((p) => ({ tool: p.tool, args: p.args || {} })),
+        }),
+      });
+      const actions = Array.isArray(res?.actions) ? res.actions : [];
+      setMessages((prev) => [
+        ...prev.map((m, idx) => (idx === msgIndex ? { ...m, resolvedState: 'confirmed' } : m)),
+        { role: 'assistant', text: res?.reply || 'Done.', actions },
+      ]);
+      if (actions.length > 0) {
+        showToast(actions[0].summary, 'ok');
+        window.dispatchEvent(new CustomEvent('dockethall:ai-action', { detail: actions }));
+        if (actions[0].route) {
+          onNavigate?.(actions[0].route);
+        }
+      }
+    } catch (err) {
+      const msg = err.message || 'Failed to apply proposed changes';
+      setMessages((prev) => [...prev, { role: 'assistant', text: `Error: ${msg}`, isError: true }]);
+      showToast(msg, 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleCancel(msgIndex) {
+    if (busy) return;
+    setMessages((prev) => [
+      ...prev.map((m, idx) => (idx === msgIndex ? { ...m, resolvedState: 'cancelled' } : m)),
+      { role: 'assistant', text: 'Cancelled — no changes were made.' },
+    ]);
   }
 
   async function handleModelChange(nextModel) {
@@ -457,6 +575,52 @@ export default function AiAssistantBar({ onNavigate }) {
                 <div style={{ whiteSpace: 'pre-wrap' }}>{m.text}</div>
               ) : (
                 <MarkdownMessage text={m.text} />
+              )}
+              {Array.isArray(m.pendingActions) && m.pendingActions.length > 0 && (
+                <div
+                  style={{
+                    marginTop: '.45rem',
+                    padding: '.45rem .55rem',
+                    background: '#f8fafc',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '6px',
+                  }}
+                >
+                  <div style={{ fontSize: '.75rem', fontWeight: 700, color: '#334155', marginBottom: '.25rem' }}>
+                    Proposed Changes:
+                  </div>
+                  <ul style={{ margin: '0 0 .45rem 1.05rem', padding: 0, fontSize: '.78rem', color: '#1e293b' }}>
+                    {m.pendingActions.map((pa, j) => (
+                      <li key={j}>{pa.summary}</li>
+                    ))}
+                  </ul>
+                  {!m.resolvedState ? (
+                    <div style={{ display: 'flex', gap: '.4rem' }}>
+                      <button
+                        type="button"
+                        className="btn sm primary"
+                        disabled={busy}
+                        onClick={() => handleConfirm(i, m.pendingActions)}
+                        style={{ fontSize: '.75rem', padding: '.22rem .6rem' }}
+                      >
+                        Confirm
+                      </button>
+                      <button
+                        type="button"
+                        className="btn sm"
+                        disabled={busy}
+                        onClick={() => handleCancel(i)}
+                        style={{ fontSize: '.75rem', padding: '.22rem .6rem' }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="muted" style={{ fontSize: '.74rem', fontWeight: 600 }}>
+                      {m.resolvedState === 'confirmed' ? '✓ Confirmed' : '✕ Cancelled'}
+                    </span>
+                  )}
+                </div>
               )}
               {Array.isArray(m.actions) && m.actions.length > 0 && (
                 <div style={{ display: 'flex', gap: '.35rem', flexWrap: 'wrap', marginTop: '.4rem' }}>
