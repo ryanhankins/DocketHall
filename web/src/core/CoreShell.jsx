@@ -241,7 +241,7 @@ export default function CoreShell() {
     if (routePath === 'calendar-manage' || routePath === 'preferences-calendar') {
       setOpenSubmenus(prev => (prev['calendar-staff'] ? prev : { ...prev, 'calendar-staff': true }));
     }
-    if (['users', 'modules', 'preferences-general', 'blog-admin', 'integrations', 'audit', 'preferences-backup', 'billing', 'sla-rules'].includes(routePath)) {
+    if (['users', 'modules', 'preferences-general', 'integrations', 'audit', 'preferences-backup', 'sla-rules'].includes(routePath)) {
       setOpenSubmenus(prev => (prev['admin-section'] ? prev : { ...prev, 'admin-section': true }));
     }
   }, [hash]);
@@ -640,15 +640,13 @@ export default function CoreShell() {
               );
             })}
 
-            {effectiveNavView === 'staff' && (isAdmin || canManageSettings || canManageBlog) && (() => {
+            {effectiveNavView === 'staff' && (isAdmin || canManageSettings) && (() => {
               const adminItems = [
                 isAdmin && { section: 'users', label: 'Manage Users' },
                 isAdmin && { section: 'modules', label: 'Manage Modules' },
                 canManageSettings && { section: 'preferences-general', label: 'General & Branding' },
-                canManageBlog && { section: 'blog-admin', label: 'Blog Settings & Feed' },
                 isAdmin && { section: 'integrations', label: 'Email & Integrations' },
                 isAdmin && { section: 'audit', label: 'Audit Log' },
-                canManageSettings && { section: 'billing', label: 'Utility Bills & Citations' },
                 canManageSettings && { section: 'sla-rules', label: 'SLA & Escalations' },
                 canManageSettings && { section: 'preferences-backup', label: 'Backup & Restore' },
               ].filter(Boolean);
