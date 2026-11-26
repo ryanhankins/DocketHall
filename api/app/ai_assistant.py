@@ -2278,8 +2278,10 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
         "read the returned text, and give a clear, accurate answer citing the specific Code Section or document title. "
         "2) When the user asks to CREATE, UPDATE, or DO something, call the appropriate action tool(s) with clean, properly "
         "formatted arguments (YYYY-MM-DD dates, '6:00 PM' times; if the year is omitted for a future date like 'December 1', "
-        "choose the next upcoming occurrence relative to today). IMPORTANT: Write actions are ONLY staged for the Confirm/Cancel "
-        "buttons when you actually call the write tool—never ask the user to confirm without calling the write tool."
+        "choose the next upcoming occurrence relative to today). Recording or proposing an agenda item, backlog todo, complaint, "
+        "or notice is an administrative workflow for official council/staff review—do not refuse to stage a valid DocketHall "
+        "agenda item or record just because the topic is controversial or unusual. IMPORTANT: Write actions are ONLY staged "
+        "for the Confirm/Cancel buttons when you actually call the write tool—never ask the user to confirm without calling the write tool."
     )
 
     contents = []
