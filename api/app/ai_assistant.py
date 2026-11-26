@@ -836,14 +836,29 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                     "ok": False,
                     "error": f"Agenda #{ag_id} ('{ag_exists[1]}') is finalized and cannot be modified.",
                 }, None
-            max_pos = conn.execute("SELECT COALESCE(MAX(position), 0) FROM agenda_items WHERE agenda_id = %s", (ag_id,)).fetchone()[0]
             title = str(args.get("title") or "").strip()
             section_name = str(args.get("section_name") or "New Business").strip()
             desc = str(args.get("description") or "").strip()
+            sec_match = conn.execute(
+                "SELECT section, MAX(position) FROM agenda_items "
+                "WHERE agenda_id = %s AND LOWER(trim(section)) = LOWER(trim(%s)) "
+                "GROUP BY section ORDER BY MAX(position) DESC LIMIT 1",
+                (ag_id, section_name),
+            ).fetchone()
+            if sec_match:
+                section_name = sec_match[0]
+                insert_pos = int(sec_match[1]) + 1
+                conn.execute(
+                    "UPDATE agenda_items SET position = position + 1 WHERE agenda_id = %s AND position >= %s",
+                    (ag_id, insert_pos),
+                )
+            else:
+                max_pos = conn.execute("SELECT COALESCE(MAX(position), 0) FROM agenda_items WHERE agenda_id = %s", (ag_id,)).fetchone()[0]
+                insert_pos = int(max_pos) + 1
             row = conn.execute(
                 "INSERT INTO agenda_items (agenda_id, position, title, section, description) "
                 "VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                (ag_id, max_pos + 1, title, section_name, desc),
+                (ag_id, insert_pos, title, section_name, desc),
             ).fetchone()
             return (
                 {"ok": True, "item_id": row[0], "agenda_id": ag_id, "title": title, "section_name": section_name},
