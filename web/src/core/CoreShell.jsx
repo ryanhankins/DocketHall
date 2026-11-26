@@ -54,6 +54,13 @@ export default function CoreShell() {
   const [backlogDueCount, setBacklogDueCount] = useState(0);
   const [hash, setHash] = useState(() => getWorkspaceRoute());
   const [menuFilter, setMenuFilter] = useState('');
+  const [navView, setNavView] = useState(() => {
+    try {
+      const saved = localStorage.getItem('dockethall.navView');
+      if (saved === 'staff' || saved === 'member') return saved;
+    } catch { /* ignore storage errors */ }
+    return 'staff';
+  });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [openSubmenus, setOpenSubmenus] = useState(() => {
     try {
@@ -72,15 +79,35 @@ export default function CoreShell() {
     } catch { /* ignore storage errors */ }
   }, [openSubmenus]);
 
-  const moduleMenus = useMemo(() => (
-    modulesMeta
+  useEffect(() => {
+    try {
+      localStorage.setItem('dockethall.navView', navView);
+    } catch { /* ignore storage errors */ }
+  }, [navView]);
+
+  const { staffModuleMenus, memberModuleMenus } = useMemo(() => {
+    const buildMenus = (predicate) => modulesMeta
       .map(mod => ({
         id: mod.id,
         name: mod.name,
-        items: (mod.nav_groups || []).flatMap(grp => grp.items || []),
+        items: (mod.nav_groups || []).filter(predicate).flatMap(grp => grp.items || []),
       }))
-      .filter(mod => mod.items.length > 0)
-  ), [modulesMeta]);
+      .filter(mod => mod.items.length > 0);
+    return {
+      staffModuleMenus: buildMenus(grp => grp.section_title === 'Staff'),
+      memberModuleMenus: buildMenus(grp => grp.section_title !== 'Staff'),
+    };
+  }, [modulesMeta]);
+
+  const isAdmin = me?.role === 'admin';
+  const canManageSettings = hasPermission(me, 'settings.manage') || hasPermission(me, 'agendas.manage');
+  const canManageBlog = hasPermission(me, 'blog.manage');
+  const hasStaffView = staffModuleMenus.length > 0 || isAdmin || canManageSettings || canManageBlog;
+  const hasMemberView = memberModuleMenus.length > 0;
+  const effectiveNavView = (hasStaffView && hasMemberView)
+    ? navView
+    : (hasStaffView ? 'staff' : 'member');
+  const moduleMenus = effectiveNavView === 'staff' ? staffModuleMenus : memberModuleMenus;
 
   const collapsibleGroupIds = useMemo(
     () => moduleMenus.filter(m => m.items.length > 1).map(m => m.id),
@@ -198,10 +225,6 @@ export default function CoreShell() {
     setHash(clean);
     setMobileNavOpen(false);
   }, []);
-
-  const canManageSettings = hasPermission(me, 'settings.manage') || hasPermission(me, 'agendas.manage');
-  const canManageBlog = hasPermission(me, 'blog.manage');
-  const isAdmin = me?.role === 'admin';
 
   // Auto-open submenu when active route belongs to it
   useEffect(() => {
@@ -445,15 +468,75 @@ export default function CoreShell() {
       <div className="shell">
         {me && (
           <nav id="menu" className={mobileNavOpen ? 'mobile-open' : ''}>
-            <div style={{ marginBottom: '.45rem', paddingBottom: '.45rem', borderBottom: '1px solid #e2e8f0' }}>
-              <button
-                type="button"
-                className={activeSection === 'my-account' ? 'active' : ''}
-                onClick={() => navigate('#my-account')}
+            {hasStaffView && hasMemberView && (
+              <div
+                role="tablist"
+                aria-label="Workspace view"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr',
+                  gap: '.25rem',
+                  padding: '.25rem',
+                  background: '#f1f5f9',
+                  borderRadius: '8px',
+                  marginBottom: '.55rem',
+                }}
               >
-                My Civic Account
-              </button>
-            </div>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={effectiveNavView === 'staff'}
+                  onClick={() => setNavView('staff')}
+                  style={{
+                    margin: 0,
+                    padding: '.35rem .4rem',
+                    fontSize: '.78rem',
+                    fontWeight: effectiveNavView === 'staff' ? 700 : 500,
+                    borderRadius: '6px',
+                    border: 'none',
+                    textAlign: 'center',
+                    background: effectiveNavView === 'staff' ? '#fff' : 'transparent',
+                    color: effectiveNavView === 'staff' ? '#0f172a' : '#475569',
+                    boxShadow: effectiveNavView === 'staff' ? '0 1px 2px rgba(15,23,42,.08)' : 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Staff / Admin
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={effectiveNavView === 'member'}
+                  onClick={() => setNavView('member')}
+                  style={{
+                    margin: 0,
+                    padding: '.35rem .4rem',
+                    fontSize: '.78rem',
+                    fontWeight: effectiveNavView === 'member' ? 700 : 500,
+                    borderRadius: '6px',
+                    border: 'none',
+                    textAlign: 'center',
+                    background: effectiveNavView === 'member' ? '#fff' : 'transparent',
+                    color: effectiveNavView === 'member' ? '#0f172a' : '#475569',
+                    boxShadow: effectiveNavView === 'member' ? '0 1px 2px rgba(15,23,42,.08)' : 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Resident / Member
+                </button>
+              </div>
+            )}
+            {(effectiveNavView === 'member' || !hasStaffView) && (
+              <div style={{ marginBottom: '.45rem', paddingBottom: '.45rem', borderBottom: '1px solid #e2e8f0' }}>
+                <button
+                  type="button"
+                  className={activeSection === 'my-account' ? 'active' : ''}
+                  onClick={() => navigate('#my-account')}
+                >
+                  My Civic Account
+                </button>
+              </div>
+            )}
             {(moduleMenus.reduce((acc, m) => acc + m.items.length, 0) >= 6 || isAdmin || canManageSettings || canManageBlog) && (
               <input
                 type="search"
@@ -557,7 +640,7 @@ export default function CoreShell() {
               );
             })}
 
-            {(isAdmin || canManageSettings || canManageBlog) && (() => {
+            {effectiveNavView === 'staff' && (isAdmin || canManageSettings || canManageBlog) && (() => {
               const adminItems = [
                 isAdmin && { section: 'users', label: 'Manage Users' },
                 isAdmin && { section: 'modules', label: 'Manage Modules' },
