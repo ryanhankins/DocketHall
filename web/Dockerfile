@@ -13,7 +13,14 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+FROM node:20-alpine AS builder
+WORKDIR /src
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY . .
+RUN npm run build
+
 FROM nginx:1.27-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 COPY security_headers.conf /etc/nginx/security_headers.conf
-COPY dist /usr/share/nginx/html
+COPY --from=builder /src/dist /usr/share/nginx/html
