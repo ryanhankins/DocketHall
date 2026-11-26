@@ -145,7 +145,14 @@ def test_ai_allowed_in_demo_mode_while_config_blocked(admin_client, monkeypatch)
     admin_client.put("/api/modules/admin/ai_assistant", json={"enabled": True})
     monkeypatch.setenv("DEMO_MODE", "true")
 
-    # Config changes remain blocked in demo mode
+    # Config changes remain blocked in demo mode, and model/cap are forced to 3.5-flash-lite + $1/day
+    st_demo = admin_client.get("/api/ai/status")
+    assert st_demo.status_code == 200
+    assert st_demo.json()["model"] == "gemini-3.5-flash-lite"
+    assert st_demo.json()["daily_spend_limit_usd"] == 1.0
+    assert st_demo.json()["available_models"] == ["gemini-3.5-flash-lite"]
+    assert st_demo.json()["can_configure"] is False
+
     r_put = admin_client.put("/api/ai/config", json={"model": "gemini-3.8-flash", "daily_spend_limit_usd": 100})
     assert r_put.status_code == 403
     r_del = admin_client.delete("/api/ai/config")

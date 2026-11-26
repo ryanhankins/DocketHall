@@ -30,14 +30,16 @@ from pydantic import BaseModel, Field
 from psycopg.types.json import Jsonb
 
 from .audit import record_audit
-from .auth import current_user, has_permission, require_admin, require_not_demo_mode, require_permission
+from .auth import current_user, has_permission, is_demo_mode, require_admin, require_not_demo_mode, require_permission
 from .db import pool
 from .registry import is_module_enabled
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
 DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+DEMO_GEMINI_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_DAILY_SPEND_LIMIT_USD = 1.00
+DEMO_DAILY_SPEND_LIMIT_USD = 1.00
 _ALLOWED_MODELS = (
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
@@ -86,14 +88,15 @@ def _load_gemini_settings() -> tuple[str, str, str, float]:
         ).fetchone()
     cfg = row[2] if row and isinstance(row[2], dict) else {}
     limit = _parse_daily_limit(cfg)
+    demo = is_demo_mode()
     if row and row[0] and (row[1] or "").strip():
-        model = (cfg.get("model") or DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
-        return row[1].strip(), model, "integrations", limit
+        model = DEMO_GEMINI_MODEL if demo else ((cfg.get("model") or DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL)
+        return row[1].strip(), model, "integrations", (DEMO_DAILY_SPEND_LIMIT_USD if demo else limit)
     env_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
     if env_key:
-        env_model = (os.environ.get("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
-        return env_key, env_model, "env", limit
-    return "", DEFAULT_GEMINI_MODEL, "none", limit
+        env_model = DEMO_GEMINI_MODEL if demo else ((os.environ.get("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL)
+        return env_key, env_model, "env", (DEMO_DAILY_SPEND_LIMIT_USD if demo else limit)
+    return "", (DEMO_GEMINI_MODEL if demo else DEFAULT_GEMINI_MODEL), "none", (DEMO_DAILY_SPEND_LIMIT_USD if demo else limit)
 
 
 def _load_gemini_config() -> tuple[str, str, str]:
@@ -2636,14 +2639,15 @@ def get_ai_status(user: dict = Depends(_require_ai_user)):
     key, model, source, limit = _load_gemini_settings()
     today_spend, today_requests = _get_today_usage()
     remaining = round(max(0.0, limit - today_spend), 6) if limit > 0 else None
+    demo = is_demo_mode()
     return {
         "enabled": is_module_enabled("ai_assistant"),
         "configured": bool(key),
-        "can_configure": user.get("role") == "admin",
+        "can_configure": (False if demo else user.get("role") == "admin"),
         "allowed_tools_count": len(_allowed_tools_for_user(user)),
         "model": model,
         "source": source,
-        "available_models": list(_ALLOWED_MODELS),
+        "available_models": ([DEMO_GEMINI_MODEL] if demo else list(_ALLOWED_MODELS)),
         "daily_spend_limit_usd": limit,
         "today_spend_usd": round(today_spend, 6),
         "today_requests": today_requests,
