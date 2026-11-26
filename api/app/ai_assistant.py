@@ -153,7 +153,7 @@ _TOOL_DECLARATIONS = [
     },
     {
         "name": "create_notice",
-        "description": "Create a public notice, news item, bid, or job posting.",
+        "description": "Create a NEW public notice, news item, bid, or job posting. Do not use to edit or publish an existing notice; use update_notice instead.",
         "parameters": {
             "type": "OBJECT",
             "properties": {
@@ -167,8 +167,36 @@ _TOOL_DECLARATIONS = [
         },
     },
     {
+        "name": "list_notices",
+        "description": "List or search existing City Notices, News, Bids/RFPs, and Job Postings (including drafts).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "search": {"type": "STRING", "description": "Optional keyword/title filter"},
+                "status": {"type": "STRING", "description": "Optional filter: 'all', 'draft', or 'published'"},
+                "limit": {"type": "INTEGER", "description": "Max notices to return (default 10)"},
+            },
+        },
+    },
+    {
+        "name": "update_notice",
+        "description": "Update, publish, or unpublish an existing City Notice by notice_id or title_match.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "notice_id": {"type": "INTEGER", "description": "Numeric ID of the notice"},
+                "title_match": {"type": "STRING", "description": "Existing notice title to match if notice_id is unknown"},
+                "title": {"type": "STRING", "description": "Updated title"},
+                "category": {"type": "STRING", "description": "Updated category: 'Notice', 'News', 'Bid / RFP', or 'Job Posting'"},
+                "summary": {"type": "STRING", "description": "Updated summary"},
+                "body": {"type": "STRING", "description": "Updated body text"},
+                "is_public": {"type": "BOOLEAN", "description": "Set true to publish or false to unpublish to draft"},
+            },
+        },
+    },
+    {
         "name": "create_blog_post",
-        "description": "Create a City Blog article (draft or published).",
+        "description": "Create a NEW City Blog article (draft or published). Do not use to publish or edit an existing post; use list_blog_posts and update_blog_post instead.",
         "parameters": {
             "type": "OBJECT",
             "properties": {
@@ -178,6 +206,33 @@ _TOOL_DECLARATIONS = [
                 "is_published": {"type": "BOOLEAN", "description": "Publish immediately (default false = draft)"},
             },
             "required": ["title", "body"],
+        },
+    },
+    {
+        "name": "list_blog_posts",
+        "description": "List or search existing City Blog posts (including drafts and published articles).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "search": {"type": "STRING", "description": "Optional keyword/title filter"},
+                "status": {"type": "STRING", "description": "Optional filter: 'all', 'draft', or 'published'"},
+                "limit": {"type": "INTEGER", "description": "Max posts to return (default 10)"},
+            },
+        },
+    },
+    {
+        "name": "update_blog_post",
+        "description": "Update, publish, or unpublish an existing City Blog post by post_id or title_match.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "post_id": {"type": "INTEGER", "description": "Numeric ID of the blog post"},
+                "title_match": {"type": "STRING", "description": "Existing blog post title or slug to match if post_id is unknown"},
+                "title": {"type": "STRING", "description": "Updated post title"},
+                "summary": {"type": "STRING", "description": "Updated excerpt / lead-in"},
+                "body": {"type": "STRING", "description": "Updated article body"},
+                "is_published": {"type": "BOOLEAN", "description": "Set true to publish or false to revert to draft"},
+            },
         },
     },
     {
@@ -447,7 +502,7 @@ _TOOL_DECLARATIONS = [
     },
     {
         "name": "create_page",
-        "description": "Create a custom City Information Page.",
+        "description": "Create a NEW custom City Information Page. Do not use to publish or edit an existing page; use list_pages and update_page instead.",
         "parameters": {
             "type": "OBJECT",
             "properties": {
@@ -457,6 +512,32 @@ _TOOL_DECLARATIONS = [
                 "is_public": {"type": "BOOLEAN", "description": "Publish publicly (default true)"},
             },
             "required": ["title", "body"],
+        },
+    },
+    {
+        "name": "list_pages",
+        "description": "List or search existing City Information Pages (including unpublished drafts).",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "search": {"type": "STRING", "description": "Optional keyword/title filter"},
+                "limit": {"type": "INTEGER", "description": "Max pages to return (default 10)"},
+            },
+        },
+    },
+    {
+        "name": "update_page",
+        "description": "Update, publish, or unpublish an existing City Information Page by page_id or title_match.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "page_id": {"type": "INTEGER", "description": "Numeric ID of the page"},
+                "title_match": {"type": "STRING", "description": "Existing page title or slug to match if page_id is unknown"},
+                "title": {"type": "STRING", "description": "Updated page title"},
+                "summary": {"type": "STRING", "description": "Updated summary"},
+                "body": {"type": "STRING", "description": "Updated page content"},
+                "is_public": {"type": "BOOLEAN", "description": "Set true to publish or false to unpublish"},
+            },
         },
     },
     {
@@ -722,11 +803,17 @@ _TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "list_agendas": ("agendas", ("agendas.manage", "agendas.submit")),
     "finalize_agenda": ("agendas", ("agendas.manage",)),
     "create_notice": ("communications", ("notices.manage",)),
+    "list_notices": ("communications", ("notices.manage",)),
+    "update_notice": ("communications", ("notices.manage",)),
     "create_blog_post": ("communications", ("blog.manage",)),
+    "list_blog_posts": ("communications", ("blog.manage",)),
+    "update_blog_post": ("communications", ("blog.manage",)),
     "update_urgent_alert": ("communications", ("notices.manage", "pages.manage")),
     "create_directory_entry": ("communications", ("directory.manage",)),
     "create_faq": ("communications", ("directory.manage",)),
     "create_page": ("communications", ("pages.manage",)),
+    "list_pages": ("communications", ("pages.manage",)),
+    "update_page": ("communications", ("pages.manage",)),
     "search_portal_info": ("communications", ()),
     "create_calendar_event": ("calendar", ("calendar.manage",)),
     "create_permit": ("permits", ("permits.manage", "permits.submit")),
@@ -803,6 +890,47 @@ def _find_active_facility(conn, fname_req: str):
                 tuple(f"%{t}%" for t in terms),
             ).fetchone()
     return fac
+
+
+def _find_cms_record(conn, table: str, rec_id, title_match: str, *, has_slug: bool = True):
+    """Find a CMS row (blog_posts, city_notices, city_pages) by ID, exact slug/title, or fuzzy title."""
+    if rec_id is not None:
+        try:
+            rid = int(rec_id)
+            row = conn.execute(f"SELECT id, title FROM {table} WHERE id = %s", (rid,)).fetchone()
+            if row:
+                return row
+        except (TypeError, ValueError):
+            pass
+    match = (title_match or "").strip()
+    if not match:
+        return None
+    if has_slug:
+        slug_guess = _slugify(match, "")
+        if slug_guess:
+            row = conn.execute(
+                f"SELECT id, title FROM {table} WHERE slug = %s ORDER BY id DESC LIMIT 1",
+                (slug_guess,),
+            ).fetchone()
+            if row:
+                return row
+    row = conn.execute(
+        f"SELECT id, title FROM {table} WHERE LOWER(trim(title)) = LOWER(%s) ORDER BY id DESC LIMIT 1",
+        (match,),
+    ).fetchone()
+    if row:
+        return row
+    return conn.execute(
+        f"SELECT id, title FROM {table} WHERE title ILIKE %s ORDER BY id DESC LIMIT 1",
+        (f"%{match}%",),
+    ).fetchone()
+
+
+def _format_blog_body(body_txt: str) -> str:
+    txt = body_txt.strip()
+    if not txt:
+        return ""
+    return txt if txt.lstrip().startswith("<") else f"<p>{txt}</p>"
 
 
 def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]:
@@ -964,6 +1092,27 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             summary = str(args.get("summary") or "").strip()
             body_txt = str(args.get("body") or summary or title).strip()
             is_pub = bool(args.get("is_public", True))
+            existing = conn.execute(
+                "SELECT id, is_published FROM city_notices WHERE LOWER(trim(title)) = LOWER(%s) ORDER BY id DESC LIMIT 1",
+                (title,),
+            ).fetchone()
+            if existing:
+                if not existing[1] and is_pub:
+                    conn.execute(
+                        "UPDATE city_notices SET category = %s, "
+                        "summary = COALESCE(NULLIF(%s, ''), summary), "
+                        "body = COALESCE(NULLIF(%s, ''), body), "
+                        "is_published = TRUE, updated_at = now() WHERE id = %s",
+                        (cat, summary, body_txt, existing[0]),
+                    )
+                    return (
+                        {"ok": True, "notice_id": existing[0], "title": title, "category": cat, "is_published": True, "updated_existing": True},
+                        {"tool": name, "summary": f"Published existing notice: {title}", "route": "/app/notices-manage"},
+                    )
+                return (
+                    {"ok": False, "error": f"A notice titled '{title}' already exists (notice_id={existing[0]}). Use update_notice to modify or publish/unpublish it."},
+                    None,
+                )
             row = conn.execute(
                 "INSERT INTO city_notices (title, category, summary, body, is_published, created_by) "
                 "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
@@ -974,15 +1123,103 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                 {"tool": name, "summary": f"Created {cat}: {title}", "route": "/app/notices-manage"},
             )
 
+        if name == "list_notices":
+            lim = max(1, min(int(args.get("limit") or 10), 25))
+            q = str(args.get("search") or "").strip()
+            st = str(args.get("status") or "all").strip().lower()
+            clauses = ["1=1"]
+            params: list = []
+            if st == "draft":
+                clauses.append("is_published = FALSE")
+            elif st == "published":
+                clauses.append("is_published = TRUE")
+            if q:
+                clauses.append("(title ILIKE %s OR summary ILIKE %s)")
+                params.extend([f"%{q}%", f"%{q}%"])
+            params.append(lim)
+            rows = conn.execute(
+                f"SELECT id, title, category, summary, is_published, publish_at FROM city_notices WHERE {' AND '.join(clauses)} ORDER BY id DESC LIMIT %s",
+                tuple(params),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "notices": [
+                        {
+                            "id": r[0],
+                            "title": r[1],
+                            "category": r[2],
+                            "summary": r[3],
+                            "is_published": r[4],
+                            "publish_at": r[5].isoformat() if r[5] else None,
+                        }
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "update_notice":
+            target = _find_cms_record(conn, "city_notices", args.get("notice_id"), str(args.get("title_match") or args.get("title") or ""), has_slug=False)
+            if not target:
+                return ({"ok": False, "error": "Notice not found. Use list_notices to find the notice ID or exact title."}, None)
+            nid, current_title = target
+            sets = ["updated_at = now()"]
+            params_u: list = []
+            if args.get("title"):
+                sets.append("title = %s")
+                params_u.append(str(args["title"]).strip())
+            if args.get("category"):
+                raw_cat = str(args["category"]).strip().lower()
+                cat_map = {"notice": "notice", "news": "news", "bid": "bid", "bid / rfp": "bid", "rfp": "bid", "job": "job", "job posting": "job"}
+                sets.append("category = %s")
+                params_u.append(cat_map.get(raw_cat, "notice"))
+            if "summary" in args and args["summary"] is not None:
+                sets.append("summary = %s")
+                params_u.append(str(args["summary"]).strip())
+            if args.get("body"):
+                sets.append("body = %s")
+                params_u.append(str(args["body"]).strip())
+            if "is_public" in args and args["is_public"] is not None:
+                sets.append("is_published = %s")
+                params_u.append(bool(args["is_public"]))
+            params_u.append(nid)
+            row = conn.execute(
+                f"UPDATE city_notices SET {', '.join(sets)} WHERE id = %s RETURNING id, title, is_published",
+                tuple(params_u),
+            ).fetchone()
+            return (
+                {"ok": True, "notice_id": row[0], "title": row[1], "is_published": row[2]},
+                {"tool": name, "summary": f"Updated notice '{row[1]}' ({'published' if row[2] else 'draft'})", "route": "/app/notices-manage"},
+            )
+
         if name == "create_blog_post":
             title = str(args.get("title") or "").strip()
             summary = str(args.get("summary") or "").strip()
             body_txt = str(args.get("body") or "").strip()
             is_pub = bool(args.get("is_published", False))
             slug = _slugify(title, "post")
-            exists = conn.execute("SELECT 1 FROM blog_posts WHERE slug = %s", (slug,)).fetchone()
-            if exists:
-                slug = f"{slug}-{int(datetime.now(timezone.utc).timestamp()) % 10000}"
+            existing = conn.execute(
+                "SELECT id, is_published, slug FROM blog_posts WHERE slug = %s OR LOWER(trim(title)) = LOWER(%s) ORDER BY id DESC LIMIT 1",
+                (slug, title),
+            ).fetchone()
+            if existing:
+                if not existing[1] and is_pub:
+                    conn.execute(
+                        "UPDATE blog_posts SET "
+                        "lead_in = COALESCE(NULLIF(%s, ''), lead_in), "
+                        "body = COALESCE(NULLIF(%s, ''), body), "
+                        "is_published = TRUE, updated_at = now() WHERE id = %s",
+                        (summary, _format_blog_body(body_txt), existing[0]),
+                    )
+                    return (
+                        {"ok": True, "post_id": existing[0], "slug": existing[2], "title": title, "is_published": True, "updated_existing": True},
+                        {"tool": name, "summary": f"Published existing blog post: {title}", "route": "/app/blog-manage"},
+                    )
+                return (
+                    {"ok": False, "error": f"A blog post titled '{title}' already exists (post_id={existing[0]}, slug={existing[2]}). Use update_blog_post to modify or publish/unpublish it."},
+                    None,
+                )
             cat_row = conn.execute("SELECT id FROM blog_categories ORDER BY id ASC LIMIT 1").fetchone()
             if not cat_row:
                 cat_row = conn.execute(
@@ -991,11 +1228,76 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             row = conn.execute(
                 "INSERT INTO blog_posts (category_id, slug, title, lead_in, body, is_published, author_name) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id, slug",
-                (cat_row[0], slug, title, summary, f"<p>{body_txt}</p>", is_pub, username),
+                (cat_row[0], slug, title, summary, _format_blog_body(body_txt), is_pub, username),
             ).fetchone()
             return (
                 {"ok": True, "post_id": row[0], "slug": row[1], "title": title, "is_published": is_pub},
                 {"tool": name, "summary": f"Created blog post ({'published' if is_pub else 'draft'}): {title}", "route": "/app/blog-manage"},
+            )
+
+        if name == "list_blog_posts":
+            lim = max(1, min(int(args.get("limit") or 10), 25))
+            q = str(args.get("search") or "").strip()
+            st = str(args.get("status") or "all").strip().lower()
+            clauses = ["1=1"]
+            params_b: list = []
+            if st == "draft":
+                clauses.append("is_published = FALSE")
+            elif st == "published":
+                clauses.append("is_published = TRUE")
+            if q:
+                clauses.append("(title ILIKE %s OR lead_in ILIKE %s OR slug ILIKE %s)")
+                params_b.extend([f"%{q}%", f"%{q}%", f"%{q}%"])
+            params_b.append(lim)
+            rows = conn.execute(
+                f"SELECT id, slug, title, lead_in, is_published, publish_at FROM blog_posts WHERE {' AND '.join(clauses)} ORDER BY id DESC LIMIT %s",
+                tuple(params_b),
+            ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "posts": [
+                        {
+                            "id": r[0],
+                            "slug": r[1],
+                            "title": r[2],
+                            "summary": r[3],
+                            "is_published": r[4],
+                            "publish_at": r[5].isoformat() if r[5] else None,
+                        }
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "update_blog_post":
+            target = _find_cms_record(conn, "blog_posts", args.get("post_id"), str(args.get("title_match") or args.get("title") or ""), has_slug=True)
+            if not target:
+                return ({"ok": False, "error": "Blog post not found. Use list_blog_posts to find the post ID or exact title."}, None)
+            pid, _ = target
+            sets = ["updated_at = now()"]
+            params_bu: list = []
+            if args.get("title"):
+                sets.append("title = %s")
+                params_bu.append(str(args["title"]).strip())
+            if "summary" in args and args["summary"] is not None:
+                sets.append("lead_in = %s")
+                params_bu.append(str(args["summary"]).strip())
+            if args.get("body"):
+                sets.append("body = %s")
+                params_bu.append(_format_blog_body(str(args["body"])))
+            if "is_published" in args and args["is_published"] is not None:
+                sets.append("is_published = %s")
+                params_bu.append(bool(args["is_published"]))
+            params_bu.append(pid)
+            row = conn.execute(
+                f"UPDATE blog_posts SET {', '.join(sets)} WHERE id = %s RETURNING id, slug, title, is_published",
+                tuple(params_bu),
+            ).fetchone()
+            return (
+                {"ok": True, "post_id": row[0], "slug": row[1], "title": row[2], "is_published": row[3]},
+                {"tool": name, "summary": f"Updated blog post '{row[2]}' ({'published' if row[3] else 'draft'})", "route": "/app/blog-manage"},
             )
 
         if name == "create_calendar_event":
@@ -1576,16 +1878,95 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             body_txt = str(args.get("body") or "").strip()
             is_pub = bool(args.get("is_public", True))
             slug = _slugify(title, "page")
-            if conn.execute("SELECT 1 FROM city_pages WHERE slug = %s", (slug,)).fetchone():
-                slug = f"{slug}-{int(datetime.now(timezone.utc).timestamp()) % 10000}"
+            existing = conn.execute(
+                "SELECT id, is_public, slug FROM city_pages WHERE slug = %s OR LOWER(trim(title)) = LOWER(%s) ORDER BY id DESC LIMIT 1",
+                (slug, title),
+            ).fetchone()
+            if existing:
+                if not existing[1] and is_pub:
+                    conn.execute(
+                        "UPDATE city_pages SET "
+                        "summary = COALESCE(NULLIF(%s, ''), summary), "
+                        "body = COALESCE(NULLIF(%s, ''), body), "
+                        "is_public = TRUE, updated_by = %s, updated_at = now() WHERE id = %s",
+                        (summary, body_txt, username, existing[0]),
+                    )
+                    return (
+                        {"ok": True, "page_id": existing[0], "slug": existing[2], "title": title, "is_public": True, "updated_existing": True},
+                        {"tool": name, "summary": f"Published existing page: {title}", "route": "/app/pages-manage"},
+                    )
+                return (
+                    {"ok": False, "error": f"A page titled '{title}' already exists (page_id={existing[0]}, slug={existing[2]}). Use update_page to modify or publish/unpublish it."},
+                    None,
+                )
             row = conn.execute(
                 "INSERT INTO city_pages (slug, title, summary, body, is_public, updated_by) "
                 "VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, slug",
                 (slug, title, summary, body_txt, is_pub, username),
             ).fetchone()
             return (
-                {"ok": True, "page_id": row[0], "slug": row[1], "title": title},
+                {"ok": True, "page_id": row[0], "slug": row[1], "title": title, "is_public": is_pub},
                 {"tool": name, "summary": f"Created page: {title}", "route": "/app/pages-manage"},
+            )
+
+        if name == "list_pages":
+            lim = max(1, min(int(args.get("limit") or 10), 25))
+            q = str(args.get("search") or "").strip()
+            if q:
+                rows = conn.execute(
+                    "SELECT id, slug, title, summary, is_public, updated_at FROM city_pages WHERE title ILIKE %s OR summary ILIKE %s OR slug ILIKE %s ORDER BY id DESC LIMIT %s",
+                    (f"%{q}%", f"%{q}%", f"%{q}%", lim),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, slug, title, summary, is_public, updated_at FROM city_pages ORDER BY id DESC LIMIT %s",
+                    (lim,),
+                ).fetchall()
+            return (
+                {
+                    "ok": True,
+                    "pages": [
+                        {
+                            "id": r[0],
+                            "slug": r[1],
+                            "title": r[2],
+                            "summary": r[3],
+                            "is_public": r[4],
+                            "updated_at": r[5].isoformat() if r[5] else None,
+                        }
+                        for r in rows
+                    ],
+                },
+                None,
+            )
+
+        if name == "update_page":
+            target = _find_cms_record(conn, "city_pages", args.get("page_id"), str(args.get("title_match") or args.get("title") or ""), has_slug=True)
+            if not target:
+                return ({"ok": False, "error": "Page not found. Use list_pages to find the page ID or exact title."}, None)
+            pg_id, _ = target
+            sets = ["updated_by = %s", "updated_at = now()"]
+            params_p: list = [username]
+            if args.get("title"):
+                sets.append("title = %s")
+                params_p.append(str(args["title"]).strip())
+            if "summary" in args and args["summary"] is not None:
+                sets.append("summary = %s")
+                params_p.append(str(args["summary"]).strip())
+            if args.get("body"):
+                sets.append("body = %s")
+                params_p.append(str(args["body"]).strip())
+            if "is_public" in args and args["is_public"] is not None:
+                sets.append("is_public = %s")
+                params_p.append(bool(args["is_public"]))
+            params_p.append(pg_id)
+            row = conn.execute(
+                f"UPDATE city_pages SET {', '.join(sets)} WHERE id = %s RETURNING id, slug, title, is_public",
+                tuple(params_p),
+            ).fetchone()
+            return (
+                {"ok": True, "page_id": row[0], "slug": row[1], "title": row[2], "is_public": row[3]},
+                {"tool": name, "summary": f"Updated page '{row[2]}' ({'published' if row[3] else 'draft'})", "route": "/app/pages-manage"},
             )
 
         if name == "add_contractor_license":
@@ -2273,6 +2654,9 @@ _READ_ONLY_TOOLS = {
     "list_facilities",
     "list_utility_bills",
     "list_citations",
+    "list_notices",
+    "list_blog_posts",
+    "list_pages",
 }
 
 
@@ -2292,8 +2676,15 @@ def _describe_proposed_action(name: str, args: dict) -> str:
         return f"Add backlog todo '{a.get('title', '')}'{due}"
     if name == "create_notice":
         return f"Post notice '{a.get('title', '')}' ({a.get('category') or 'general'})"
+    if name == "update_notice":
+        verb = "Publish" if a.get("is_public") is True else ("Unpublish" if a.get("is_public") is False else "Update")
+        return f"{verb} notice {a.get('title') or a.get('title_match') or '#' + str(a.get('notice_id', ''))}"
     if name == "create_blog_post":
-        return f"Publish blog post '{a.get('title', '')}'"
+        verb = "Publish" if a.get("is_published") else "Create draft"
+        return f"{verb} blog post '{a.get('title', '')}'"
+    if name == "update_blog_post":
+        verb = "Publish" if a.get("is_published") is True else ("Unpublish" if a.get("is_published") is False else "Update")
+        return f"{verb} blog post {a.get('title') or a.get('title_match') or '#' + str(a.get('post_id', ''))}"
     if name == "create_calendar_event":
         return f"Create calendar event '{a.get('title', '')}' on {a.get('event_date', '')}"
     if name == "create_facility":
@@ -2321,6 +2712,9 @@ def _describe_proposed_action(name: str, args: dict) -> str:
         return f"Add FAQ: '{a.get('question', '')}'"
     if name == "create_page":
         return f"Create info page '{a.get('title', '')}'"
+    if name == "update_page":
+        verb = "Publish" if a.get("is_public") is True else ("Unpublish" if a.get("is_public") is False else "Update")
+        return f"{verb} info page {a.get('title') or a.get('title_match') or '#' + str(a.get('page_id', ''))}"
     if name == "add_contractor_license":
         return f"Add contractor license '{a.get('business_name', '')}' ({a.get('license_number', '')})"
     if name == "create_utility_bill":
@@ -2368,7 +2762,9 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict) -> dict:
         "read the returned text, and give a clear, accurate answer citing the specific Code Section or document title. "
         "2) When the user asks to CREATE, UPDATE, or DO something, call the appropriate action tool(s) with clean, properly "
         "formatted arguments (YYYY-MM-DD dates, '6:00 PM' times; if the year is omitted for a future date like 'December 1', "
-        "choose the next upcoming occurrence relative to today). Recording or proposing an agenda item, backlog todo, complaint, "
+        "choose the next upcoming occurrence relative to today). When asked to PUBLISH, UNPUBLISH, or EDIT an existing "
+        "blog post, notice, or info page, ALWAYS use list_blog_posts / list_notices / list_pages to find it and call "
+        "update_blog_post / update_notice / update_page—NEVER call create_* to publish or edit an existing item. Recording or proposing an agenda item, backlog todo, complaint, "
         "or notice is an administrative workflow for official council/staff review—do not refuse to stage a valid DocketHall "
         "agenda item or record just because the topic is controversial or unusual. IMPORTANT: Write actions are ONLY staged "
         "for the Confirm/Cancel buttons when you actually call the write tool—never ask the user to confirm without calling the write tool."
