@@ -12,10 +12,17 @@ fi
 
 cd "$ROOT"
 
+ensure_api_started() {
+  docker compose -f docker-compose.demo.yml start api >/dev/null 2>&1 || true
+}
+trap ensure_api_started EXIT
+
 echo "==> Stopping API container for clean restore..."
 docker compose -f docker-compose.demo.yml stop api
 
 echo "==> Restoring Postgres snapshot..."
+docker compose -f docker-compose.demo.yml exec -T db \
+  psql -U civicdesk -d civicdesk -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" >/dev/null
 docker compose -f docker-compose.demo.yml exec -T db \
   psql -U civicdesk -d civicdesk -v ON_ERROR_STOP=1 < "$SNAP_DIR/demo_seed.sql" >/dev/null
 
