@@ -454,6 +454,25 @@ def _is_council_finalized(conn, agenda_id: int) -> bool:
     return row is not None
 
 
+def _require_agenda_not_finalized(conn, agenda_id: int, not_found_detail: str = "Agenda not found") -> None:
+    """Raise 404 if agenda does not exist, or 400 if it is finalized."""
+    ag = conn.execute(
+        "SELECT status, finalized_at FROM agendas WHERE id = %s",
+        (agenda_id,),
+    ).fetchone()
+    if not ag:
+        raise HTTPException(status_code=404, detail=not_found_detail)
+    cat_row = conn.execute("SELECT categories FROM agenda_preferences WHERE id = 1").fetchone()
+    final_cats = {
+        c["name"]
+        for c in (cat_row[0] if cat_row and isinstance(cat_row[0], list) else [])
+        if isinstance(c, dict) and c.get("is_final") and c.get("name")
+    }
+    ag_status = str(ag[0] or "")
+    if ag[1] is not None or ag_status.lower().startswith("finalized") or ag_status in final_cats:
+        raise HTTPException(status_code=400, detail="Finalized agendas cannot have new items added")
+
+
 def _touch_agenda(conn, agenda_id: int, *, mark_amended: bool = True) -> None:
     """Update updated_at and mark finalized agendas as amended when items/docs change."""
     if mark_amended and _is_council_finalized(conn, agenda_id):
@@ -1973,6 +1992,7 @@ def assign_backlog_item(
         ).fetchone()
         if not target:
             raise HTTPException(status_code=404, detail="Target agenda not found")
+        _require_agenda_not_finalized(conn, body.target_agenda_id, "Target agenda not found")
         next_pos = conn.execute(
             "SELECT COALESCE(MAX(position), 0) + 1 FROM agenda_items WHERE agenda_id = %s",
             (body.target_agenda_id,),
@@ -2953,8 +2973,7 @@ def add_item(agenda_id: int, body: ItemIn, _: dict = Depends(get_staff_user)):
     if not title:
         raise HTTPException(status_code=400, detail="Item title is required")
     with pool.connection() as conn:
-        if not conn.execute("SELECT 1 FROM agendas WHERE id = %s", (agenda_id,)).fetchone():
-            raise HTTPException(status_code=404, detail="Agenda not found")
+        _require_agenda_not_finalized(conn, agenda_id)
         next_pos = conn.execute(
             "SELECT COALESCE(MAX(position), 0) + 1 FROM agenda_items WHERE agenda_id = %s",
             (agenda_id,),
