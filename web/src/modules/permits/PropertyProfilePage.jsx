@@ -24,6 +24,12 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
   const [parcels, setParcels] = useState([]);
   const [mapParcels, setMapParcels] = useState([]);
   const [showMap, setShowMap] = useState(false);
+  const [mapView, setMapView] = useState('google');
+  const [mapType, setMapType] = useState('m');
+  const [selectedMapParcelId, setSelectedMapParcelId] = useState(null);
+  const [mapRegion, setMapRegion] = useState(() => {
+    try { return localStorage.getItem('dockethall.mapRegion') || ''; } catch { return ''; }
+  });
   const [geojsonFeatures, setGeojsonFeatures] = useState([]);
   const [parcelId, setParcelId] = useState(initialParcel);
   const [address, setAddress] = useState(initialAddress);
@@ -31,7 +37,7 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
   const [loading, setLoading] = useState(false);
   const showToast = useToast();
 
-  useEffect(() => {
+  const loadParcels = useCallback(() => {
     api('/api/permits/parcels')
       .then((rows) => setParcels(Array.isArray(rows) ? rows : []))
       .catch(() => {});
@@ -39,6 +45,32 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
       .then((rows) => setMapParcels(Array.isArray(rows) ? rows : []))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    loadParcels();
+    api('/api/branding')
+      .then((b) => {
+        setMapRegion((prev) => {
+          if (prev) return prev;
+          const t = (b?.city_title || '').trim();
+          if (/birchwood/i.test(t)) return 'Birchwood Village, MN 55110';
+          return t;
+        });
+      })
+      .catch(() => {});
+  }, [loadParcels]);
+
+  useEffect(() => {
+    const onAiAction = () => loadParcels();
+    window.addEventListener('dockethall:ai-action', onAiAction);
+    return () => window.removeEventListener('dockethall:ai-action', onAiAction);
+  }, [loadParcels]);
+
+  useEffect(() => {
+    try {
+      if (mapRegion) localStorage.setItem('dockethall.mapRegion', mapRegion);
+    } catch { /* ignore */ }
+  }, [mapRegion]);
 
   const loadProfile = useCallback(async (pid, addr) => {
     if (!pid.trim() && !addr.trim()) return;
@@ -99,85 +131,206 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
           const spanY = Math.max(0.0001, maxY - minY);
           const proj = (lon, lat) => [30 + ((lon - minX) / spanX) * 540, 270 - ((lat - minY) / spanY) * 240];
 
+          const selectedMp = mapParcels.find((m) => m.id === selectedMapParcelId)
+            || mapParcels.find((m) => (parcelId && m.parcel_id === parcelId) || (address && m.address === address))
+            || mapParcels[0]
+            || null;
+          const formatMapQuery = (mp) => {
+            if (mp && mp.latitude != null && mp.longitude != null) {
+              return `${mp.latitude},${mp.longitude}`;
+            }
+            const rawAddr = (mp?.address || address || '').trim();
+            const reg = mapRegion.trim();
+            if (!rawAddr) return reg || 'Birchwood Village, MN 55110';
+            if (/\b\d{5}\b/.test(rawAddr) || /,\s*[A-Z]{2}\b/.test(rawAddr) || !reg) {
+              return rawAddr;
+            }
+            return `${rawAddr}, ${reg}`;
+          };
+          const mapQuery = formatMapQuery(selectedMp);
+          const googleEmbedUrl = `https://maps.google.com/maps?q=${encodeURIComponent(mapQuery)}&t=${mapType}&z=17&output=embed`;
+          const googleOpenUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`;
+
           return (
             <div className="card">
               <div className="between" style={{ marginBottom: '.65rem', flexWrap: 'wrap', gap: '.5rem' }}>
-                <h2 style={{ margin: 0 }}>Interactive Parcel &amp; Zoning Map (Offline / GeoJSON)</h2>
-                <label className="btn sm" style={{ cursor: 'pointer' }}>
-                  Load GeoJSON Layer (.geojson / .json)
-                  <input
-                    type="file"
-                    accept=".geojson,.json,application/geo+json,application/json"
-                    style={{ display: 'none' }}
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      try {
-                        const parsed = JSON.parse(await file.text());
-                        setGeojsonFeatures(Array.isArray(parsed.features) ? parsed.features : []);
-                        showToast(`Loaded ${(parsed.features || []).length} GeoJSON parcel feature(s)`, 'ok');
-                      } catch {
-                        showToast('Invalid GeoJSON file', 'error');
-                      }
-                    }}
-                  />
-                </label>
-              </div>
-              <svg viewBox="0 0 600 300" style={{ width: '100%', maxHeight: 320, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
-                {geojsonFeatures.map((f, idx) => {
-                  const rings = f.geometry?.type === 'Polygon' ? f.geometry.coordinates : (f.geometry?.type === 'MultiPolygon' ? f.geometry.coordinates.flat() : []);
-                  const props = f.properties || {};
-                  const fPid = props.parcel_id || props.PARCEL_ID || props.PIN || '';
-                  const fAddr = props.address || props.ADDRESS || props.SITE_ADDR || '';
-                  return rings.map((ring, rIdx) => {
-                    const pts = ring.map((c) => proj(Number(c[0]), Number(c[1])).join(',')).join(' ');
-                    return (
-                      <polygon
-                        key={`${idx}-${rIdx}`}
-                        points={pts}
-                        fill="#dbeafe"
-                        stroke="#2563eb"
-                        strokeWidth="1.2"
-                        style={{ cursor: 'pointer' }}
-                        onClick={() => {
-                          if (fPid || fAddr) {
-                            setParcelId(String(fPid));
-                            setAddress(String(fAddr));
-                            loadProfile(String(fPid), String(fAddr));
+                <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap' }}>
+                  <h2 style={{ margin: 0 }}>Interactive Parcel &amp; GIS Map</h2>
+                  <div className="tabs" style={{ margin: 0 }}>
+                    <button type="button" className={`btn sm${mapView === 'google' ? ' active' : ''}`} onClick={() => setMapView('google')}>
+                      Google Map
+                    </button>
+                    <button type="button" className={`btn sm${mapView === 'geojson' ? ' active' : ''}`} onClick={() => setMapView('geojson')}>
+                      GeoJSON / Offline
+                    </button>
+                  </div>
+                </div>
+                <div className="actions" style={{ flexWrap: 'wrap' }}>
+                  {mapView === 'google' && (
+                    <>
+                      <input
+                        type="text"
+                        aria-label="City, State, ZIP for map geocoding"
+                        placeholder="City, ST ZIP (e.g. Birchwood Village, MN 55110)"
+                        value={mapRegion}
+                        onChange={(e) => setMapRegion(e.target.value)}
+                        style={{ width: '240px', padding: '.28rem .5rem', fontSize: '.82rem' }}
+                      />
+                      <button
+                        type="button"
+                        className={`btn sm${mapType === 'k' ? ' active' : ''}`}
+                        onClick={() => setMapType((t) => (t === 'm' ? 'k' : 'm'))}
+                      >
+                        {mapType === 'k' ? 'Street View' : 'Satellite'}
+                      </button>
+                      <a className="btn sm" href={googleOpenUrl} target="_blank" rel="noreferrer">
+                        Open in Google Maps &rarr;
+                      </a>
+                    </>
+                  )}
+                  {mapView === 'geojson' && (
+                    <label className="btn sm" style={{ cursor: 'pointer' }}>
+                      Load GeoJSON Layer (.geojson / .json)
+                      <input
+                        type="file"
+                        accept=".geojson,.json,application/geo+json,application/json"
+                        style={{ display: 'none' }}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          try {
+                            const parsed = JSON.parse(await file.text());
+                            setGeojsonFeatures(Array.isArray(parsed.features) ? parsed.features : []);
+                            showToast(`Loaded ${(parsed.features || []).length} GeoJSON parcel feature(s)`, 'ok');
+                          } catch {
+                            showToast('Invalid GeoJSON file', 'error');
                           }
                         }}
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              {mapView === 'google' ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(240px, 1fr)', gap: '.75rem', alignItems: 'start' }}>
+                  <iframe
+                    title="Interactive Parcel Google Map"
+                    src={googleEmbedUrl}
+                    style={{ width: '100%', height: 380, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                  />
+                  <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, maxHeight: 380, overflowY: 'auto', padding: '.4rem', display: 'grid', gap: '.35rem', background: '#f8fafc' }}>
+                    <div style={{ fontSize: '.78rem', fontWeight: 700, color: '#475569', padding: '.15rem .35rem' }}>
+                      Registered Parcels ({mapParcels.length})
+                    </div>
+                    {!mapParcels.length ? (
+                      <div className="muted" style={{ fontSize: '.84rem', padding: '.35rem' }}>
+                        No registered parcels yet. Add a parcel below or search any address above.
+                      </div>
+                    ) : mapParcels.map((mp) => {
+                      const isSel = selectedMp && selectedMp.id === mp.id;
+                      const dotColor = mp.open_code_cases > 0 ? '#dc2626' : (mp.active_permits > 0 ? '#2563eb' : '#16a34a');
+                      return (
+                        <button
+                          key={mp.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedMapParcelId(mp.id);
+                            setParcelId(mp.parcel_id || '');
+                            setAddress(mp.address || '');
+                            loadProfile(mp.parcel_id || '', mp.address || '');
+                          }}
+                          style={{
+                            textAlign: 'left',
+                            padding: '.45rem .55rem',
+                            borderRadius: 6,
+                            border: isSel ? '1px solid #2563eb' : '1px solid #e2e8f0',
+                            background: isSel ? '#eff6ff' : '#fff',
+                            cursor: 'pointer',
+                            display: 'grid',
+                            gap: '.15rem',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '.4rem', fontWeight: 600, fontSize: '.86rem', color: '#0f172a' }}>
+                            <span style={{ width: 9, height: 9, borderRadius: '50%', background: dotColor, flexShrink: 0 }} />
+                            <span>{mp.address || mp.parcel_id}</span>
+                          </div>
+                          <div className="muted" style={{ fontSize: '.76rem' }}>
+                            {mp.parcel_id}
+                            {mp.zoning_district ? ` · ${mp.zoning_district}` : ''}
+                            {mp.owner_name ? ` · ${mp.owner_name}` : ''}
+                          </div>
+                          {(mp.active_permits > 0 || mp.open_code_cases > 0) && (
+                            <div style={{ fontSize: '.74rem', color: '#334155' }}>
+                              {mp.active_permits > 0 ? `${mp.active_permits} active permit(s)` : ''}
+                              {mp.active_permits > 0 && mp.open_code_cases > 0 ? ' · ' : ''}
+                              {mp.open_code_cases > 0 ? `${mp.open_code_cases} open code case(s)` : ''}
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <svg viewBox="0 0 600 300" style={{ width: '100%', maxHeight: 320, background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                  {geojsonFeatures.map((f, idx) => {
+                    const rings = f.geometry?.type === 'Polygon' ? f.geometry.coordinates : (f.geometry?.type === 'MultiPolygon' ? f.geometry.coordinates.flat() : []);
+                    const props = f.properties || {};
+                    const fPid = props.parcel_id || props.PARCEL_ID || props.PIN || '';
+                    const fAddr = props.address || props.ADDRESS || props.SITE_ADDR || '';
+                    return rings.map((ring, rIdx) => {
+                      const pts = ring.map((c) => proj(Number(c[0]), Number(c[1])).join(',')).join(' ');
+                      return (
+                        <polygon
+                          key={`${idx}-${rIdx}`}
+                          points={pts}
+                          fill="#dbeafe"
+                          stroke="#2563eb"
+                          strokeWidth="1.2"
+                          style={{ cursor: 'pointer' }}
+                          onClick={() => {
+                            if (fPid || fAddr) {
+                              setParcelId(String(fPid));
+                              setAddress(String(fAddr));
+                              loadProfile(String(fPid), String(fAddr));
+                            }
+                          }}
+                        >
+                          <title>{fPid || fAddr || `Parcel #${idx + 1}`}</title>
+                        </polygon>
+                      );
+                    });
+                  })}
+                  {mapParcels.map((mp, idx) => {
+                    const [cx, cy] = (mp.longitude != null && mp.latitude != null)
+                      ? proj(Number(mp.longitude), Number(mp.latitude))
+                      : [55 + (idx % 8) * 68, 48 + Math.floor(idx / 8) * 58];
+                    const fill = mp.open_code_cases > 0 ? '#dc2626' : (mp.active_permits > 0 ? '#2563eb' : '#16a34a');
+                    return (
+                      <g
+                        key={mp.id}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => {
+                          setParcelId(mp.parcel_id || '');
+                          setAddress(mp.address || '');
+                          loadProfile(mp.parcel_id || '', mp.address || '');
+                        }}
                       >
-                        <title>{fPid || fAddr || `Parcel #${idx + 1}`}</title>
-                      </polygon>
+                        <circle cx={cx} cy={cy} r="9" fill={fill} stroke="#fff" strokeWidth="2" />
+                        <text x={cx} y={cy + 20} textAnchor="middle" fontSize="9" fill="#334155">
+                          {mp.parcel_id}
+                        </text>
+                        <title>{`${mp.parcel_id} — ${mp.address} (Permits: ${mp.active_permits}, Code: ${mp.open_code_cases})`}</title>
+                      </g>
                     );
-                  });
-                })}
-                {mapParcels.map((mp, idx) => {
-                  const [cx, cy] = (mp.longitude != null && mp.latitude != null)
-                    ? proj(Number(mp.longitude), Number(mp.latitude))
-                    : [55 + (idx % 8) * 68, 48 + Math.floor(idx / 8) * 58];
-                  const fill = mp.open_code_cases > 0 ? '#dc2626' : (mp.active_permits > 0 ? '#2563eb' : '#16a34a');
-                  return (
-                    <g
-                      key={mp.id}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => {
-                        setParcelId(mp.parcel_id || '');
-                        setAddress(mp.address || '');
-                        loadProfile(mp.parcel_id || '', mp.address || '');
-                      }}
-                    >
-                      <circle cx={cx} cy={cy} r="9" fill={fill} stroke="#fff" strokeWidth="2" />
-                      <text x={cx} y={cy + 20} textAnchor="middle" fontSize="9" fill="#334155">
-                        {mp.parcel_id}
-                      </text>
-                      <title>{`${mp.parcel_id} — ${mp.address} (Permits: ${mp.active_permits}, Code: ${mp.open_code_cases})`}</title>
-                    </g>
-                  );
-                })}
-              </svg>
+                  })}
+                </svg>
+              )}
               <div className="muted" style={{ fontSize: '.8rem', marginTop: '.4rem' }}>
-                Click any parcel pin or polygon to open its Property &amp; Parcel Profile. Colors: Green = clear, Blue = active permits, Red = open code enforcement.
+                Showing: <strong>{mapQuery}</strong>. Click any parcel to focus the map and open its Property &amp; Parcel Profile. Colors: Green = clear, Blue = active permits, Red = open code enforcement.
               </div>
             </div>
           );
