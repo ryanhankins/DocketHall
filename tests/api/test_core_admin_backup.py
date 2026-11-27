@@ -226,7 +226,7 @@ def test_hidden_home_cards_block_public_endpoints(admin_client, anon_client):
     """Unchecking a card in Public Home Page Service Cards blocks its public endpoints while keeping staff endpoints active."""
     r = admin_client.put(
         "/api/branding",
-        json={"city_title": "Test City", "home_hidden_cards": ["complaints", "citations", "utilities"]},
+        json={"city_title": "Test City", "home_hidden_cards": ["complaints", "citations", "utilities", "transparency"]},
     )
     assert r.status_code == 200
 
@@ -237,6 +237,11 @@ def test_hidden_home_cards_block_public_endpoints(admin_client, anon_client):
     )
     assert sub.status_code == 404
     assert anon_client.get("/api/complaints/public-log").status_code == 404
+
+    # Public transparency snapshot & performance dashboard are blocked (404)
+    assert anon_client.get("/api/public/transparency").status_code == 404
+    assert anon_client.get("/api/public/performance").status_code == 404
+    assert anon_client.get("/api/public/performance.csv").status_code == 404
 
     # Staff complaints endpoint remains available
     assert admin_client.get("/api/complaints").status_code == 200
@@ -249,6 +254,9 @@ def test_hidden_home_cards_block_public_endpoints(admin_client, anon_client):
     reset = admin_client.put("/api/branding", json={"city_title": "Test City", "home_hidden_cards": []})
     assert reset.status_code == 200
     assert anon_client.get("/api/complaints/public-log").status_code == 200
+    assert anon_client.get("/api/public/transparency").status_code == 200
+    assert anon_client.get("/api/public/performance").status_code == 200
+    assert anon_client.get("/api/public/performance.csv").status_code == 200
 
 
 def test_demo_mode_guards_and_login(admin_client, anon_client, monkeypatch):

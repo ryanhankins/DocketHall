@@ -20,11 +20,11 @@ from html import escape as _html_escape
 import io
 import urllib.parse
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, Response
 
 from .db import pool
-from .registry import get_enabled_module_ids
+from .registry import get_enabled_module_ids, require_public_card_enabled
 
 router = APIRouter(prefix="/api/public", tags=["public-search"])
 
@@ -259,7 +259,7 @@ def global_public_search(q: str = ""):
     return {"query": term, "results": results[:40]}
 
 
-@router.get("/transparency")
+@router.get("/transparency", dependencies=[Depends(require_public_card_enabled("transparency"))])
 def public_transparency_snapshot():
     """Return anonymized YTD & active civic metrics across enabled public modules (no PII)."""
     enabled = set(get_enabled_module_ids())
@@ -441,7 +441,7 @@ def _build_performance_metrics() -> dict:
     }
 
 
-@router.get("/performance")
+@router.get("/performance", dependencies=[Depends(require_public_card_enabled("transparency"))])
 def public_performance_dashboard(download: int = 0):
     """Return anonymized public performance metrics (311 response times, permit turnaround, FOIA compliance)."""
     data = _build_performance_metrics()
@@ -454,7 +454,7 @@ def public_performance_dashboard(download: int = 0):
     return data
 
 
-@router.get("/performance.csv")
+@router.get("/performance.csv", dependencies=[Depends(require_public_card_enabled("transparency"))])
 def public_performance_csv():
     """Export public performance metrics as an open-data CSV file."""
     data = _build_performance_metrics()

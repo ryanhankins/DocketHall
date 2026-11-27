@@ -4132,7 +4132,7 @@ function PublicHomePage() {
               />
             )}
 
-            <TransparencySnapshotBar onSelectTab={selectTab} />
+            {!hiddenCards.has('transparency') && <TransparencySnapshotBar onSelectTab={selectTab} />}
 
             <NotifyMeCard t={t} />
           </div>
@@ -4201,7 +4201,7 @@ function PublicHomePage() {
             {activeTab === 'pay' && <PayBillsPublicTab />}
             {activeTab === 'utilities' && <PayBillsPublicTab billType="utility" />}
             {activeTab === 'citations' && <PayBillsPublicTab billType="citation" />}
-            {activeTab === 'transparency' && <TransparencyPublicTab />}
+            {activeTab === 'transparency' && !hiddenCards.has('transparency') && <TransparencyPublicTab />}
           </div>
         )}
       </main>

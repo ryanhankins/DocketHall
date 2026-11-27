@@ -512,6 +512,7 @@ export default function GeneralPrefsPage({ onBrandingChange }) {
                 ['pages', 'City Info Pages & Quick Links'],
                 ['utilities', 'Pay Utility Bill'],
                 ['citations', 'Pay / Contest Citation'],
+                ['transparency', 'City Transparency Snapshot & Performance Dashboard'],
               ];
               return (
                 <>
