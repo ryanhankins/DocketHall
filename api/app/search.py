@@ -280,7 +280,9 @@ def public_transparency_snapshot():
         if "agendas" in enabled:
             try:
                 ag = conn.execute(
-                    "SELECT COUNT(*) FROM agendas WHERE status = 'finalized' AND meeting_date >= CURRENT_DATE"
+                    "SELECT COUNT(*) FROM agendas "
+                    "WHERE (finalized_at IS NOT NULL OR LOWER(status) LIKE 'finalized%') "
+                    "AND meeting_date >= CURRENT_DATE"
                 ).fetchone()[0]
                 metrics.append({"label": "Upcoming Finalized Meetings", "value": int(ag), "tab": "agendas"})
             except Exception:
