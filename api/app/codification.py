@@ -211,6 +211,8 @@ def bootstrap() -> None:
         conn.execute(SCHEMA)
         if os.environ.get("SEED_CITY_PROFILE", "").strip().lower() != "birchwood":
             return
+        if conn.execute("SELECT COUNT(*) FROM code_chapters").fetchone()[0] > 0:
+            return
         for c_idx, (prefix, c_title, sections) in enumerate(_SEED_CODE):
             conn.execute(
                 "INSERT INTO code_chapters (code_prefix, title, sort_order) "
