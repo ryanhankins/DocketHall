@@ -20,11 +20,105 @@ import { api, formatDate } from '../../core/api.js';
 import { useToast } from '../../core/toast.jsx';
 import { permitStatusBadge } from './MyPermitsPage.jsx';
 
+const TILE_SIZE = 256;
+
+function lonToWorldX(lon, zoom) {
+  return ((lon + 180) / 360) * (2 ** zoom) * TILE_SIZE;
+}
+
+function latToWorldY(lat, zoom) {
+  const clamped = Math.max(-85.0511, Math.min(85.0511, lat));
+  const rad = (clamped * Math.PI) / 180;
+  return ((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2) * (2 ** zoom) * TILE_SIZE;
+}
+
+function ParcelTileMap({ centerLat, centerLon, zoom, onZoomChange, pins, selectedId, onSelectPin }) {
+  const width = 720;
+  const height = 380;
+  const cx = lonToWorldX(centerLon, zoom);
+  const cy = latToWorldY(centerLat, zoom);
+  const vx0 = cx - width / 2;
+  const vy0 = cy - height / 2;
+  const maxTile = 2 ** zoom;
+
+  const minTx = Math.floor(vx0 / TILE_SIZE);
+  const maxTx = Math.floor((vx0 + width) / TILE_SIZE);
+  const minTy = Math.max(0, Math.floor(vy0 / TILE_SIZE));
+  const maxTy = Math.min(maxTile - 1, Math.floor((vy0 + height) / TILE_SIZE));
+
+  const tiles = [];
+  for (let tx = minTx; tx <= maxTx; tx += 1) {
+    const wrappedTx = ((tx % maxTile) + maxTile) % maxTile;
+    for (let ty = minTy; ty <= maxTy; ty += 1) {
+      tiles.push({
+        key: `${zoom}-${tx}-${ty}`,
+        left: tx * TILE_SIZE - vx0,
+        top: ty * TILE_SIZE - vy0,
+        src: `https://tile.openstreetmap.org/${zoom}/${wrappedTx}/${ty}.png`,
+      });
+    }
+  }
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height, overflow: 'hidden', borderRadius: 8, border: '1px solid #cbd5e1', background: '#e2e8f0' }}>
+      <div style={{ position: 'relative', width, height, margin: '0 auto' }}>
+        {tiles.map((t) => (
+          <img
+            key={t.key}
+            src={t.src}
+            alt=""
+            draggable={false}
+            style={{ position: 'absolute', left: t.left, top: t.top, width: TILE_SIZE, height: TILE_SIZE, userSelect: 'none', pointerEvents: 'none' }}
+          />
+        ))}
+        {pins.map((p) => {
+          const px = lonToWorldX(p.lon, zoom) - vx0;
+          const py = latToWorldY(p.lat, zoom) - vy0;
+          if (px < -30 || px > width + 30 || py < -30 || py > height + 30) return null;
+          const isSel = selectedId === p.id;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              title={`${p.parcel_id} — ${p.address}`}
+              onClick={() => onSelectPin(p)}
+              style={{
+                position: 'absolute',
+                left: px,
+                top: py,
+                transform: 'translate(-50%, -50%)',
+                width: isSel ? 22 : 16,
+                height: isSel ? 22 : 16,
+                borderRadius: '50%',
+                background: p.color,
+                border: isSel ? '3px solid #0f172a' : '2px solid #fff',
+                boxShadow: '0 2px 6px rgba(15,23,42,.38)',
+                cursor: 'pointer',
+                padding: 0,
+                zIndex: isSel ? 10 : 5,
+              }}
+              aria-label={`Select parcel ${p.parcel_id} ${p.address}`}
+            />
+          );
+        })}
+      </div>
+      <div style={{ position: 'absolute', top: 10, right: 10, display: 'grid', gap: 4, zIndex: 20 }}>
+        <button type="button" className="btn sm" style={{ background: '#fff', minWidth: 28, padding: '2px 8px' }} onClick={() => onZoomChange(Math.min(18, zoom + 1))} aria-label="Zoom in">+</button>
+        <button type="button" className="btn sm" style={{ background: '#fff', minWidth: 28, padding: '2px 8px' }} onClick={() => onZoomChange(Math.max(11, zoom - 1))} aria-label="Zoom out">&minus;</button>
+      </div>
+      <div style={{ position: 'absolute', bottom: 4, right: 8, background: 'rgba(255,255,255,.85)', padding: '1px 6px', borderRadius: 4, fontSize: '.7rem', color: '#334155', zIndex: 20 }}>
+        &copy; OpenStreetMap contributors
+      </div>
+    </div>
+  );
+}
+
 export default function PropertyProfilePage({ onNavigate, initialParcel = '', initialAddress = '' }) {
   const [parcels, setParcels] = useState([]);
   const [mapParcels, setMapParcels] = useState([]);
   const [showMap, setShowMap] = useState(false);
   const [mapView, setMapView] = useState('map');
+  const [mapZoom, setMapZoom] = useState(15);
   const [selectedMapParcelId, setSelectedMapParcelId] = useState(null);
   const [geoCache, setGeoCache] = useState({});
   const [mapRegion, setMapRegion] = useState(() => {
@@ -176,9 +270,26 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
           const coords = (selectedMp && selectedMp.latitude != null && selectedMp.longitude != null)
             ? { lat: Number(selectedMp.latitude), lon: Number(selectedMp.longitude) }
             : geoCache[mapQuery];
-          const osmEmbedUrl = coords
-            ? `https://www.openstreetmap.org/export/embed.html?bbox=${(coords.lon - 0.004).toFixed(6)},${(coords.lat - 0.0025).toFixed(6)},${(coords.lon + 0.004).toFixed(6)},${(coords.lat + 0.0025).toFixed(6)}&layer=mapnik&marker=${coords.lat.toFixed(6)},${coords.lon.toFixed(6)}`
-            : null;
+          const mapPins = mapParcels
+            .map((mp) => {
+              const q = (mp.latitude != null && mp.longitude != null)
+                ? null
+                : (/\b\d{5}\b/.test(mp.address || '') || /,\s*[A-Z]{2}\b/.test(mp.address || '') || !mapRegion.trim()
+                    ? (mp.address || '').trim()
+                    : `${(mp.address || '').trim()}, ${mapRegion.trim()}`);
+              const c = (mp.latitude != null && mp.longitude != null)
+                ? { lat: Number(mp.latitude), lon: Number(mp.longitude) }
+                : (q ? geoCache[q] : null);
+              if (!c) return null;
+              return {
+                ...mp,
+                lat: c.lat,
+                lon: c.lon,
+                color: mp.open_code_cases > 0 ? '#dc2626' : (mp.active_permits > 0 ? '#2563eb' : '#16a34a'),
+              };
+            })
+            .filter(Boolean);
+          const centerCoords = coords || (mapPins[0] ? { lat: mapPins[0].lat, lon: mapPins[0].lon } : { lat: 45.0604, lon: -92.9784 });
           const googleOpenUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`;
 
           return (
@@ -237,22 +348,20 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
 
               {mapView === 'map' ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(240px, 1fr)', gap: '.75rem', alignItems: 'start' }}>
-                  {osmEmbedUrl ? (
-                    <iframe
-                      title="Interactive Parcel Map"
-                      src={osmEmbedUrl}
-                      style={{ width: '100%', height: 380, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div style={{ width: '100%', height: 380, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', textAlign: 'center' }}>
-                      <div className="muted">
-                        {coords === null
-                          ? `Could not geocode "${mapQuery}". Try adjusting the City, ST ZIP box or click "Open in Google Maps →".`
-                          : `Locating "${mapQuery}"…`}
-                      </div>
-                    </div>
-                  )}
+                  <ParcelTileMap
+                    centerLat={centerCoords.lat}
+                    centerLon={centerCoords.lon}
+                    zoom={mapZoom}
+                    onZoomChange={setMapZoom}
+                    pins={mapPins}
+                    selectedId={selectedMp?.id}
+                    onSelectPin={(mp) => {
+                      setSelectedMapParcelId(mp.id);
+                      setParcelId(mp.parcel_id || '');
+                      setAddress(mp.address || '');
+                      loadProfile(mp.parcel_id || '', mp.address || '');
+                    }}
+                  />
                   <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, maxHeight: 380, overflowY: 'auto', padding: '.4rem', display: 'grid', gap: '.35rem', background: '#f8fafc' }}>
                     <div style={{ fontSize: '.78rem', fontWeight: 700, color: '#475569', padding: '.15rem .35rem' }}>
                       Registered Parcels ({mapParcels.length})
