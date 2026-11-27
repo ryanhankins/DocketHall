@@ -130,6 +130,29 @@ const CLAUSE_L1_RE = /^(\([a-z]{1,2}\)|Subd\.?\s*\d+\.?|[A-Z]\.)\s+(.*)$/i;
 const CLAUSE_L2_RE = /^(\(\d{1,3}\)|\d{1,3}\.)\s+(.*)$/;
 const CLAUSE_L3_RE = /^(\([A-Z]{1,2}\)|\([ivxlcdm]{1,5}\)|[•●▪▫◦-])\s+(.*)$/;
 
+function parseMarkdownTableBlock(block) {
+  const lines = String(block || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return null;
+  if (!lines[0].includes('|') || !/^\|?[\s:-]+\|[\s|:-]*$/.test(lines[1])) {
+    return null;
+  }
+  const splitRow = (line) => {
+    const trimmed = line.replace(/^\|/, '').replace(/\|$/, '');
+    return trimmed.split('|').map((c) => c.trim());
+  };
+  const headers = splitRow(lines[0]);
+  if (!headers.length) return null;
+  const rows = lines.slice(2).map((l) => {
+    const cells = splitRow(l);
+    while (cells.length < headers.length) cells.push('');
+    return cells.slice(0, headers.length);
+  });
+  return { type: 'table', headers, rows };
+}
+
 export function parseStructuredCodeBody(body) {
   const raw = String(body || '').trim();
   if (!raw) return [];
@@ -137,6 +160,11 @@ export function parseStructuredCodeBody(body) {
   const out = [];
 
   for (const block of rawBlocks) {
+    const tbl = parseMarkdownTableBlock(block);
+    if (tbl) {
+      out.push(tbl);
+      continue;
+    }
     let m;
     if ((m = block.match(ARTICLE_BLOCK_RE))) {
       out.push({
@@ -319,6 +347,74 @@ export function StructuredCodeBody({
                   />
                 </p>
               )}
+            </div>
+          );
+        }
+        if (blk.type === 'table') {
+          return (
+            <div
+              key={idx}
+              className="code-lib-table-wrap"
+              style={{ overflowX: 'auto', margin: '0.65rem 0 0.9rem' }}
+            >
+              <table
+                className="code-lib-table"
+                style={{
+                  width: '100%',
+                  borderCollapse: 'collapse',
+                  fontSize: '0.88rem',
+                  border: '1px solid #cbd5e1',
+                  background: '#ffffff',
+                }}
+              >
+                <thead>
+                  <tr style={{ background: 'var(--cd-tint, #f1f5f9)' }}>
+                    {blk.headers.map((h, hIdx) => (
+                      <th
+                        key={hIdx}
+                        style={{
+                          textAlign: 'left',
+                          padding: '0.55rem 0.7rem',
+                          border: '1px solid #cbd5e1',
+                          fontWeight: 700,
+                          color: '#0f172a',
+                          verticalAlign: 'bottom',
+                        }}
+                      >
+                        <HighlightText text={h} query={query} />
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {blk.rows.map((row, rIdx) => (
+                    <tr
+                      key={rIdx}
+                      style={{ background: rIdx % 2 === 1 ? '#f8fafc' : '#ffffff' }}
+                    >
+                      {row.map((cell, cIdx) => (
+                        <td
+                          key={cIdx}
+                          style={{
+                            padding: '0.5rem 0.7rem',
+                            border: '1px solid #cbd5e1',
+                            verticalAlign: 'top',
+                            color: '#1e293b',
+                          }}
+                        >
+                          <LinkedCodeBody
+                            text={cell}
+                            sectionMap={sectionMap}
+                            currentSectionId={currentSectionId}
+                            onSelectSection={onSelectSection}
+                            query={query}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           );
         }
