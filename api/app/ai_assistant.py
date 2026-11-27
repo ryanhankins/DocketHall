@@ -3090,6 +3090,10 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict, page_context: 
             "agenda item or record just because the topic is controversial or unusual. IMPORTANT: Write actions are ONLY staged "
             "for the Confirm/Cancel buttons when you actually call the write tool—never ask the user to confirm without calling the write tool."
         )
+    sys_instruction += (
+        " FORMATTING: Write any formulas or equations in plain readable text (for example: "
+        "'Height = (Average Elevation of Eaves) + 70% of ...') rather than raw LaTeX ($$...$$ or \\text{...})."
+    )
     if page_context and (page_context.get("route") or page_context.get("title")):
         ctx_route = str(page_context.get("route") or "").strip()[:200]
         ctx_title = str(page_context.get("title") or "").strip()[:200]

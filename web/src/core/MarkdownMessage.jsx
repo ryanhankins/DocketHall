@@ -55,6 +55,32 @@ function renderTextWithLinks(text, keyPrefix, allowStaffLinks = false) {
   return out;
 }
 
+function formatMathExpression(expr) {
+  let s = String(expr || '').trim();
+  // Unwrap \text{...} and \mathrm{...}
+  for (let pass = 0; pass < 3; pass++) {
+    s = s.replace(/\\(?:text|mathrm|mathbf|mathit)\{([^{}]*)\}/g, '$1');
+  }
+  s = s.replace(/\\frac\{([^{}]+)\}\{([^{}]+)\}/g, '($1) / ($2)');
+  s = s
+    .replace(/\\left\s*/g, '')
+    .replace(/\\right\s*/g, '')
+    .replace(/\\times/g, '×')
+    .replace(/\\cdot/g, '·')
+    .replace(/\\pm/g, '±')
+    .replace(/\\leq?/g, '≤')
+    .replace(/\\geq?/g, '≥')
+    .replace(/\\approx/g, '≈')
+    .replace(/\\neq?/g, '≠')
+    .replace(/\\%/g, '%')
+    .replace(/\\\{/g, '{')
+    .replace(/\\\}/g, '}')
+    .replace(/\\,/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return s;
+}
+
 function normalizeSafeHref(rawHref) {
   const href = String(rawHref || '').trim();
   if (!href) return null;
@@ -65,7 +91,7 @@ function normalizeSafeHref(rawHref) {
 
 function renderInlineMarkdown(text, allowStaffLinks = false, depth = 0) {
   const parts = [];
-  const tokenRe = /(\*\*[^*]+\*\*|\[[^\]]+\]\([^)\s]+\)|`[^`]+`|\*[^*\n]+\*)/g;
+  const tokenRe = /(\$\$[^$]+\$\$|\$(?=[^\d\s])[^$\n]*[\\=^_][^$\n]*\$|\*\*[^*]+\*\*|\[[^\]]+\]\([^)\s]+\)|`[^`]+`|\*[^*\n]+\*)/g;
   let last = 0;
   let match;
   let idx = 0;
@@ -74,7 +100,32 @@ function renderInlineMarkdown(text, allowStaffLinks = false, depth = 0) {
       parts.push(...renderTextWithLinks(text.slice(last, match.index), `t-${depth}-${idx++}`, allowStaffLinks));
     }
     const tok = match[0];
-    if (tok.startsWith('**') && tok.endsWith('**')) {
+    if (tok.startsWith('$$') && tok.endsWith('$$')) {
+      parts.push(
+        <span
+          key={`${depth}-${idx++}`}
+          style={{
+            display: 'inline-block',
+            background: '#f8fafc',
+            border: '1px solid #e2e8f0',
+            borderRadius: '6px',
+            padding: '0.15rem 0.45rem',
+            fontFamily: 'Georgia, Cambria, "Times New Roman", serif',
+          }}
+        >
+          {formatMathExpression(tok.slice(2, -2))}
+        </span>
+      );
+    } else if (tok.startsWith('$') && tok.endsWith('$')) {
+      parts.push(
+        <span
+          key={`${depth}-${idx++}`}
+          style={{ fontFamily: 'Georgia, Cambria, "Times New Roman", serif' }}
+        >
+          {formatMathExpression(tok.slice(1, -1))}
+        </span>
+      );
+    } else if (tok.startsWith('**') && tok.endsWith('**')) {
       const inner = tok.slice(2, -2);
       parts.push(
         <strong key={`${depth}-${idx++}`}>
@@ -149,6 +200,44 @@ export function MarkdownMessage({ text, allowStaffLinks = false }) {
         </div>
       );
       i++;
+      continue;
+    }
+    if (line.trim().startsWith('$$')) {
+      let mathBody = line.trim();
+      if (mathBody.length > 4 && mathBody.endsWith('$$')) {
+        mathBody = mathBody.slice(2, -2);
+        i++;
+      } else {
+        const mathLines = [mathBody.slice(2)];
+        i++;
+        while (i < lines.length && !lines[i].trim().endsWith('$$')) {
+          mathLines.push(lines[i]);
+          i++;
+        }
+        if (i < lines.length) {
+          mathLines.push(lines[i].trim().slice(0, -2));
+          i++;
+        }
+        mathBody = mathLines.join(' ');
+      }
+      blocks.push(
+        <div
+          key={blocks.length}
+          style={{
+            background: '#f8fafc',
+            border: '1px solid #e2e8f0',
+            borderRadius: '8px',
+            padding: '0.45rem 0.65rem',
+            margin: '0.35rem 0',
+            fontFamily: 'Georgia, Cambria, "Times New Roman", serif',
+            fontSize: '0.9em',
+            textAlign: 'center',
+            color: '#0f172a',
+          }}
+        >
+          {formatMathExpression(mathBody)}
+        </div>
+      );
       continue;
     }
     if (
