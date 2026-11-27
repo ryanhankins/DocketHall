@@ -168,7 +168,8 @@ def global_public_search(q: str = ""):
         if "agendas" in enabled:
             for r in conn.execute(
                 "SELECT title, body, meeting_date FROM agendas "
-                "WHERE status = 'finalized' AND (title ILIKE %s OR body ILIKE %s) "
+                "WHERE (finalized_at IS NOT NULL OR STARTS_WITH(LOWER(status), 'finalized')) "
+                "AND (title ILIKE %s OR body ILIKE %s) "
                 "ORDER BY meeting_date DESC NULLS LAST LIMIT 6",
                 (like, like),
             ).fetchall():

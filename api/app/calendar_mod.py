@@ -395,7 +395,8 @@ def download_event_ics(kind: Literal["meeting", "event"], item_id: int):
         if kind == "meeting":
             row = conn.execute(
                 "SELECT title, meeting_date, meeting_time, body FROM agendas "
-                "WHERE id = %s AND status = 'finalized' AND meeting_date IS NOT NULL",
+                "WHERE id = %s AND (finalized_at IS NOT NULL OR STARTS_WITH(LOWER(status), 'finalized')) "
+                "AND meeting_date IS NOT NULL",
                 (item_id,),
             ).fetchone()
             if not row:
