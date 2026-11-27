@@ -568,7 +568,7 @@ _TOOL_DECLARATIONS = [
     },
     {
         "name": "search_city_code",
-        "description": "Search the Municipal City Code by keyword(s) or section number. Returns matching sections with their text.",
+        "description": "Search the Municipal City Code by keyword(s) or section number. Returns matching sections with their chapter, parent topic, and text. Always check the chapter/parent to ensure a section applies (e.g. don't cite Floodplain § 405 for general zoning unless floodplain is relevant), and cite the exact section_number returned.",
         "parameters": {
             "type": "OBJECT",
             "properties": {
@@ -1901,40 +1901,63 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             terms = _extract_search_terms(q)
             if not terms:
                 rows = conn.execute(
-                    "SELECT section_number, title, body FROM code_sections ORDER BY sort_order ASC, id ASC LIMIT 10"
+                    "SELECT s.section_number, s.title, s.body, c.title, p.section_number, p.title "
+                    "FROM code_sections s "
+                    "LEFT JOIN code_chapters c ON c.id = s.chapter_id "
+                    "LEFT JOIN code_sections p ON p.id = s.parent_id "
+                    "ORDER BY s.sort_order ASC, s.id ASC LIMIT 10"
                 ).fetchall()
-                index_rows = [(r[0], r[1]) for r in rows]
+                index_rows = [(r[0], r[1], r[3]) for r in rows]
             else:
-                # Score title/section matches higher than body-only matches
+                # Score title/section matches higher than body-only matches; ignore hyphens (e.g. nonconforming vs non-conforming)
                 score_parts = []
                 score_params: list = []
                 where_parts = []
                 where_params: list = []
                 for t in terms:
-                    like = f"%{t}%"
-                    where_parts.append("(section_number ILIKE %s OR title ILIKE %s OR body ILIKE %s)")
-                    where_params.extend([like, like, like])
-                    score_parts.append("(CASE WHEN section_number ILIKE %s THEN 5 WHEN title ILIKE %s THEN 3 WHEN body ILIKE %s THEN 1 ELSE 0 END)")
-                    score_params.extend([like, like, like])
+                    like_nh = f"%{t.replace('-', '')}%"
+                    where_parts.append(
+                        "(REPLACE(s.section_number, '-', '') ILIKE %s "
+                        "OR REPLACE(s.title, '-', '') ILIKE %s "
+                        "OR REPLACE(s.body, '-', '') ILIKE %s)"
+                    )
+                    where_params.extend([like_nh, like_nh, like_nh])
+                    score_parts.append(
+                        "(CASE "
+                        "WHEN REPLACE(s.section_number, '-', '') ILIKE %s THEN 5 "
+                        "WHEN REPLACE(s.title, '-', '') ILIKE %s THEN 3 "
+                        "WHEN REPLACE(s.body, '-', '') ILIKE %s THEN 1 "
+                        "ELSE 0 END)"
+                    )
+                    score_params.extend([like_nh, like_nh, like_nh])
                 score_expr = " + ".join(score_parts)
                 where_expr = " OR ".join(where_parts)
                 rows = conn.execute(
-                    f"SELECT section_number, title, body, ({score_expr}) AS score "
-                    f"FROM code_sections WHERE {where_expr} "
-                    f"ORDER BY score DESC, sort_order ASC, id ASC LIMIT 12",
+                    f"SELECT s.section_number, s.title, s.body, c.title, p.section_number, p.title, ({score_expr}) AS score "
+                    f"FROM code_sections s "
+                    f"LEFT JOIN code_chapters c ON c.id = s.chapter_id "
+                    f"LEFT JOIN code_sections p ON p.id = s.parent_id "
+                    f"WHERE {where_expr} "
+                    f"ORDER BY score DESC, s.sort_order ASC, s.id ASC LIMIT 12",
                     tuple(score_params + where_params),
                 ).fetchall()
                 index_rows = conn.execute(
-                    f"SELECT section_number, title FROM code_sections WHERE {where_expr} "
-                    f"ORDER BY sort_order ASC, id ASC LIMIT 30",
+                    f"SELECT s.section_number, s.title, c.title "
+                    f"FROM code_sections s "
+                    f"LEFT JOIN code_chapters c ON c.id = s.chapter_id "
+                    f"WHERE {where_expr} "
+                    f"ORDER BY s.sort_order ASC, s.id ASC LIMIT 30",
                     tuple(where_params),
                 ).fetchall()
             sections = []
             for r in rows:
                 body_txt = (r[2] or "").strip()
+                parent_label = f"{r[4]} {r[5]}".strip() if (r[4] or r[5]) else ""
                 sections.append({
                     "section_number": r[0],
                     "title": r[1],
+                    "chapter": r[3] or "",
+                    "parent": parent_label,
                     "body": body_txt[:4500],
                     "truncated": len(body_txt) > 4500,
                 })
@@ -1942,7 +1965,10 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                 {
                     "ok": True,
                     "sections": sections,
-                    "matching_index": [{"section_number": ir[0], "title": ir[1]} for ir in index_rows],
+                    "matching_index": [
+                        {"section_number": ir[0], "title": ir[1], "chapter": ir[2] or ""}
+                        for ir in index_rows
+                    ],
                 },
                 None,
             )
@@ -1950,22 +1976,33 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
         if name == "get_city_code_section":
             sec = str(args.get("section_number") or "").strip()
             row = conn.execute(
-                "SELECT section_number, title, body FROM code_sections WHERE section_number = %s",
+                "SELECT s.section_number, s.title, s.body, c.title, p.section_number, p.title "
+                "FROM code_sections s "
+                "LEFT JOIN code_chapters c ON c.id = s.chapter_id "
+                "LEFT JOIN code_sections p ON p.id = s.parent_id "
+                "WHERE s.section_number = %s",
                 (sec,),
             ).fetchone()
             if not row:
                 row = conn.execute(
-                    "SELECT section_number, title, body FROM code_sections WHERE section_number ILIKE %s ORDER BY id ASC LIMIT 1",
+                    "SELECT s.section_number, s.title, s.body, c.title, p.section_number, p.title "
+                    "FROM code_sections s "
+                    "LEFT JOIN code_chapters c ON c.id = s.chapter_id "
+                    "LEFT JOIN code_sections p ON p.id = s.parent_id "
+                    "WHERE s.section_number ILIKE %s ORDER BY s.id ASC LIMIT 1",
                     (f"%{sec}%",),
                 ).fetchone()
             if not row:
                 return ({"ok": False, "error": f"Code section '{sec}' not found"}, None)
             body_txt = (row[2] or "").strip()
+            parent_label = f"{row[4]} {row[5]}".strip() if (row[4] or row[5]) else ""
             return (
                 {
                     "ok": True,
                     "section_number": row[0],
                     "title": row[1],
+                    "chapter": row[3] or "",
+                    "parent": parent_label,
                     "body": body_txt[:16000],
                     "truncated": len(body_txt) > 16000,
                 },
