@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import MarkdownMessage from './MarkdownMessage.jsx';
 
 const STARTER_PROMPTS = [
   'What are the rules for fence or setback permits?',
@@ -271,18 +272,17 @@ export default function PublicAiAssistant({ activeTab = 'home' }) {
             >
               <div
                 style={{
-                  maxWidth: '85%',
-                  whiteSpace: 'pre-wrap',
+                  maxWidth: '88%',
                   borderRadius: '12px',
                   padding: '.55rem .75rem',
                   fontSize: '.83rem',
                   lineHeight: 1.45,
                   ...(m.role === 'user'
-                    ? { background: 'var(--cd-primary, #0f2942)', color: '#ffffff' }
+                    ? { background: 'var(--cd-primary, #0f2942)', color: '#ffffff', whiteSpace: 'pre-wrap' }
                     : { background: '#ffffff', border: '1px solid #e2e8f0', color: '#0f172a' }),
                 }}
               >
-                {m.text}
+                {m.role === 'user' ? m.text : <MarkdownMessage text={m.text} />}
               </div>
             </div>
           ))
