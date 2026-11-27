@@ -24,9 +24,9 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
   const [parcels, setParcels] = useState([]);
   const [mapParcels, setMapParcels] = useState([]);
   const [showMap, setShowMap] = useState(false);
-  const [mapView, setMapView] = useState('google');
-  const [mapType, setMapType] = useState('m');
+  const [mapView, setMapView] = useState('map');
   const [selectedMapParcelId, setSelectedMapParcelId] = useState(null);
+  const [geoCache, setGeoCache] = useState({});
   const [mapRegion, setMapRegion] = useState(() => {
     try { return localStorage.getItem('dockethall.mapRegion') || ''; } catch { return ''; }
   });
@@ -71,6 +71,46 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
       if (mapRegion) localStorage.setItem('dockethall.mapRegion', mapRegion);
     } catch { /* ignore */ }
   }, [mapRegion]);
+
+  const activeMapParcel = mapParcels.find((m) => m.id === selectedMapParcelId)
+    || mapParcels.find((m) => (parcelId && m.parcel_id === parcelId) || (address && m.address === address))
+    || mapParcels[0]
+    || null;
+
+  const activeMapQuery = (() => {
+    if (activeMapParcel && activeMapParcel.latitude != null && activeMapParcel.longitude != null) {
+      return `${activeMapParcel.latitude},${activeMapParcel.longitude}`;
+    }
+    const rawAddr = (activeMapParcel?.address || address || '').trim();
+    const reg = mapRegion.trim();
+    if (!rawAddr) return reg || 'Birchwood Village, MN 55110';
+    if (/\b\d{5}\b/.test(rawAddr) || /,\s*[A-Z]{2}\b/.test(rawAddr) || !reg) {
+      return rawAddr;
+    }
+    return `${rawAddr}, ${reg}`;
+  })();
+
+  useEffect(() => {
+    if (!showMap || mapView !== 'map') return undefined;
+    if (activeMapParcel && activeMapParcel.latitude != null && activeMapParcel.longitude != null) {
+      return undefined;
+    }
+    if (geoCache[activeMapQuery] !== undefined) return undefined;
+    const ctrl = new AbortController();
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(activeMapQuery)}`, {
+      signal: ctrl.signal,
+    })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => {
+        const first = Array.isArray(rows) && rows[0];
+        setGeoCache((prev) => ({
+          ...prev,
+          [activeMapQuery]: first ? { lat: Number(first.lat), lon: Number(first.lon) } : null,
+        }));
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [showMap, mapView, activeMapParcel, activeMapQuery, geoCache]);
 
   const loadProfile = useCallback(async (pid, addr) => {
     if (!pid.trim() && !addr.trim()) return;
@@ -131,24 +171,14 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
           const spanY = Math.max(0.0001, maxY - minY);
           const proj = (lon, lat) => [30 + ((lon - minX) / spanX) * 540, 270 - ((lat - minY) / spanY) * 240];
 
-          const selectedMp = mapParcels.find((m) => m.id === selectedMapParcelId)
-            || mapParcels.find((m) => (parcelId && m.parcel_id === parcelId) || (address && m.address === address))
-            || mapParcels[0]
-            || null;
-          const formatMapQuery = (mp) => {
-            if (mp && mp.latitude != null && mp.longitude != null) {
-              return `${mp.latitude},${mp.longitude}`;
-            }
-            const rawAddr = (mp?.address || address || '').trim();
-            const reg = mapRegion.trim();
-            if (!rawAddr) return reg || 'Birchwood Village, MN 55110';
-            if (/\b\d{5}\b/.test(rawAddr) || /,\s*[A-Z]{2}\b/.test(rawAddr) || !reg) {
-              return rawAddr;
-            }
-            return `${rawAddr}, ${reg}`;
-          };
-          const mapQuery = formatMapQuery(selectedMp);
-          const googleEmbedUrl = `https://maps.google.com/maps?q=${encodeURIComponent(mapQuery)}&t=${mapType}&z=17&output=embed`;
+          const selectedMp = activeMapParcel;
+          const mapQuery = activeMapQuery;
+          const coords = (selectedMp && selectedMp.latitude != null && selectedMp.longitude != null)
+            ? { lat: Number(selectedMp.latitude), lon: Number(selectedMp.longitude) }
+            : geoCache[mapQuery];
+          const osmEmbedUrl = coords
+            ? `https://www.openstreetmap.org/export/embed.html?bbox=${(coords.lon - 0.004).toFixed(6)},${(coords.lat - 0.0025).toFixed(6)},${(coords.lon + 0.004).toFixed(6)},${(coords.lat + 0.0025).toFixed(6)}&layer=mapnik&marker=${coords.lat.toFixed(6)},${coords.lon.toFixed(6)}`
+            : null;
           const googleOpenUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`;
 
           return (
@@ -157,8 +187,8 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
                 <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap' }}>
                   <h2 style={{ margin: 0 }}>Interactive Parcel &amp; GIS Map</h2>
                   <div className="tabs" style={{ margin: 0 }}>
-                    <button type="button" className={`btn sm${mapView === 'google' ? ' active' : ''}`} onClick={() => setMapView('google')}>
-                      Google Map
+                    <button type="button" className={`btn sm${mapView === 'map' ? ' active' : ''}`} onClick={() => setMapView('map')}>
+                      Interactive Map
                     </button>
                     <button type="button" className={`btn sm${mapView === 'geojson' ? ' active' : ''}`} onClick={() => setMapView('geojson')}>
                       GeoJSON / Offline
@@ -166,7 +196,7 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
                   </div>
                 </div>
                 <div className="actions" style={{ flexWrap: 'wrap' }}>
-                  {mapView === 'google' && (
+                  {mapView === 'map' && (
                     <>
                       <input
                         type="text"
@@ -176,13 +206,6 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
                         onChange={(e) => setMapRegion(e.target.value)}
                         style={{ width: '240px', padding: '.28rem .5rem', fontSize: '.82rem' }}
                       />
-                      <button
-                        type="button"
-                        className={`btn sm${mapType === 'k' ? ' active' : ''}`}
-                        onClick={() => setMapType((t) => (t === 'm' ? 'k' : 'm'))}
-                      >
-                        {mapType === 'k' ? 'Street View' : 'Satellite'}
-                      </button>
                       <a className="btn sm" href={googleOpenUrl} target="_blank" rel="noreferrer">
                         Open in Google Maps &rarr;
                       </a>
@@ -212,15 +235,24 @@ export default function PropertyProfilePage({ onNavigate, initialParcel = '', in
                 </div>
               </div>
 
-              {mapView === 'google' ? (
+              {mapView === 'map' ? (
                 <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(240px, 1fr)', gap: '.75rem', alignItems: 'start' }}>
-                  <iframe
-                    title="Interactive Parcel Google Map"
-                    src={googleEmbedUrl}
-                    style={{ width: '100%', height: 380, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}
-                    loading="lazy"
-                    referrerPolicy="no-referrer-when-downgrade"
-                  />
+                  {osmEmbedUrl ? (
+                    <iframe
+                      title="Interactive Parcel Map"
+                      src={osmEmbedUrl}
+                      style={{ width: '100%', height: 380, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc' }}
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div style={{ width: '100%', height: 380, border: '1px solid #cbd5e1', borderRadius: 8, background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', textAlign: 'center' }}>
+                      <div className="muted">
+                        {coords === null
+                          ? `Could not geocode "${mapQuery}". Try adjusting the City, ST ZIP box or click "Open in Google Maps →".`
+                          : `Locating "${mapQuery}"…`}
+                      </div>
+                    </div>
+                  )}
                   <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, maxHeight: 380, overflowY: 'auto', padding: '.4rem', display: 'grid', gap: '.35rem', background: '#f8fafc' }}>
                     <div style={{ fontSize: '.78rem', fontWeight: 700, color: '#475569', padding: '.15rem .35rem' }}>
                       Registered Parcels ({mapParcels.length})
