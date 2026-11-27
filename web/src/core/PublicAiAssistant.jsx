@@ -1,55 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-function SparkleIcon({ className = 'h-4 w-4' }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z" />
-    </svg>
-  );
-}
-
-function ChatIcon({ className = 'h-3.5 w-3.5' }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function SendIcon({ className = 'h-3.5 w-3.5' }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M22 2L11 13" />
-      <path d="M22 2L15 22l-4-9-9-4 20-7z" />
-    </svg>
-  );
-}
-
-function TrashIcon({ className = 'h-4 w-4' }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 6h18" />
-      <path d="M8 6V4h8v2" />
-      <path d="M19 6l-1 14H6L5 6" />
-    </svg>
-  );
-}
-
-function CloseIcon({ className = 'h-4 w-4' }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 6L6 18" />
-      <path d="M6 6l12 12" />
-    </svg>
-  );
-}
-
 const STARTER_PROMPTS = [
   'What are the rules for fence or setback permits?',
   'When is the next City Council meeting?',
   'Show recent public notices and announcements',
   'How do I contact city staff?',
 ];
+
+function SparkleIcon({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3l1.9 5.8a2 2 0 0 0 1.3 1.3L21 12l-5.8 1.9a2 2 0 0 0-1.3 1.3L12 21l-1.9-5.8a2 2 0 0 0-1.3-1.3L3 12l5.8-1.9a2 2 0 0 0 1.3-1.3L12 3z" />
+    </svg>
+  );
+}
 
 export default function PublicAiAssistant({ activeTab = 'home' }) {
   const [open, setOpen] = useState(false);
@@ -134,34 +98,75 @@ export default function PublicAiAssistant({ activeTab = 'home' }) {
 
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        data-testid="public-ai-launcher"
-        className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-full bg-slate-900 px-4 py-3 text-sm font-medium text-white shadow-lg ring-1 ring-white/15 transition hover:bg-slate-800"
+      <div
+        style={{
+          position: 'fixed',
+          right: '1.25rem',
+          bottom: '1.25rem',
+          zIndex: 950,
+        }}
       >
-        <SparkleIcon className="h-4 w-4 text-amber-300" />
-        <span>Ask City Assistant</span>
-      </button>
+        <button
+          type="button"
+          className="btn primary"
+          onClick={() => setOpen(true)}
+          data-testid="public-ai-launcher"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '.45rem',
+            borderRadius: '999px',
+            boxShadow: '0 8px 24px rgba(15, 41, 66, 0.28)',
+            padding: '.6rem 1.05rem',
+            fontWeight: 600,
+          }}
+        >
+          <SparkleIcon size={16} />
+          <span>Ask City Assistant</span>
+        </button>
+      </div>
     );
   }
 
   return (
-    <div
+    <aside
       data-testid="public-ai-panel"
-      className="fixed bottom-5 right-5 z-50 flex h-[32rem] max-h-[calc(100vh-2.5rem)] w-96 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+      aria-label="City Assistant"
+      style={{
+        position: 'fixed',
+        right: '1rem',
+        bottom: '1rem',
+        width: 'min(400px, calc(100vw - 1.5rem))',
+        height: 'min(520px, calc(100vh - 2rem))',
+        zIndex: 950,
+        display: 'flex',
+        flexDirection: 'column',
+        background: '#ffffff',
+        border: '1px solid #cbd5e1',
+        borderRadius: '12px',
+        boxShadow: '0 14px 36px rgba(15, 23, 42, 0.22)',
+        overflow: 'hidden',
+      }}
     >
-      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-900 px-4 py-3 text-white">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10">
-            <SparkleIcon className="h-4 w-4 text-amber-300" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold leading-tight">City Assistant</div>
-            <div className="text-[11px] text-slate-300">Public records &amp; municipal code</div>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '.5rem',
+          padding: '.65rem .85rem',
+          background: 'var(--cd-primary, #0f2942)',
+          color: '#ffffff',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', minWidth: 0 }}>
+          <SparkleIcon size={17} />
+          <div style={{ minWidth: 0 }}>
+            <strong style={{ fontSize: '.92rem', display: 'block', lineHeight: 1.2 }}>City Assistant</strong>
+            <span style={{ fontSize: '.74rem', opacity: 0.85 }}>Public records &amp; municipal code</span>
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '.25rem' }}>
           {messages.length > 0 && (
             <button
               type="button"
@@ -170,41 +175,87 @@ export default function PublicAiAssistant({ activeTab = 'home' }) {
                 setError('');
               }}
               title="Clear conversation"
-              className="rounded-lg p-1.5 text-slate-300 transition hover:bg-white/10 hover:text-white"
+              style={{
+                background: 'rgba(255,255,255,0.14)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '.25rem .5rem',
+                fontSize: '.75rem',
+                cursor: 'pointer',
+              }}
             >
-              <TrashIcon className="h-4 w-4" />
+              Clear
             </button>
           )}
           <button
             type="button"
             onClick={() => setOpen(false)}
             title="Close assistant"
-            className="rounded-lg p-1.5 text-slate-300 transition hover:bg-white/10 hover:text-white"
+            aria-label="Close assistant"
+            style={{
+              background: 'rgba(255,255,255,0.14)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '.25rem .55rem',
+              fontSize: '.85rem',
+              lineHeight: 1,
+              cursor: 'pointer',
+            }}
           >
-            <CloseIcon className="h-4 w-4" />
+            &times;
           </button>
         </div>
       </div>
 
-      <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50 p-4">
+      <div
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          background: '#f8fafc',
+          padding: '.85rem',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '.6rem',
+        }}
+      >
         {messages.length === 0 ? (
-          <div className="space-y-3">
-            <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs leading-relaxed text-slate-600">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '.65rem' }}>
+            <div
+              style={{
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: '10px',
+                padding: '.65rem .75rem',
+                fontSize: '.82rem',
+                color: '#475569',
+                lineHeight: 1.45,
+              }}
+            >
               Ask about published municipal code, upcoming public meetings, city notices, calendar events, forms, or staff directory info.
             </div>
-            <div className="space-y-1.5">
-              <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
-                Try asking
-              </div>
+            <div style={{ fontSize: '.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em', color: '#64748b' }}>
+              Try asking
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '.4rem' }}>
               {STARTER_PROMPTS.map((q) => (
                 <button
                   key={q}
                   type="button"
                   onClick={() => sendPrompt(q)}
-                  className="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-xs text-slate-700 transition hover:border-slate-300 hover:bg-slate-100"
+                  style={{
+                    textAlign: 'left',
+                    background: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: '8px',
+                    padding: '.5rem .7rem',
+                    fontSize: '.82rem',
+                    color: '#1e293b',
+                    cursor: 'pointer',
+                  }}
                 >
-                  <ChatIcon className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                  <span>{q}</span>
+                  {q}
                 </button>
               ))}
             </div>
@@ -213,14 +264,23 @@ export default function PublicAiAssistant({ activeTab = 'home' }) {
           messages.map((m, idx) => (
             <div
               key={idx}
-              className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              style={{
+                display: 'flex',
+                justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start',
+              }}
             >
               <div
-                className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed ${
-                  m.role === 'user'
-                    ? 'bg-slate-900 text-white'
-                    : 'border border-slate-200 bg-white text-slate-800 shadow-sm'
-                }`}
+                style={{
+                  maxWidth: '85%',
+                  whiteSpace: 'pre-wrap',
+                  borderRadius: '12px',
+                  padding: '.55rem .75rem',
+                  fontSize: '.83rem',
+                  lineHeight: 1.45,
+                  ...(m.role === 'user'
+                    ? { background: 'var(--cd-primary, #0f2942)', color: '#ffffff' }
+                    : { background: '#ffffff', border: '1px solid #e2e8f0', color: '#0f172a' }),
+                }}
               >
                 {m.text}
               </div>
@@ -228,14 +288,32 @@ export default function PublicAiAssistant({ activeTab = 'home' }) {
           ))
         )}
         {loading && (
-          <div className="flex justify-start">
-            <div className="rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-xs text-slate-500 shadow-sm">
+          <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+            <div
+              style={{
+                background: '#ffffff',
+                border: '1px solid #e2e8f0',
+                borderRadius: '12px',
+                padding: '.5rem .75rem',
+                fontSize: '.8rem',
+                color: '#64748b',
+              }}
+            >
               Searching public records…
             </div>
           </div>
         )}
         {error && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <div
+            style={{
+              background: '#fef2f2',
+              border: '1px solid #fecaca',
+              borderRadius: '8px',
+              padding: '.5rem .75rem',
+              fontSize: '.8rem',
+              color: '#b91c1c',
+            }}
+          >
             {error}
           </div>
         )}
@@ -247,7 +325,14 @@ export default function PublicAiAssistant({ activeTab = 'home' }) {
           e.preventDefault();
           sendPrompt();
         }}
-        className="flex items-center gap-2 border-t border-slate-200 bg-white p-3"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '.45rem',
+          borderTop: '1px solid #e2e8f0',
+          background: '#ffffff',
+          padding: '.6rem .75rem',
+        }}
       >
         <input
           type="text"
@@ -256,17 +341,24 @@ export default function PublicAiAssistant({ activeTab = 'home' }) {
           placeholder="Ask a public question..."
           maxLength={2000}
           disabled={loading}
-          className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none"
+          style={{
+            flex: 1,
+            margin: 0,
+            padding: '.45rem .65rem',
+            fontSize: '.84rem',
+            borderRadius: '8px',
+            border: '1px solid #cbd5e1',
+          }}
         />
         <button
           type="submit"
+          className="btn primary"
           disabled={loading || !input.trim()}
-          className="flex h-8 w-8 items-center justify-center rounded-xl bg-slate-900 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-          aria-label="Send message"
+          style={{ padding: '.45rem .8rem', borderRadius: '8px', fontSize: '.84rem' }}
         >
-          <SendIcon className="h-3.5 w-3.5" />
+          Send
         </button>
       </form>
-    </div>
+    </aside>
   );
 }
