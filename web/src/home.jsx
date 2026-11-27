@@ -25,6 +25,7 @@ import { DemoBanner, DocketHallLogo, DirectoryHeaderLink, PublicFooter, PublicHe
 import { applyTheme } from './core/theme.js';
 import RichTextContent from './core/RichTextContent.jsx';
 import RichTextEditor from './core/RichTextEditor.jsx';
+import PublicAiAssistant from './core/PublicAiAssistant.jsx';
 import BlogPublicTab from './modules/blog/BlogPublicTab.jsx';
 import CodeLibraryViewer from './modules/codification/CodeLibraryViewer.jsx';
 import { COMPLAINT_STATUSES, ORDINANCE_PRESETS, StatusBadge } from './modules/complaints/constants.jsx';
@@ -4321,6 +4322,9 @@ function PublicHomePage() {
             </form>
           </div>
         </div>
+      )}
+      {enabledModules.includes('ai_assistant') && publicFeatures?.ai_assistant?.public_front_page && (
+        <PublicAiAssistant activeTab={activeTab} />
       )}
       <PublicFooter branding={branding} />
     </div>

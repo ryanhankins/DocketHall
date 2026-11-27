@@ -20,6 +20,8 @@ from datetime import date, datetime, timezone
 import json
 import os
 import re
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -39,7 +41,7 @@ from .ai_tools_ext import (
 from .audit import record_audit
 from .auth import current_user, has_permission, is_demo_mode, require_admin, require_not_demo_mode, require_permission
 from .db import pool
-from .registry import is_module_enabled
+from .registry import is_feature_enabled, is_module_enabled
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -984,6 +986,40 @@ _TOOL_ACCESS: dict[str, tuple[str | None, tuple[str, ...]]] = {
 }
 
 
+_PUBLIC_USER: dict = {"id": 0, "username": "public", "role": "public", "permissions": []}
+
+_PUBLIC_TOOL_NAMES: frozenset[str] = frozenset({
+    "search_city_code",
+    "get_city_code_section",
+    "search_portal_info",
+    "search_directory",
+    "list_faqs",
+    "list_calendar_events",
+    "list_facilities",
+    "list_forms",
+    "list_agendas",
+    "get_agenda_details",
+    "list_notices",
+    "list_blog_posts",
+    "list_pages",
+    "search_records",
+})
+
+_PUBLIC_RATE_LOCK = threading.Lock()
+_PUBLIC_RATE_HITS: dict[str, list[float]] = {}
+
+
+def _check_public_ai_rate_limit(request: Request, limit: int = 20, window_sec: int = 300) -> None:
+    ip = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    now = time.monotonic()
+    with _PUBLIC_RATE_LOCK:
+        hits = [t for t in _PUBLIC_RATE_HITS.get(ip, []) if now - t < window_sec]
+        if len(hits) >= limit:
+            raise HTTPException(status_code=429, detail="Too many requests. Please wait a few minutes and try again.")
+        hits.append(now)
+        _PUBLIC_RATE_HITS[ip] = hits
+
+
 def _check_tool_access(name: str, user: dict) -> str | None:
     """Return None if user may run tool `name`, otherwise a human-readable denial reason."""
     policy = _TOOL_ACCESS.get(name)
@@ -992,6 +1028,10 @@ def _check_tool_access(name: str, user: dict) -> str | None:
     mod_id, perms = policy
     if mod_id and not is_module_enabled(mod_id):
         return f"The '{mod_id}' module is currently disabled."
+    if user.get("role") == "public":
+        if name not in _PUBLIC_TOOL_NAMES:
+            return "This tool is not available on the public portal."
+        return None
     if "__admin__" in perms:
         if user.get("role") != "admin":
             return "Administrator access is required for this action."
@@ -1295,7 +1335,9 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             st = str(args.get("status") or "all").strip().lower()
             clauses = ["1=1"]
             params: list = []
-            if st == "draft":
+            if not has_permission(user, "notices.manage"):
+                clauses.append("is_published = TRUE")
+            elif st == "draft":
                 clauses.append("is_published = FALSE")
             elif st == "published":
                 clauses.append("is_published = TRUE")
@@ -1407,7 +1449,9 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             st = str(args.get("status") or "all").strip().lower()
             clauses = ["1=1"]
             params_b: list = []
-            if st == "draft":
+            if not has_permission(user, "blog.manage"):
+                clauses.append("is_published = TRUE")
+            elif st == "draft":
                 clauses.append("is_published = FALSE")
             elif st == "published":
                 clauses.append("is_published = TRUE")
@@ -1496,8 +1540,9 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
 
         if name == "list_agendas":
             lim = max(1, min(int(args.get("limit") or 8), 20))
+            where_sql = "" if has_permission(user, "agendas.manage") else "WHERE (finalized_at IS NOT NULL OR STARTS_WITH(LOWER(status), 'finalized')) "
             rows = conn.execute(
-                "SELECT id, title, body, meeting_date, meeting_time, status FROM agendas ORDER BY meeting_date DESC NULLS LAST, id DESC LIMIT %s",
+                f"SELECT id, title, body, meeting_date, meeting_time, status FROM agendas {where_sql}ORDER BY meeting_date DESC NULLS LAST, id DESC LIMIT %s",
                 (lim,),
             ).fetchall()
             return (
@@ -1687,11 +1732,16 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             q = str(args.get("query") or "").strip()
             st_f = str(args.get("status") or "").strip().lower()
             like = f"%{q}%"
+            is_mgr = has_permission(user, "complaints.manage")
+            owner_clause = "" if is_mgr else "AND complainant_user_id = %s "
+            c_params: list = [q, like, like, like, like, st_f, st_f]
+            if not is_mgr:
+                c_params.append(user["id"])
             rows = conn.execute(
                 "SELECT complaint_number, subject_property_address, ordinance_section, conduct_description, status, enforcement_stage, date_observed "
                 "FROM complaints WHERE (%s = '' OR complaint_number ILIKE %s OR subject_property_address ILIKE %s OR ordinance_section ILIKE %s OR conduct_description ILIKE %s) "
-                "AND (%s = '' OR LOWER(status) = %s) ORDER BY id DESC LIMIT 12",
-                (q, like, like, like, like, st_f, st_f),
+                f"AND (%s = '' OR LOWER(status) = %s) {owner_clause}ORDER BY id DESC LIMIT 12",
+                tuple(c_params),
             ).fetchall()
             return (
                 {
@@ -1719,14 +1769,17 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             if m_cmp:
                 candidates.append(f"{m_cmp.group(1)}{int(m_cmp.group(2)):04d}")
             row = None
+            is_mgr = has_permission(user, "complaints.manage")
+            owner_clause = "" if is_mgr else " AND complainant_user_id = %s"
             for cand in candidates:
+                c_q_params = (cand,) if is_mgr else (cand, user["id"])
                 row = conn.execute(
                     "SELECT id, complaint_number, intake_channel, is_anonymous, complainant_name, "
                     "subject_property_address, subject_person_name, ordinance_section, conduct_description, "
                     "date_observed, status, assigned_to, investigation_report, enforcement_stage, "
                     "nov_required_action, nov_compliance_deadline, final_resolution "
-                    "FROM complaints WHERE UPPER(complaint_number) = UPPER(%s)",
-                    (cand,),
+                    f"FROM complaints WHERE UPPER(complaint_number) = UPPER(%s){owner_clause}",
+                    c_q_params,
                 ).fetchone()
                 if row:
                     break
@@ -1832,10 +1885,13 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
         if name == "search_records":
             q = str(args.get("query") or "").strip()
             terms = _extract_search_terms(q)
+            pub_only = not has_permission(user, "records.manage")
+            pub_sql_d = " AND d.is_public = TRUE" if pub_only else ""
             if not terms:
                 rows = conn.execute(
                     "SELECT id, doc_number, category, title, notes, tags, is_public FROM repository_documents "
-                    "ORDER BY id DESC LIMIT 10"
+                    + ("WHERE is_public = TRUE " if pub_only else "")
+                    + "ORDER BY id DESC LIMIT 10"
                 ).fetchall()
             else:
                 conds = " OR ".join(
@@ -1849,7 +1905,7 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                 rows = conn.execute(
                     f"SELECT DISTINCT d.id, d.doc_number, d.category, d.title, d.notes, d.tags, d.is_public "
                     f"FROM repository_documents d LEFT JOIN repository_files f ON f.document_id = d.id "
-                    f"WHERE {conds} ORDER BY d.id DESC LIMIT 10",
+                    f"WHERE ({conds}){pub_sql_d} ORDER BY d.id DESC LIMIT 10",
                     tuple(params),
                 ).fetchall()
             records = []
@@ -1875,8 +1931,12 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
 
         if name == "read_record_file":
             fid = int(args.get("file_id"))
+            pub_only = not has_permission(user, "records.manage")
             frow = conn.execute(
-                "SELECT filename, content_type, object_key FROM repository_files WHERE id = %s",
+                "SELECT f.filename, f.content_type, f.object_key "
+                "FROM repository_files f "
+                "JOIN repository_documents d ON d.id = f.document_id "
+                "WHERE f.id = %s" + (" AND d.is_public = TRUE" if pub_only else ""),
                 (fid,),
             ).fetchone()
             if not frow:
@@ -1899,13 +1959,15 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
         if name == "search_city_code":
             q = str(args.get("query") or "").strip()
             terms = _extract_search_terms(q)
+            pub_code_clause = "" if has_permission(user, "codification.manage") else "s.is_published = TRUE AND COALESCE(c.is_published, TRUE) = TRUE"
             if not terms:
+                where_sql = f"WHERE {pub_code_clause} " if pub_code_clause else ""
                 rows = conn.execute(
                     "SELECT s.section_number, s.title, s.body, c.title, p.section_number, p.title "
                     "FROM code_sections s "
                     "LEFT JOIN code_chapters c ON c.id = s.chapter_id "
                     "LEFT JOIN code_sections p ON p.id = s.parent_id "
-                    "ORDER BY s.sort_order ASC, s.id ASC LIMIT 10"
+                    f"{where_sql}ORDER BY s.sort_order ASC, s.id ASC LIMIT 10"
                 ).fetchall()
                 index_rows = [(r[0], r[1], r[3]) for r in rows]
             else:
@@ -1932,12 +1994,13 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                     score_params.extend([like_nh, like_nh, like_nh])
                 score_expr = " + ".join(score_parts)
                 where_expr = " OR ".join(where_parts)
+                full_where = f"({where_expr}) AND {pub_code_clause}" if pub_code_clause else where_expr
                 rows = conn.execute(
                     f"SELECT s.section_number, s.title, s.body, c.title, p.section_number, p.title, ({score_expr}) AS score "
                     f"FROM code_sections s "
                     f"LEFT JOIN code_chapters c ON c.id = s.chapter_id "
                     f"LEFT JOIN code_sections p ON p.id = s.parent_id "
-                    f"WHERE {where_expr} "
+                    f"WHERE {full_where} "
                     f"ORDER BY score DESC, s.sort_order ASC, s.id ASC LIMIT 12",
                     tuple(score_params + where_params),
                 ).fetchall()
@@ -1945,7 +2008,7 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                     f"SELECT s.section_number, s.title, c.title "
                     f"FROM code_sections s "
                     f"LEFT JOIN code_chapters c ON c.id = s.chapter_id "
-                    f"WHERE {where_expr} "
+                    f"WHERE {full_where} "
                     f"ORDER BY s.sort_order ASC, s.id ASC LIMIT 30",
                     tuple(where_params),
                 ).fetchall()
@@ -1975,12 +2038,13 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
 
         if name == "get_city_code_section":
             sec = str(args.get("section_number") or "").strip()
+            pub_code_and = "" if has_permission(user, "codification.manage") else " AND s.is_published = TRUE AND COALESCE(c.is_published, TRUE) = TRUE"
             row = conn.execute(
                 "SELECT s.section_number, s.title, s.body, c.title, p.section_number, p.title "
                 "FROM code_sections s "
                 "LEFT JOIN code_chapters c ON c.id = s.chapter_id "
                 "LEFT JOIN code_sections p ON p.id = s.parent_id "
-                "WHERE s.section_number = %s",
+                f"WHERE s.section_number = %s{pub_code_and}",
                 (sec,),
             ).fetchone()
             if not row:
@@ -1989,7 +2053,7 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                     "FROM code_sections s "
                     "LEFT JOIN code_chapters c ON c.id = s.chapter_id "
                     "LEFT JOIN code_sections p ON p.id = s.parent_id "
-                    "WHERE s.section_number ILIKE %s ORDER BY s.id ASC LIMIT 1",
+                    f"WHERE s.section_number ILIKE %s{pub_code_and} ORDER BY s.id ASC LIMIT 1",
                     (f"%{sec}%",),
                 ).fetchone()
             if not row:
@@ -2014,8 +2078,9 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             terms = _extract_search_terms(q) or [q]
             like_clauses_pages = " OR ".join("(title ILIKE %s OR summary ILIKE %s OR body ILIKE %s)" for _ in terms)
             p_params = [f"%{t}%" for t in terms for _ in range(3)]
+            pages_pub = "" if has_permission(user, "pages.manage") else " AND is_public = TRUE"
             pages = conn.execute(
-                f"SELECT title, summary, body FROM city_pages WHERE {like_clauses_pages} ORDER BY sort_order ASC LIMIT 5",
+                f"SELECT title, summary, body FROM city_pages WHERE ({like_clauses_pages}){pages_pub} ORDER BY sort_order ASC LIMIT 5",
                 tuple(p_params),
             ).fetchall()
             like_clauses_faqs = " OR ".join("(question ILIKE %s OR answer ILIKE %s)" for _ in terms)
@@ -2025,8 +2090,9 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
                 tuple(f_params),
             ).fetchall()
             like_clauses_notices = " OR ".join("(title ILIKE %s OR summary ILIKE %s OR body ILIKE %s)" for _ in terms)
+            notices_pub = "" if has_permission(user, "notices.manage") else " AND is_published = TRUE"
             notices = conn.execute(
-                f"SELECT title, summary, body FROM city_notices WHERE {like_clauses_notices} ORDER BY id DESC LIMIT 5",
+                f"SELECT title, summary, body FROM city_notices WHERE ({like_clauses_notices}){notices_pub} ORDER BY id DESC LIMIT 5",
                 tuple(p_params),
             ).fetchall()
             like_clauses_blog = " OR ".join("(title ILIKE %s OR lead_in ILIKE %s OR body ILIKE %s)" for _ in terms)
@@ -2115,14 +2181,18 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
         if name == "list_pages":
             lim = max(1, min(int(args.get("limit") or 10), 25))
             q = str(args.get("search") or "").strip()
+            pub_only = not has_permission(user, "pages.manage")
+            pub_and = " AND is_public = TRUE" if pub_only else ""
             if q:
                 rows = conn.execute(
-                    "SELECT id, slug, title, summary, is_public, updated_at FROM city_pages WHERE title ILIKE %s OR summary ILIKE %s OR slug ILIKE %s ORDER BY id DESC LIMIT %s",
+                    f"SELECT id, slug, title, summary, is_public, updated_at FROM city_pages WHERE (title ILIKE %s OR summary ILIKE %s OR slug ILIKE %s){pub_and} ORDER BY id DESC LIMIT %s",
                     (f"%{q}%", f"%{q}%", f"%{q}%", lim),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT id, slug, title, summary, is_public, updated_at FROM city_pages ORDER BY id DESC LIMIT %s",
+                    "SELECT id, slug, title, summary, is_public, updated_at FROM city_pages "
+                    + ("WHERE is_public = TRUE " if pub_only else "")
+                    + "ORDER BY id DESC LIMIT %s",
                     (lim,),
                 ).fetchall()
             return (
@@ -2258,9 +2328,10 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
 
         if name == "get_agenda_details":
             ag_id = int(args["agenda_id"])
+            fin_and = "" if has_permission(user, "agendas.manage") else " AND (finalized_at IS NOT NULL OR STARTS_WITH(LOWER(status), 'finalized'))"
             ag = conn.execute(
                 "SELECT id, title, body, meeting_date, meeting_time, status, finalized_at, minutes_status "
-                "FROM agendas WHERE id = %s",
+                f"FROM agendas WHERE id = %s{fin_and}",
                 (ag_id,),
             ).fetchone()
             if not ag:
@@ -2391,19 +2462,20 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
             from_raw = str(args.get("from_date") or "").strip()
             from_d = date.fromisoformat(from_raw) if from_raw else None
             like = f"%{q}%"
+            pub_and = "" if has_permission(user, "calendar.manage") else " AND is_public = TRUE"
             if from_d is not None:
                 rows = conn.execute(
                     "SELECT id, title, event_date, start_time, location, category, description "
                     "FROM calendar_events "
                     "WHERE (%s = '' OR title ILIKE %s OR location ILIKE %s OR description ILIKE %s) "
-                    "AND event_date >= %s ORDER BY event_date ASC, id ASC LIMIT 20",
+                    f"AND event_date >= %s{pub_and} ORDER BY event_date ASC, id ASC LIMIT 20",
                     (q, like, like, like, from_d),
                 ).fetchall()
             else:
                 rows = conn.execute(
                     "SELECT id, title, event_date, start_time, location, category, description "
                     "FROM calendar_events "
-                    "WHERE (%s = '' OR title ILIKE %s OR location ILIKE %s OR description ILIKE %s) "
+                    f"WHERE (%s = '' OR title ILIKE %s OR location ILIKE %s OR description ILIKE %s){pub_and} "
                     "ORDER BY event_date ASC, id ASC LIMIT 20",
                     (q, like, like, like),
                 ).fetchall()
@@ -2442,10 +2514,11 @@ def _execute_tool(name: str, args: dict, user: dict) -> tuple[dict, dict | None]
         if name == "list_forms":
             q = str(args.get("query") or "").strip()
             like = f"%{q}%"
+            pub_and = "" if has_permission(user, "forms.manage") else " AND is_public = TRUE"
             rows = conn.execute(
                 "SELECT slug, title, form_kind, description, closes_at, is_public "
                 "FROM city_forms "
-                "WHERE (%s = '' OR title ILIKE %s OR description ILIKE %s) "
+                f"WHERE (%s = '' OR title ILIKE %s OR description ILIKE %s){pub_and} "
                 "ORDER BY sort_order ASC, id ASC LIMIT 20",
                 (q, like, like),
             ).fetchall()
@@ -2961,7 +3034,7 @@ def _describe_proposed_action(name: str, args: dict) -> str:
     return f"Execute {name}"
 
 
-def _run_ai_command(prompt: str, history: list[dict], user: dict, page_context: dict | None = None) -> dict:
+def _run_ai_command(prompt: str, history: list[dict], user: dict, page_context: dict | None = None, *, public_mode: bool = False) -> dict:
     username = user["username"]
     api_key, model, _ = _load_gemini_config()
     if not api_key:
@@ -2979,33 +3052,44 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict, page_context: 
         ).fetchone()
         if crow and crow[0]:
             city_label = crow[0]
-    sys_instruction = (
-        f"You are the DocketHall municipal admin assistant for {city_label}. Today's date is {today_str}. "
-        "DocketHall is an all-in-one municipal operations platform covering: Agendas & Live Meetings, "
-        "Permits & Land-Use/Variance Applications, Inspections, Contractor Licensing, Municipal City Code, "
-        "Public Records & FOIA, Code-Enforcement Complaints & 311 Work Orders, Public Notices, City Blog, "
-        "Calendar, City Directory & FAQs, Info Pages, Utility Billing, Municipal Citations, and Site Modules/Branding. "
-        f"SCOPE GUARDRAIL: You are strictly limited to {city_label} municipal administration and DocketHall tasks. "
-        f"If the user asks for anything unrelated to {city_label} governance, city code/documents, permits, agendas, "
-        "or DocketHall operations (such as general trivia, personal tasks, creative writing, or outside topics), "
-        "politely decline and explain that you can only assist with municipal tasks in DocketHall. "
-        "1) When the user asks a QUESTION about city rules, ordinances, limits, permits, policies, records, or schedules, "
-        "ALWAYS search the relevant data using your read/search tools (search_city_code, get_city_code_section, "
-        "search_records, read_record_file, search_portal_info, list_agendas, list_permits, get_permit_details, list_complaints, get_complaint_details), "
-        "read the returned text, and give a clear, accurate answer citing the specific Code Section or document title. "
-        "2) When the user asks to CREATE, UPDATE, or DO something, call the appropriate action tool(s) with clean, properly "
-        "formatted arguments (YYYY-MM-DD dates, '6:00 PM' times; if the year is omitted for a future date like 'December 1', "
-        "choose the next upcoming occurrence relative to today). When asked to PUBLISH, UNPUBLISH, or EDIT an existing "
-        "blog post, notice, or info page, ALWAYS use list_blog_posts / list_notices / list_pages to find it and call "
-        "update_blog_post / update_notice / update_page—NEVER call create_* to publish or edit an existing item. "
-        "When asked to attach a memo, summary, or city code note to an agenda or agenda item, use add_agenda_item_attachment "
-        "(after searching city code/records if needed). When asked to MERGE or CONSOLIDATE two agenda items into a single item, "
-        "use merge_agenda_items (or BOTH update_agenda_item and delete_agenda_item) so the merged-away item is actually removed. "
-        "Recording or proposing an agenda item, backlog todo, complaint, "
-        "or notice is an administrative workflow for official council/staff review—do not refuse to stage a valid DocketHall "
-        "agenda item or record just because the topic is controversial or unusual. IMPORTANT: Write actions are ONLY staged "
-        "for the Confirm/Cancel buttons when you actually call the write tool—never ask the user to confirm without calling the write tool."
-    )
+    if public_mode:
+        sys_instruction = (
+            f"You are the public civic assistant for {city_label}. Today's date is {today_str}. "
+            "You help residents and visitors find information from published city code, finalized meeting agendas, "
+            "published public notices, blog posts, city pages, FAQs, directory contacts, public calendar events, and public records. "
+            f"SCOPE GUARDRAIL: You are strictly limited to {city_label} civic information. "
+            "Politely decline any unrelated requests. You are READ-ONLY: never claim to create, edit, or submit anything on the user's behalf; "
+            "instead guide them to the relevant portal tab (e.g., Permits, Complaints, Calendar) or contact city hall. "
+            "Always search using your tools and cite the exact Code Section number or document title returned."
+        )
+    else:
+        sys_instruction = (
+            f"You are the DocketHall municipal admin assistant for {city_label}. Today's date is {today_str}. "
+            "DocketHall is an all-in-one municipal operations platform covering: Agendas & Live Meetings, "
+            "Permits & Land-Use/Variance Applications, Inspections, Contractor Licensing, Municipal City Code, "
+            "Public Records & FOIA, Code-Enforcement Complaints & 311 Work Orders, Public Notices, City Blog, "
+            "Calendar, City Directory & FAQs, Info Pages, Utility Billing, Municipal Citations, and Site Modules/Branding. "
+            f"SCOPE GUARDRAIL: You are strictly limited to {city_label} municipal administration and DocketHall tasks. "
+            f"If the user asks for anything unrelated to {city_label} governance, city code/documents, permits, agendas, "
+            "or DocketHall operations (such as general trivia, personal tasks, creative writing, or outside topics), "
+            "politely decline and explain that you can only assist with municipal tasks in DocketHall. "
+            "1) When the user asks a QUESTION about city rules, ordinances, limits, permits, policies, records, or schedules, "
+            "ALWAYS search the relevant data using your read/search tools (search_city_code, get_city_code_section, "
+            "search_records, read_record_file, search_portal_info, list_agendas, list_permits, get_permit_details, list_complaints, get_complaint_details), "
+            "read the returned text, and give a clear, accurate answer citing the specific Code Section or document title. "
+            "2) When the user asks to CREATE, UPDATE, or DO something, call the appropriate action tool(s) with clean, properly "
+            "formatted arguments (YYYY-MM-DD dates, '6:00 PM' times; if the year is omitted for a future date like 'December 1', "
+            "choose the next upcoming occurrence relative to today). When asked to PUBLISH, UNPUBLISH, or EDIT an existing "
+            "blog post, notice, or info page, ALWAYS use list_blog_posts / list_notices / list_pages to find it and call "
+            "update_blog_post / update_notice / update_page—NEVER call create_* to publish or edit an existing item. "
+            "When asked to attach a memo, summary, or city code note to an agenda or agenda item, use add_agenda_item_attachment "
+            "(after searching city code/records if needed). When asked to MERGE or CONSOLIDATE two agenda items into a single item, "
+            "use merge_agenda_items (or BOTH update_agenda_item and delete_agenda_item) so the merged-away item is actually removed. "
+            "Recording or proposing an agenda item, backlog todo, complaint, "
+            "or notice is an administrative workflow for official council/staff review—do not refuse to stage a valid DocketHall "
+            "agenda item or record just because the topic is controversial or unusual. IMPORTANT: Write actions are ONLY staged "
+            "for the Confirm/Cancel buttons when you actually call the write tool—never ask the user to confirm without calling the write tool."
+        )
     if page_context and (page_context.get("route") or page_context.get("title")):
         ctx_route = str(page_context.get("route") or "").strip()[:200]
         ctx_title = str(page_context.get("title") or "").strip()[:200]
@@ -3073,6 +3157,8 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict, page_context: 
                 denied = _check_tool_access(fname, user)
                 if denied:
                     result_obj = {"ok": False, "error": denied}
+                elif public_mode:
+                    result_obj = {"ok": False, "error": "Write actions are not available on the public portal."}
                 elif fname == "create_facility_reservation" and not any(p["tool"] == "create_facility" for p in pending_actions):
                     fname_req = str(fargs.get("facility_name") or "").strip()
                     with pool.connection() as conn:
@@ -3139,9 +3225,28 @@ def _run_ai_command(prompt: str, history: list[dict], user: dict, page_context: 
     record_audit(username, "ai.command", f"Prompt: {prompt[:120]} | Proposed: {len(pending_actions)}")
     return {
         "reply": final_text or "I couldn't find an answer or propose an action for that request.",
-        "actions": actions,
-        "pending_actions": pending_actions,
+        "actions": [] if public_mode else actions,
+        "pending_actions": [] if public_mode else pending_actions,
     }
+
+
+@router.get("/public/status")
+def get_public_ai_status():
+    enabled = is_module_enabled("ai_assistant") and is_feature_enabled("ai_assistant", "public_front_page")
+    if not enabled:
+        return {"enabled": False, "configured": False}
+    key, _, _, _ = _load_gemini_settings()
+    return {"enabled": True, "configured": bool(key)}
+
+
+@router.post("/public/command")
+async def run_public_ai_command(body: AiCommandIn, request: Request):
+    if not is_module_enabled("ai_assistant") or not is_feature_enabled("ai_assistant", "public_front_page"):
+        raise HTTPException(status_code=403, detail="Public AI Assistant is not enabled")
+    _check_public_ai_rate_limit(request)
+    history = [{"role": h.role, "text": h.text} for h in body.history]
+    ctx = body.page_context.model_dump() if body.page_context else None
+    return await run_in_threadpool(lambda: _run_ai_command(body.prompt, history, _PUBLIC_USER, ctx, public_mode=True))
 
 
 class AiPendingActionIn(BaseModel):

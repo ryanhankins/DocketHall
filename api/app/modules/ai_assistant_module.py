@@ -39,7 +39,14 @@ MODULE = CivicModule(
     routers=[],
     bootstrap=ai_assistant.ensure_ai_assistant_schema,
     permissions=[],
-    features=[],
+    features=[
+        {
+            "key": "public_front_page",
+            "label": "Public Front Page AI Assistant",
+            "description": "Show a read-only AI assistant on the public homepage that answers questions using only published city code, finalized agendas, notices, directory, and FAQs.",
+            "default": False,
+        },
+    ],
     nav_groups=[],
     backup_tables=AI_ASSISTANT_BACKUP_TABLES,
 )

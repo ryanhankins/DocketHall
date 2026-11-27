@@ -389,3 +389,125 @@ def test_agenda_cover_page_groups_items_by_section(admin_client):
     assert "First New Item" in first_page_text
     assert "Second New Item" in first_page_text
     assert "Old Item" in first_page_text
+
+
+def test_public_ai_feature_toggle_and_data_isolation(admin_client, anon_client, applicant_client):
+    from app import ai_assistant
+
+    # Enable ai_assistant module, ensure public_front_page starts disabled
+    r = admin_client.patch(
+        "/api/modules/admin/ai_assistant",
+        json={"enabled": True, "features": {"public_front_page": False}},
+    )
+    assert r.status_code == 200, r.text
+
+    st_off = anon_client.get("/api/ai/public/status")
+    assert st_off.status_code == 200
+    assert st_off.json()["enabled"] is False
+
+    cmd_off = anon_client.post("/api/ai/public/command", json={"prompt": "Hello"})
+    assert cmd_off.status_code == 403
+
+    # Admin enables public_front_page
+    r = admin_client.patch(
+        "/api/modules/admin/ai_assistant",
+        json={"enabled": True, "features": {"public_front_page": True}},
+    )
+    assert r.status_code == 200, r.text
+
+    st_on = anon_client.get("/api/ai/public/status")
+    assert st_on.status_code == 200
+    assert st_on.json()["enabled"] is True
+
+    # Public user cannot call write or private/staff tools
+    for blocked_tool in [
+        "list_complaints",
+        "get_complaint_details",
+        "list_permits",
+        "list_users",
+        "list_audit_logs",
+        "create_blog_post",
+        "update_page",
+        "read_record_file",
+    ]:
+        res, _ = ai_assistant._execute_tool(blocked_tool, {}, ai_assistant._PUBLIC_USER)
+        assert "error" in res, f"Expected {blocked_tool} to be blocked for public user"
+
+    # Seed public vs private/draft content as admin
+    admin_user = admin_client.get("/api/me").json()
+    admin_client.patch("/api/modules/admin/communications", json={"enabled": True})
+    admin_client.patch("/api/modules/admin/agendas", json={"enabled": True})
+
+    pub_notice, _ = ai_assistant._execute_tool(
+        "create_notice",
+        {"title": "Public Water Flush", "body": "Hydrant flushing Friday.", "is_public": True},
+        admin_user,
+    )
+    priv_notice, _ = ai_assistant._execute_tool(
+        "create_notice",
+        {"title": "Secret Draft Notice", "body": "Internal only.", "is_public": False},
+        admin_user,
+    )
+    assert pub_notice["ok"] and priv_notice["ok"]
+    assert priv_notice["is_published"] is False
+
+    pub_blog, _ = ai_assistant._execute_tool(
+        "create_blog_post",
+        {"title": "Public Park Opening", "summary": "Park opens.", "body": "Join us.", "is_published": True},
+        admin_user,
+    )
+    priv_blog, _ = ai_assistant._execute_tool(
+        "create_blog_post",
+        {"title": "Secret Draft Blog", "summary": "Draft.", "body": "Unpublished.", "is_published": False},
+        admin_user,
+    )
+    assert pub_blog["ok"] and priv_blog["ok"]
+
+    draft_ag, _ = ai_assistant._execute_tool(
+        "create_agenda",
+        {"title": "Confidential Draft Agenda", "body": "City Council", "meeting_date": "2026-12-20"},
+        admin_user,
+    )
+    assert draft_ag["ok"]
+
+    # Public user only sees published notices & blogs, and never sees draft agendas
+    pub_notices, _ = ai_assistant._execute_tool("list_notices", {}, ai_assistant._PUBLIC_USER)
+    notice_titles = [n["title"] for n in pub_notices["notices"]]
+    assert "Public Water Flush" in notice_titles
+    assert "Secret Draft Notice" not in notice_titles
+
+    pub_blogs, _ = ai_assistant._execute_tool("list_blog_posts", {}, ai_assistant._PUBLIC_USER)
+    blog_titles = [b["title"] for b in pub_blogs["posts"]]
+    assert "Public Park Opening" in blog_titles
+    assert "Secret Draft Blog" not in blog_titles
+
+    pub_agendas, _ = ai_assistant._execute_tool("list_agendas", {}, ai_assistant._PUBLIC_USER)
+    assert all(a["id"] != draft_ag["agenda_id"] for a in pub_agendas["agendas"])
+    ag_detail, _ = ai_assistant._execute_tool("get_agenda_details", {"agenda_id": draft_ag["agenda_id"]}, ai_assistant._PUBLIC_USER)
+    assert "error" in ag_detail
+
+    # Authenticated non-manager applicant only sees their own complaints
+    res_me = applicant_client.get("/api/me").json()
+    c_admin = admin_client.post(
+        "/api/complaints",
+        json={"conduct_description": "Admin private complaint", "subject_property_address": "100 Main St"},
+    )
+    assert c_admin.status_code in (200, 201), c_admin.text
+    c_res = applicant_client.post(
+        "/api/complaints",
+        json={"conduct_description": "Resident own complaint", "subject_property_address": "200 Oak St"},
+    )
+    assert c_res.status_code in (200, 201), c_res.text
+
+    res_list, _ = ai_assistant._execute_tool("list_complaints", {}, res_me)
+    assert res_list["ok"] is True
+    serialized = str(res_list["complaints"])
+    assert "Resident own complaint" in serialized
+    assert "Admin private complaint" not in serialized
+
+    # Clean up toggle back to default
+    admin_client.patch(
+        "/api/modules/admin/ai_assistant",
+        json={"enabled": True, "features": {"public_front_page": False}},
+    )
+
