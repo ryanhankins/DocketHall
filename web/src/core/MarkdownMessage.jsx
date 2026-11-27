@@ -151,6 +151,78 @@ export function MarkdownMessage({ text, allowStaffLinks = false }) {
       i++;
       continue;
     }
+    if (
+      line.includes('|') &&
+      i + 1 < lines.length &&
+      /^\|?[\s:-]+\|[\s|:-]*$/.test(lines[i + 1].trim())
+    ) {
+      const splitRow = (rawLine) => {
+        const trimmed = rawLine.trim().replace(/^\|/, '').replace(/\|$/, '');
+        return trimmed.split('|').map((c) => c.trim());
+      };
+      const headers = splitRow(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].trim() && lines[i].includes('|')) {
+        const cells = splitRow(lines[i]);
+        while (cells.length < headers.length) cells.push('');
+        rows.push(cells.slice(0, headers.length));
+        i++;
+      }
+      blocks.push(
+        <div key={blocks.length} style={{ overflowX: 'auto', margin: '0.35rem 0 0.5rem' }}>
+          <table
+            style={{
+              width: '100%',
+              borderCollapse: 'collapse',
+              fontSize: '0.8em',
+              border: '1px solid #cbd5e1',
+              background: '#ffffff',
+            }}
+          >
+            <thead>
+              <tr style={{ background: '#f1f5f9' }}>
+                {headers.map((h, hIdx) => (
+                  <th
+                    key={hIdx}
+                    style={{
+                      textAlign: 'left',
+                      padding: '0.35rem 0.45rem',
+                      border: '1px solid #cbd5e1',
+                      fontWeight: 700,
+                      color: '#0f172a',
+                      verticalAlign: 'bottom',
+                    }}
+                  >
+                    {renderInlineMarkdown(h, allowStaffLinks)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, rIdx) => (
+                <tr key={rIdx} style={{ background: rIdx % 2 === 1 ? '#f8fafc' : '#ffffff' }}>
+                  {row.map((cell, cIdx) => (
+                    <td
+                      key={cIdx}
+                      style={{
+                        padding: '0.35rem 0.45rem',
+                        border: '1px solid #cbd5e1',
+                        verticalAlign: 'top',
+                        color: '#1e293b',
+                      }}
+                    >
+                      {renderInlineMarkdown(cell, allowStaffLinks)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
     if (/^\s*[-*•]\s+/.test(line)) {
       const items = [];
       while (i < lines.length && /^\s*[-*•]\s+/.test(lines[i])) {
@@ -187,7 +259,8 @@ export function MarkdownMessage({ text, allowStaffLinks = false }) {
       lines[i].trim() &&
       !/^(#{1,3})\s+/.test(lines[i]) &&
       !/^\s*[-*•]\s+/.test(lines[i]) &&
-      !/^\s*\d+\.\s+/.test(lines[i])
+      !/^\s*\d+\.\s+/.test(lines[i]) &&
+      !(lines[i].includes('|') && i + 1 < lines.length && /^\|?[\s:-]+\|[\s|:-]*$/.test(lines[i + 1].trim()))
     ) {
       paraLines.push(lines[i]);
       i++;
