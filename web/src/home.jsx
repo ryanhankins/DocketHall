@@ -4323,7 +4323,7 @@ function PublicHomePage() {
           </div>
         </div>
       )}
-      {enabledModules.includes('ai_assistant') && publicFeatures?.ai_assistant?.public_front_page && (
+      {Array.isArray(enabledModules) && enabledModules.includes('ai_assistant') && publicFeatures?.ai_assistant?.public_front_page && (
         <PublicAiAssistant activeTab={activeTab} />
       )}
       <PublicFooter branding={branding} />
