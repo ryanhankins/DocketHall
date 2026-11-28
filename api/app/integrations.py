@@ -58,18 +58,22 @@ def bootstrap() -> None:
             conn.execute(SCHEMA)
             smtp_email = os.environ.get("SMTP_SENDER_EMAIL", "").strip()
             smtp_pass = os.environ.get("SMTP_PASSWORD", "").strip()
+            smtp_user = os.environ.get("SMTP_USERNAME", "").strip()
             if smtp_email and smtp_pass:
                 smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com").strip() or "smtp.gmail.com"
                 try:
                     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
                 except ValueError:
                     smtp_port = 587
+                cfg_seed: dict = {"smtp_host": smtp_host, "smtp_port": smtp_port}
+                if smtp_user:
+                    cfg_seed["smtp_username"] = smtp_user
                 conn.execute(
                     "INSERT INTO core_integrations "
                     "(provider, enabled, api_key, project_id, config, last_status, updated_by, updated_at) "
                     "VALUES ('gmail_smtp', TRUE, %s, %s, %s, 'Seeded from environment', 'system', now()) "
                     "ON CONFLICT (provider) DO NOTHING",
-                    (smtp_pass, smtp_email, Jsonb({"smtp_host": smtp_host, "smtp_port": smtp_port})),
+                    (smtp_pass, smtp_email, Jsonb(cfg_seed)),
                 )
 
 
@@ -316,6 +320,7 @@ def _load_email_state(conn) -> dict:
             "enabled": False,
             "smtp_host": "smtp.gmail.com",
             "smtp_port": 587,
+            "smtp_username": "",
             "sender_email": "",
             "has_password": False,
             "password_masked": "",
@@ -330,6 +335,7 @@ def _load_email_state(conn) -> dict:
         "enabled": bool(row[0]),
         "smtp_host": (cfg.get("smtp_host") or "smtp.gmail.com").strip(),
         "smtp_port": int(cfg.get("smtp_port") or 587),
+        "smtp_username": (cfg.get("smtp_username") or "").strip(),
         "sender_email": row[2] or "",
         "has_password": bool((row[1] or "").strip()),
         "password_masked": _mask_key(row[1] or ""),
@@ -348,6 +354,8 @@ def _send_smtp_mail(
     to_emails: list[str],
     subject: str,
     body: str,
+    *,
+    smtp_username: str = "",
 ) -> None:
     from .auth import is_demo_mode
     if is_demo_mode():
@@ -357,12 +365,19 @@ def _send_smtp_mail(
     msg["To"] = ", ".join(to_emails)
     msg["Subject"] = subject
     msg.set_content(body)
-    with smtplib.SMTP(smtp_host, int(smtp_port), timeout=15) as smtp:
-        smtp.ehlo()
-        smtp.starttls()
-        smtp.ehlo()
-        smtp.login(sender_email, app_password)
-        smtp.send_message(msg)
+    login_user = (smtp_username or "").strip() or sender_email
+    port_num = int(smtp_port)
+    if port_num == 465:
+        with smtplib.SMTP_SSL(smtp_host, port_num, timeout=15) as smtp:
+            smtp.login(login_user, app_password)
+            smtp.send_message(msg)
+    else:
+        with smtplib.SMTP(smtp_host, port_num, timeout=15) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.ehlo()
+            smtp.login(login_user, app_password)
+            smtp.send_message(msg)
 
 
 def _resolve_event_recipients(conn, event_key: str) -> list[str]:
@@ -454,6 +469,7 @@ def send_notification_email(
                 return
             smtp_host = (cfg.get("smtp_host") or "smtp.gmail.com").strip()
             smtp_port = int(cfg.get("smtp_port") or 587)
+            smtp_user = (cfg.get("smtp_username") or "").strip()
             recipients = _resolve_event_recipients(conn, event_key)
     except Exception:
         return
@@ -463,7 +479,7 @@ def send_notification_email(
 
     def _worker():
         try:
-            _send_smtp_mail(smtp_host, smtp_port, sender, app_pw, recipients, subject, body)
+            _send_smtp_mail(smtp_host, smtp_port, sender, app_pw, recipients, subject, body, smtp_username=smtp_user)
         except Exception:
             pass
 
@@ -502,12 +518,13 @@ def send_direct_email(
                 return
             smtp_host = (cfg.get("smtp_host") or "smtp.gmail.com").strip()
             smtp_port = int(cfg.get("smtp_port") or 587)
+            smtp_user = (cfg.get("smtp_username") or "").strip()
     except Exception:
         return
 
     def _worker():
         try:
-            _send_smtp_mail(smtp_host, smtp_port, sender, app_pw, cleaned, subject, body)
+            _send_smtp_mail(smtp_host, smtp_port, sender, app_pw, cleaned, subject, body, smtp_username=smtp_user)
         except Exception:
             pass
 
@@ -518,6 +535,7 @@ def send_direct_email(
 class EmailConfigIn(BaseModel):
     smtp_host: str | None = None
     smtp_port: int | None = None
+    smtp_username: str | None = None
     sender_email: str | None = None
     app_password: str | None = None
     enabled: bool | None = None
@@ -562,6 +580,8 @@ def update_email_config(body: EmailConfigIn, admin: dict = Depends(require_admin
         cur_cfg["smtp_host"] = body.smtp_host.strip() or "smtp.gmail.com"
     if body.smtp_port is not None:
         cur_cfg["smtp_port"] = max(1, min(65535, int(body.smtp_port)))
+    if body.smtp_username is not None:
+        cur_cfg["smtp_username"] = body.smtp_username.strip()
 
     if new_enabled and (not new_sender or not new_pw):
         raise HTTPException(status_code=400, detail="Sender email and SMTP password/app password are required to enable email notifications")
@@ -600,6 +620,7 @@ def test_email_config(body: EmailTestIn, admin: dict = Depends(require_admin)):
     cfg = row[2] if isinstance(row[2], dict) else {}
     smtp_host = (cfg.get("smtp_host") or "smtp.gmail.com").strip()
     smtp_port = int(cfg.get("smtp_port") or 587)
+    smtp_user = (cfg.get("smtp_username") or "").strip()
     recipients = [e.strip() for e in (body.to_email or "").split(",") if e.strip()]
     if not recipients:
         raise HTTPException(status_code=400, detail="Enter a test recipient email address")
@@ -613,6 +634,7 @@ def test_email_config(body: EmailTestIn, admin: dict = Depends(require_admin)):
             recipients,
             "DocketHall Test Notification",
             "This is a test email from DocketHall confirming your outgoing SMTP notification settings work.",
+            smtp_username=smtp_user,
         )
         msg = f"Test email sent to {', '.join(recipients)}."
         with pool.connection() as conn:

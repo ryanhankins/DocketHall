@@ -92,7 +92,7 @@ def bootstrap() -> None:
         conn.execute(SCHEMA)
 
 
-def _get_smtp_config(conn) -> tuple[str, int, str, str] | None:
+def _get_smtp_config(conn) -> tuple[str, int, str, str, str] | None:
     row = conn.execute(
         "SELECT enabled, api_key, project_id, config "
         "FROM core_integrations WHERE provider = 'gmail_smtp'"
@@ -106,7 +106,8 @@ def _get_smtp_config(conn) -> tuple[str, int, str, str] | None:
         return None
     smtp_host = (cfg.get("smtp_host") or "smtp.gmail.com").strip()
     smtp_port = int(cfg.get("smtp_port") or 587)
-    return smtp_host, smtp_port, sender, app_pw
+    smtp_user = (cfg.get("smtp_username") or "").strip()
+    return smtp_host, smtp_port, sender, app_pw, smtp_user
 
 
 def notify_topic_subscribers(
@@ -148,12 +149,12 @@ def notify_topic_subscribers(
 
     def _worker():
         if smtp:
-            smtp_host, smtp_port, sender, app_pw = smtp
+            smtp_host, smtp_port, sender, app_pw, smtp_user = smtp
             for email, token, _, _ in rows:
                 unsub_url = f"{base}/api/subscriptions/unsubscribe?token={token}"
                 full_body = f"{body}{view_line}\n\nUnsubscribe from {_TOPIC_LABELS.get(topic, topic)}: {unsub_url}"
                 try:
-                    _send_smtp_mail(smtp_host, smtp_port, sender, app_pw, [email], subject, full_body)
+                    _send_smtp_mail(smtp_host, smtp_port, sender, app_pw, [email], subject, full_body, smtp_username=smtp_user)
                 except Exception:
                     pass
         if sms_webhook and sms_phones:
@@ -226,7 +227,7 @@ def subscribe(body: SubscribeIn, request: Request):
 
     if smtp:
         base = get_app_base_url(request)
-        smtp_host, smtp_port, sender, app_pw = smtp
+        smtp_host, smtp_port, sender, app_pw, smtp_user = smtp
         lines = [
             f"You are now subscribed to DocketHall public email alerts ({base}):",
             "",
@@ -241,6 +242,7 @@ def subscribe(body: SubscribeIn, request: Request):
                     smtp_host, smtp_port, sender, app_pw, [email],
                     "[DocketHall] Public Email Alert Subscription Confirmed",
                     msg_body,
+                    smtp_username=smtp_user,
                 )
             except Exception:
                 pass
@@ -340,7 +342,7 @@ def send_email_bulletin(
     if not rows:
         raise HTTPException(status_code=400, detail="No active subscribers found for the selected topic")
 
-    smtp_host, smtp_port, sender, app_pw = smtp_cfg
+    smtp_host, smtp_port, sender, app_pw, smtp_user = smtp_cfg
     base = get_app_base_url(request)
     extra_link = ""
     if body.link_path.strip():
@@ -355,7 +357,7 @@ def send_email_bulletin(
                 if extra_link:
                     parts.append(f"More details: {extra_link}")
                 parts.append(f"---\nUnsubscribe: {unsub_url}")
-                _send_smtp_mail(smtp_host, smtp_port, sender, app_pw, em, subj, "\n\n".join(parts))
+                _send_smtp_mail(smtp_host, smtp_port, sender, app_pw, [em], subj, "\n\n".join(parts), smtp_username=smtp_user)
             except Exception:
                 pass
 

@@ -33,6 +33,7 @@ export default function IntegrationsPage() {
   const [emailCfg, setEmailCfg] = useState(null);
   const [smtpHost, setSmtpHost] = useState('smtp.gmail.com');
   const [smtpPort, setSmtpPort] = useState('587');
+  const [smtpUsername, setSmtpUsername] = useState('');
   const [senderEmail, setSenderEmail] = useState('');
   const [appPassword, setAppPassword] = useState('');
   const [testRecipient, setTestRecipient] = useState('');
@@ -63,6 +64,7 @@ export default function IntegrationsPage() {
     setEmailCfg(em);
     setSmtpHost(em.smtp_host || 'smtp.gmail.com');
     setSmtpPort(String(em.smtp_port || 587));
+    setSmtpUsername(em.smtp_username || '');
     setSenderEmail(em.sender_email || '');
     setEmailEnabled(em.has_password ? Boolean(em.enabled) : true);
     setSubData(subs || { topics: [], counts: {}, subscribers: [] });
@@ -439,7 +441,7 @@ export default function IntegrationsPage() {
           <div>
             <h2 style={{ margin: 0 }}>Outgoing Email Server (SMTP)</h2>
             <p className="muted" style={{ margin: '4px 0 0' }}>
-              Configure the municipal or organization SMTP server used to send notifications (e.g., Microsoft 365, Google Workspace, SendGrid, or Gmail with an{' '}
+              Configure the municipal or organization SMTP server used to send notifications (e.g., Amazon SES, Microsoft 365, Google Workspace, SendGrid, or Gmail with an{' '}
               <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer">App Password</a>).
               Configure who receives each notification type inside each module&apos;s Preferences page.
             </p>
@@ -465,6 +467,7 @@ export default function IntegrationsPage() {
             }}
           >
             <div><strong>SMTP Server:</strong> <code>{emailCfg.smtp_host}:{emailCfg.smtp_port}</code></div>
+            {emailCfg.smtp_username && <div><strong>SMTP Username:</strong> <code>{emailCfg.smtp_username}</code></div>}
             <div><strong>Sender Account:</strong> {emailCfg.sender_email}</div>
             <div><strong>Stored Password / App Password:</strong> <code>{emailCfg.password_masked}</code></div>
             <div><strong>Last Test Email:</strong> {emailCfg.validated_at ? formatDate(emailCfg.validated_at) : 'Not tested yet'}</div>
@@ -481,6 +484,7 @@ export default function IntegrationsPage() {
               const payload = {
                 smtp_host: smtpHost.trim() || 'smtp.gmail.com',
                 smtp_port: Number(smtpPort) || 587,
+                smtp_username: smtpUsername.trim(),
                 sender_email: senderEmail.trim(),
                 enabled: emailEnabled,
               };
@@ -527,7 +531,7 @@ export default function IntegrationsPage() {
           </div>
 
           <div className="field">
-            <label htmlFor="em-sender">Sender Email / SMTP Username</label>
+            <label htmlFor="em-sender">Sender Email (From Address)</label>
             <input
               id="em-sender"
               type="email"
@@ -535,6 +539,18 @@ export default function IntegrationsPage() {
               placeholder="e.g. notifications@cityofexample.gov"
               value={senderEmail}
               onChange={(e) => setSenderEmail(e.target.value)}
+            />
+          </div>
+
+          <div className="field">
+            <label htmlFor="em-user">SMTP Username (optional — leave blank if same as Sender Email; required for Amazon SES e.g. AKIA… or SendGrid &ldquo;apikey&rdquo;)</label>
+            <input
+              id="em-user"
+              type="text"
+              autoComplete="off"
+              placeholder="Leave blank to use Sender Email, or enter SES SMTP username"
+              value={smtpUsername}
+              onChange={(e) => setSmtpUsername(e.target.value)}
             />
           </div>
 
@@ -614,6 +630,7 @@ export default function IntegrationsPage() {
                     setEmailCfg(updated);
                     setSmtpHost('smtp.gmail.com');
                     setSmtpPort('587');
+                    setSmtpUsername('');
                     setSenderEmail('');
                     setAppPassword('');
                     setTestRecipient('');
