@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel
 
-from .auth import has_permission, require_admin, require_permission
+from .auth import has_permission, is_managed_hosting, require_admin, require_infra_admin, require_permission
 from .db import pool
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
@@ -68,11 +68,18 @@ def bootstrap() -> None:
                 cfg_seed: dict = {"smtp_host": smtp_host, "smtp_port": smtp_port}
                 if smtp_user:
                     cfg_seed["smtp_username"] = smtp_user
+                conflict_clause = (
+                    "ON CONFLICT (provider) DO UPDATE SET enabled = TRUE, api_key = EXCLUDED.api_key, "
+                    "project_id = EXCLUDED.project_id, config = EXCLUDED.config, "
+                    "last_status = 'Managed by environment', updated_by = 'system', updated_at = now()"
+                    if is_managed_hosting()
+                    else "ON CONFLICT (provider) DO NOTHING"
+                )
                 conn.execute(
                     "INSERT INTO core_integrations "
                     "(provider, enabled, api_key, project_id, config, last_status, updated_by, updated_at) "
                     "VALUES ('gmail_smtp', TRUE, %s, %s, %s, 'Seeded from environment', 'system', now()) "
-                    "ON CONFLICT (provider) DO NOTHING",
+                    + conflict_clause,
                     (smtp_pass, smtp_email, Jsonb(cfg_seed)),
                 )
 
@@ -188,7 +195,7 @@ def get_google_cloud_config(_: dict = Depends(require_admin)):
 
 
 @router.put("/google-cloud")
-def update_google_cloud_config(body: GoogleCloudConfigIn, admin: dict = Depends(require_admin)):
+def update_google_cloud_config(body: GoogleCloudConfigIn, admin: dict = Depends(require_infra_admin)):
     with pool.connection() as conn:
         existing = conn.execute(
             "SELECT enabled, api_key, project_id, validated_at, last_status "
@@ -299,7 +306,7 @@ def validate_google_cloud_key(body: GoogleCloudValidateIn, admin: dict = Depends
 
 
 @router.delete("/google-cloud")
-def delete_google_cloud_config(_: dict = Depends(require_admin)):
+def delete_google_cloud_config(_: dict = Depends(require_infra_admin)):
     with pool.connection() as conn:
         conn.execute("DELETE FROM core_integrations WHERE provider = 'google_cloud'")
         return _load_google_cloud_state(conn)
@@ -561,7 +568,7 @@ def get_email_config(_: dict = Depends(require_admin)):
 
 
 @router.put("/email")
-def update_email_config(body: EmailConfigIn, admin: dict = Depends(require_admin)):
+def update_email_config(body: EmailConfigIn, admin: dict = Depends(require_infra_admin)):
     with pool.connection() as conn:
         existing = conn.execute(
             "SELECT enabled, api_key, project_id, config FROM core_integrations WHERE provider = 'gmail_smtp'"
@@ -657,7 +664,7 @@ def test_email_config(body: EmailTestIn, admin: dict = Depends(require_admin)):
 
 
 @router.delete("/email")
-def delete_email_config(_: dict = Depends(require_admin)):
+def delete_email_config(_: dict = Depends(require_infra_admin)):
     with pool.connection() as conn:
         conn.execute("DELETE FROM core_integrations WHERE provider = 'gmail_smtp'")
         return _load_email_state(conn)

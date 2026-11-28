@@ -19,7 +19,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { api, formatDate } from './api.js';
 import { useToast } from './toast.jsx';
 
-export default function IntegrationsPage() {
+export default function IntegrationsPage({ user = null }) {
+  const isManagedLocked = Boolean(user?.managed_hosting && !user?.is_platform_support);
   const showToast = useToast();
   const [tab, setTab] = useState('email');
   const [cfg, setCfg] = useState(null);
@@ -155,7 +156,27 @@ export default function IntegrationsPage() {
 
   return (
     <section id="section-integrations">
-      <h1>Email &amp; Integrations</h1>
+      <div className="between" style={{ flexWrap: 'wrap', gap: '.5rem', marginBottom: '.5rem' }}>
+        <h1 style={{ margin: 0 }}>Email &amp; Integrations</h1>
+        {user?.is_platform_support && (
+          <span className="badge active">Platform Support Access</span>
+        )}
+      </div>
+      {isManagedLocked && (
+        <div
+          style={{
+            background: '#f8fafc',
+            border: '1px solid #cbd5e1',
+            borderRadius: 6,
+            padding: '.65rem .85rem',
+            marginBottom: '.75rem',
+            fontSize: '.88rem',
+            color: '#334155',
+          }}
+        >
+          Email (SMTP), Google Cloud, and AI Assistant credentials are managed by your hosting provider. You can still send test emails, manage Subscribers &amp; Bulletins, and configure Stripe payments.
+        </div>
+      )}
       <div className="tabs">
         <button type="button" className={`btn sm${tab === 'email' ? ' active' : ''}`} onClick={() => setTab('email')}>
           Outgoing Email (SMTP)
@@ -166,12 +187,16 @@ export default function IntegrationsPage() {
         <button type="button" className={`btn sm${tab === 'payments' ? ' active' : ''}`} onClick={() => setTab('payments')}>
           Payments (Stripe)
         </button>
-        <button type="button" className={`btn sm${tab === 'google' ? ' active' : ''}`} onClick={() => setTab('google')}>
-          Google Cloud
-        </button>
-        <button type="button" className={`btn sm${tab === 'gemini' ? ' active' : ''}`} onClick={() => setTab('gemini')}>
-          Gemini AI Assistant
-        </button>
+        {!isManagedLocked && (
+          <>
+            <button type="button" className={`btn sm${tab === 'google' ? ' active' : ''}`} onClick={() => setTab('google')}>
+              Google Cloud
+            </button>
+            <button type="button" className={`btn sm${tab === 'gemini' ? ' active' : ''}`} onClick={() => setTab('gemini')}>
+              Gemini AI Assistant
+            </button>
+          </>
+        )}
       </div>
 
       {tab === 'gemini' && (
@@ -453,7 +478,7 @@ export default function IntegrationsPage() {
           )}
         </div>
 
-        {emailCfg?.has_password && (
+        {!isManagedLocked && emailCfg?.has_password && (
           <div
             style={{
               background: '#f8fafc',
@@ -505,7 +530,9 @@ export default function IntegrationsPage() {
           }}
           style={{ display: 'grid', gap: '.9rem', maxWidth: 560 }}
         >
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '.75rem' }}>
+          {!isManagedLocked && (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '.75rem' }}>
             <div className="field">
               <label htmlFor="em-host">SMTP Host</label>
               <input
@@ -577,6 +604,8 @@ export default function IntegrationsPage() {
             />
             <span>Enable outgoing email notifications</span>
           </label>
+            </>
+          )}
 
           <div className="field">
             <label htmlFor="em-test-to">Test Email Recipient</label>
@@ -590,9 +619,11 @@ export default function IntegrationsPage() {
           </div>
 
           <div className="actions">
-            <button type="submit" className="btn primary" disabled={emailBusy}>
-              {emailBusy ? 'Saving…' : 'Save Email Settings'}
-            </button>
+            {!isManagedLocked && (
+              <button type="submit" className="btn primary" disabled={emailBusy}>
+                {emailBusy ? 'Saving…' : 'Save Email Settings'}
+              </button>
+            )}
             <button
               type="button"
               className="btn"
@@ -617,7 +648,7 @@ export default function IntegrationsPage() {
             >
               Send Test Email
             </button>
-            {emailCfg?.has_password && (
+            {!isManagedLocked && emailCfg?.has_password && (
               <button
                 type="button"
                 className="btn danger"

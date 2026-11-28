@@ -39,7 +39,7 @@ class CopySource:
 
 from .agenda_pdf import build_agenda_packet_pdf, build_minutes_pdf, render_legislative_document_pdf, render_single_document_pdf
 from .audit import record_audit
-from .auth import current_user, has_permission, is_demo_mode
+from .auth import current_user, has_permission, is_demo_mode, is_managed_hosting
 from .db import _read_secret, pool
 from .registry import require_public_card_enabled
 from .integrations import send_notification_email
@@ -1070,6 +1070,7 @@ def get_preferences_branding():
         "home_blog_heading": prefs.get("home_blog_heading", ""),
         "home_hidden_cards": list(prefs.get("home_hidden_cards") or []),
         "demo_mode": is_demo_mode(),
+        "managed_hosting": is_managed_hosting(),
         "theme_primary": prefs.get("theme_primary", DEFAULT_THEME_COLORS["theme_primary"]),
         "theme_secondary": prefs.get("theme_secondary", DEFAULT_THEME_COLORS["theme_secondary"]),
         "theme_tint": prefs.get("theme_tint", DEFAULT_THEME_COLORS["theme_tint"]),

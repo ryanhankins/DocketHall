@@ -39,7 +39,7 @@ from .ai_tools_ext import (
     execute_ext_tool,
 )
 from .audit import record_audit
-from .auth import current_user, has_permission, is_demo_mode, require_admin, require_not_demo_mode, require_permission
+from .auth import current_user, has_permission, is_demo_mode, is_managed_hosting, require_admin, require_infra_admin, require_not_demo_mode, require_permission
 from .db import pool
 from .registry import is_feature_enabled, is_module_enabled
 
@@ -2835,7 +2835,7 @@ def get_ai_status(user: dict = Depends(_require_ai_user)):
 
 
 @router.put("/config")
-def save_ai_config(body: AiConfigIn, user: dict = Depends(require_admin)):
+def save_ai_config(body: AiConfigIn, user: dict = Depends(require_infra_admin)):
     _require_ai_module_enabled()
     require_not_demo_mode("Configuring Gemini AI key")
     existing_key, _, existing_source, existing_limit = _load_gemini_settings()
@@ -2870,7 +2870,7 @@ def save_ai_config(body: AiConfigIn, user: dict = Depends(require_admin)):
 
 
 @router.delete("/config")
-def delete_ai_config(user: dict = Depends(require_admin)):
+def delete_ai_config(user: dict = Depends(require_infra_admin)):
     _require_ai_module_enabled()
     require_not_demo_mode("Removing Gemini AI key")
     with pool.connection() as conn:

@@ -37,6 +37,64 @@ def is_demo_mode() -> bool:
     return os.environ.get("DEMO_MODE", "").strip().lower() in ("1", "true", "yes")
 
 
+def is_managed_hosting() -> bool:
+    """Return True when infrastructure (SMTP, S3, Gemini, Google Cloud) is managed by the host."""
+    return os.environ.get("MANAGED_HOSTING", "").strip().lower() in ("1", "true", "yes")
+
+
+def _read_env_or_file(name: str) -> str:
+    file_path = os.environ.get(f"{name}_FILE", "").strip()
+    if file_path and os.path.isfile(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as fh:
+                val = fh.read().strip()
+                if val:
+                    return val
+        except OSError:
+            pass
+    return os.environ.get(name, "").strip()
+
+
+def _platform_support_creds() -> tuple[str, str]:
+    user = _read_env_or_file("PLATFORM_SUPPORT_USERNAME")
+    pw = _read_env_or_file("PLATFORM_SUPPORT_PASSWORD")
+    return user, pw
+
+
+def _platform_signing_key() -> bytes:
+    _, pw = _platform_support_creds()
+    secret = _read_env_or_file("SESSION_SECRET") or _read_env_or_file("PLATFORM_ADMIN_TOKEN") or ""
+    return hashlib.sha256(f"dockethall-platform-support:{secret}:{pw}".encode("utf-8")).digest()
+
+
+def _issue_platform_token() -> str:
+    import time as _time
+    exp = int(_time.time()) + int(SESSION_TTL.total_seconds())
+    nonce = secrets.token_urlsafe(16)
+    payload = f"ps.{exp}.{nonce}"
+    sig = hmac.new(_platform_signing_key(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+
+def _verify_platform_token(token: str) -> bool:
+    import time as _time
+    user, pw = _platform_support_creds()
+    if not user or not pw:
+        return False
+    parts = token.split(".")
+    if len(parts) != 4 or parts[0] != "ps":
+        return False
+    try:
+        exp = int(parts[1])
+    except ValueError:
+        return False
+    if exp <= int(_time.time()):
+        return False
+    payload = f"{parts[0]}.{parts[1]}.{parts[2]}"
+    expected = hmac.new(_platform_signing_key(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(parts[3], expected)
+
+
 def require_not_demo_mode(action: str = "This action") -> None:
     """Raise 403 when DEMO_MODE is active for destructive or external actions."""
     if is_demo_mode():
@@ -186,6 +244,17 @@ def current_user(request: Request) -> dict | None:
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         return None
+    if token.startswith("ps.") and _verify_platform_token(token):
+        support_user, _ = _platform_support_creds()
+        return {
+            "id": 0,
+            "username": support_user,
+            "role": "admin",
+            "email": support_user if "@" in support_user else "",
+            "is_default_password": False,
+            "is_platform_support": True,
+            "permissions": ["*"],
+        }
     with pool.connection() as conn:
         row = conn.execute(
             "SELECT u.id, u.username, u.role, u.permissions, u.email, u.is_default_password "
@@ -202,6 +271,7 @@ def current_user(request: Request) -> dict | None:
         "role": row[2],
         "email": row[4] or "",
         "is_default_password": bool(row[5]),
+        "is_platform_support": False,
         "permissions": effective_permissions(row[2], explicit),
     }
 
@@ -212,6 +282,14 @@ def require_admin(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Not authenticated")
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+def require_infra_admin(request: Request) -> dict:
+    """Allow local admins in self-hosted mode; require platform support when MANAGED_HOSTING=true."""
+    user = require_admin(request)
+    if is_managed_hosting() and not user.get("is_platform_support"):
+        raise HTTPException(status_code=403, detail="This setting is managed by your hosting provider.")
     return user
 
 
@@ -236,6 +314,21 @@ def login(body: LoginIn, response: Response):
         ).fetchone()
         ok = verify_password(body.password, row[1] if row else _DUMMY_HASH)
         if not (row and ok):
+            support_user, support_pw = _platform_support_creds()
+            if (
+                not row
+                and support_user
+                and support_pw
+                and hmac.compare_digest(body.username.strip().lower(), support_user.lower())
+                and hmac.compare_digest(body.password, support_pw)
+            ):
+                ps_token = _issue_platform_token()
+                response.set_cookie(
+                    SESSION_COOKIE, ps_token,
+                    max_age=int(SESSION_TTL.total_seconds()),
+                    httponly=True, secure=COOKIE_SECURE, samesite="strict", path="/",
+                )
+                return {"username": support_user, "is_platform_support": True}
             raise HTTPException(status_code=401, detail="Invalid username or password")
 
         token = secrets.token_urlsafe(32)
@@ -370,7 +463,7 @@ def me(request: Request):
     user = current_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    return user
+    return {**user, "managed_hosting": is_managed_hosting()}
 
 
 @router.post("/change-password")

@@ -286,3 +286,44 @@ def test_demo_mode_guards_and_login(admin_client, anon_client, monkeypatch):
     assert admin_client.put("/api/backup/policy", json={"enabled": True}).status_code == 403
     assert admin_client.post("/api/payments/checkout", json={"item_type": "bill", "item_id": 1}).status_code == 403
     assert admin_client.post("/api/codification/import-urls", json={"items": []}).status_code == 403
+
+
+def test_managed_hosting_locks_infra_for_city_admin_but_allows_platform_support(admin_client, anon_client, monkeypatch):
+    monkeypatch.setenv("MANAGED_HOSTING", "true")
+    monkeypatch.setenv("PLATFORM_SUPPORT_USERNAME", "host_support@dockethall.com")
+    monkeypatch.setenv("PLATFORM_SUPPORT_PASSWORD", "Sup3rS3cretSupport!")
+
+    assert anon_client.get("/api/branding").json()["managed_hosting"] is True
+    assert admin_client.get("/api/me").json()["is_platform_support"] is False
+
+    # Regular city admin is blocked from modifying infrastructure integrations/offsite policy
+    assert admin_client.put("/api/integrations/email", json={"smtp_host": "smtp.example.com", "sender_email": "a@b.com"}).status_code == 403
+    assert admin_client.put("/api/integrations/google-cloud", json={"project_id": "p", "enabled": True}).status_code == 403
+    assert admin_client.put("/api/ai/config", json={"model": "gemini-3.8-flash"}).status_code == 403
+    assert admin_client.put("/api/backup/policy", json={"enabled": True, "target_type": "local_s3"}).status_code == 403
+
+    # Manual backup export remains available to city admin
+    assert admin_client.get("/api/backup/export").status_code == 200
+
+    # Platform support logs in via normal /api/login without existing in the city's users table
+    login_res = anon_client.post(
+        "/api/login",
+        json={"username": "host_support@dockethall.com", "password": "Sup3rS3cretSupport!"},
+    )
+    assert login_res.status_code == 200, login_res.text
+    assert login_res.json()["is_platform_support"] is True
+
+    me = anon_client.get("/api/me")
+    assert me.status_code == 200
+    assert me.json()["is_platform_support"] is True
+    assert me.json()["role"] == "admin"
+
+    # Platform support is not listed in city users table
+    users = anon_client.get("/api/users").json()
+    assert all(u["username"] != "host_support@dockethall.com" for u in users)
+
+    # Platform support CAN update backup policy and email config even in managed mode
+    pol = anon_client.put("/api/backup/policy", json={"enabled": False, "target_type": "local_s3"})
+    assert pol.status_code == 200, pol.text
+    em = anon_client.put("/api/integrations/email", json={"smtp_host": "email-smtp.us-east-2.amazonaws.com", "smtp_port": 587, "sender_email": "noreply@dockethall.com", "enabled": False})
+    assert em.status_code == 200, em.text

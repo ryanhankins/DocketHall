@@ -33,7 +33,7 @@ from starlette.background import BackgroundTask
 
 from .agendas import _bucket, _storage, get_staff_user
 from .audit import record_audit
-from .auth import require_admin, require_not_demo_mode, require_permission
+from .auth import require_admin, require_infra_admin, require_not_demo_mode, require_permission
 from .db import pool
 from .registry import get_module_backup_tables
 from .storage import BotoS3StorageClient
@@ -722,7 +722,7 @@ def download_offsite_snapshot(
 @router.put("/policy")
 def update_backup_policy(
     body: BackupPolicyIn,
-    user: dict = Depends(require_permission("settings.manage")),
+    user: dict = Depends(require_infra_admin),
 ):
     require_not_demo_mode("Modifying offsite backup policy")
     freq = body.schedule_frequency if body.schedule_frequency in ("daily", "weekly") else "daily"
@@ -874,7 +874,7 @@ def run_retention_policies(actor_username: str = "system", force: bool = False) 
 
 
 @router.post("/run-offsite")
-def trigger_offsite_backup(user: dict = Depends(require_permission("settings.manage"))):
+def trigger_offsite_backup(user: dict = Depends(require_infra_admin)):
     res = run_scheduled_offsite_backup(actor_username=user["username"], force=True)
     record_audit(user["username"], "backup.run_offsite", f"Uploaded {res.get('object_key')}")
     return res

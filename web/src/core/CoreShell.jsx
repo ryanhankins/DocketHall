@@ -286,7 +286,7 @@ export default function CoreShell() {
       return { component: ModulesPage, props: { onModulesChanged: reloadModules }, activeSection: 'modules' };
     }
     if (routePath === 'integrations' && isAdmin) {
-      return { component: IntegrationsPage, props: {}, activeSection: 'integrations' };
+      return { component: IntegrationsPage, props: { user }, activeSection: 'integrations' };
     }
     if (routePath === 'audit' && isAdmin) {
       return { component: AuditLogPage, props: {}, activeSection: 'audit' };
@@ -316,6 +316,7 @@ export default function CoreShell() {
       return {
         component: BackupRestorePage,
         props: {
+          user,
           reminderDays: backupStatus.reminder_days,
           onRefreshBackupBanner: refreshBackupBanner,
           onRestored: async () => {

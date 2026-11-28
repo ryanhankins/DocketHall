@@ -19,7 +19,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, downloadBackupArchive, downloadOffsiteSnapshot } from './api.js';
 import { useToast } from './toast.jsx';
 
-export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner, onRestored }) {
+export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner, onRestored, user = null }) {
+  const isManagedLocked = Boolean(user?.managed_hosting && !user?.is_platform_support);
   const [tab, setTab] = useState('manual');
   const [days, setDays] = useState(String(reminderDays ?? 0));
   const [msg, setMsg] = useState({ text: '', isError: false });
@@ -181,9 +182,11 @@ export default function BackupRestorePage({ reminderDays, onRefreshBackupBanner,
         <button type="button" className={`btn sm${tab === 'manual' ? ' active' : ''}`} onClick={() => setTab('manual')}>
           Manual Backup &amp; Restore
         </button>
-        <button type="button" className={`btn sm${tab === 'offsite' ? ' active' : ''}`} onClick={() => setTab('offsite')}>
-          Scheduled Offsite (S3)
-        </button>
+        {!isManagedLocked && (
+          <button type="button" className={`btn sm${tab === 'offsite' ? ' active' : ''}`} onClick={() => setTab('offsite')}>
+            Scheduled Offsite (S3)
+          </button>
+        )}
         <button type="button" className={`btn sm${tab === 'retention' ? ' active' : ''}`} onClick={() => setTab('retention')}>
           Record Retention
         </button>
